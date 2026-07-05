@@ -553,14 +553,56 @@ app.post('/api/ai/remove-objects', async (req, res) => {
       return res.status(400).json({ error: 'Both image and mask base64 data are required.' });
     }
 
-    const apiKey = process.env.DASHSCOPE_API_KEY;
-    if (!apiKey) {
-      return res.status(500).json({ error: 'DASHSCOPE_API_KEY is not configured on the server.' });
-    }
-
-    // Use data URIs directly — Wanx models accept data:image/... URIs
     const imageDataUri = ensureDataUri(image);
     const maskDataUri = ensureDataUri(mask);
+
+    // ==========================================================
+    // Primary: Volcano Ark (Doubao Seedream 5.0 Inpainting)
+    // ==========================================================
+    const volcKey = process.env.VOLC_API_KEY;
+    if (volcKey) {
+      console.log('Submitting Inpainting task to Volcano Ark (doubao-seedream-5-0)...');
+      try {
+        const volcPayload = {
+          model: 'doubao-seedream-5-0-260128',
+          prompt: 'remove the marked area, clean background, restore background matching the texture and lighting, photorealistic, high quality',
+          image: [imageDataUri],
+          mask: [maskDataUri]
+        };
+
+        const volcResponse = await fetch('https://ark.cn-beijing.volces.com/api/v3/images/generations', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${volcKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(volcPayload)
+        });
+
+        if (volcResponse.ok) {
+          const volcResult = await volcResponse.json();
+          const resultUrl = volcResult.data?.[0]?.url;
+          if (resultUrl) {
+            console.log('Volcano Ark Inpainting succeeded synchronously.');
+            const resultBase64 = await convertUrlToBase64(resultUrl);
+            return res.json({ image: resultBase64 });
+          }
+        }
+        
+        const errText = await volcResponse.text();
+        console.warn(`Volcano Ark Inpainting failed. Status: ${volcResponse.status} - ${errText}. Falling back to DashScope...`);
+      } catch (volcErr) {
+        console.error('Error during Volcano Ark inpainting, falling back to DashScope:', volcErr);
+      }
+    }
+
+    // ==========================================================
+    // Fallback: DashScope (Wanx image edit chain)
+    // ==========================================================
+    const apiKey = process.env.DASHSCOPE_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: 'Neither Volcano Ark Key nor DashScope Key is configured.' });
+    }
 
     // 2. Submit Inpainting task
     const taskUrl = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/image2image/image-synthesis';
@@ -595,7 +637,7 @@ app.post('/api/ai/remove-objects', async (req, res) => {
         input: {
           base_image_url: imageDataUri,
           mask_image_url: maskDataUri,
-          prompt: '背景, 移除杂物, 消除杂物和行人'
+          prompt: '背景, 移除杂物, 消除杂物 and 行人'
         }
       };
 
@@ -618,7 +660,7 @@ app.post('/api/ai/remove-objects', async (req, res) => {
         input: {
           image_url: imageDataUri,
           mask_url: maskDataUri,
-          prompt: '背景, 移除杂物, 消除杂物和行人'
+          prompt: '背景, 移除杂物, 消除杂物 and 行人'
         }
       };
 
@@ -635,7 +677,7 @@ app.post('/api/ai/remove-objects', async (req, res) => {
 
     if (!taskResponse.ok) {
       const errText = await taskResponse.text();
-      throw new Error(`Failed to submit inpainting task (tried imageedit, x-painting, inpainting-v1): ${taskResponse.status} - ${errText}`);
+      throw new Error(`Failed to submit inpainting in fallback chain: ${taskResponse.status} - ${errText}`);
     }
 
     const taskData = await taskResponse.json();
