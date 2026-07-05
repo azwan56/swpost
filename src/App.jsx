@@ -39,7 +39,7 @@ const BRUSH_COLORS = ['#ff2442', '#3b82f6', '#10b981', '#f59e0b', '#000000', '#f
 const TEXT_COLORS = ['#ffffff', '#ffeb3b', '#ff2442', '#ff6584', '#000000'];
 const TEXT_SUGGESTIONS = ['元气满满', '好治愈', '运动日常', '夏日清晨', '冲鸭', 'Vibe', '大自然', '好美', '开心'];
 
-// Helper: Physically crops the image using canvas, caps resolution at 1200px for massive speedup in style-transfer and inpainting
+// Helper: Physically crops the image using canvas, caps resolution at 1600px for high quality and optimized payload
 const cropImagePhysically = (src, cropBox) => {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -54,8 +54,8 @@ const cropImagePhysically = (src, cropBox) => {
       const origWidth = ((cropBox.xmax - cropBox.xmin) / 100) * img.naturalWidth;
       const origHeight = ((cropBox.ymax - cropBox.ymin) / 100) * img.naturalHeight;
       
-      // Limit resolution to max 1200px width/height to make style transfer & network payloads highly optimized
-      const MAX_CROP_DIM = 1200;
+      // Limit resolution to max 1600px width/height to make style transfer & network payloads highly optimized
+      const MAX_CROP_DIM = 1600;
       let width = origWidth;
       let height = origHeight;
       let scale = 1;
@@ -74,7 +74,7 @@ const cropImagePhysically = (src, cropBox) => {
       canvas.height = height;
       
       ctx.drawImage(img, origX, origY, origWidth, origHeight, 0, 0, width, height);
-      resolve(canvas.toDataURL('image/jpeg', 0.9));
+      resolve(canvas.toDataURL('image/jpeg', 0.95));
     };
     img.onerror = (err) => reject(new Error('Failed to load image for physical cropping: ' + err));
     img.src = src;
@@ -659,6 +659,135 @@ function App() {
     setHasEraseMarks(false);
   };
 
+  // Touch Helpers for Mobile Devices
+  const getTouchCoords = (e, canvas) => {
+    if (!e.touches || e.touches.length === 0) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches[0];
+    return {
+      x: touch.clientX - rect.left,
+      y: touch.clientY - rect.top,
+      clientX: touch.clientX,
+      clientY: touch.clientY
+    };
+  };
+
+  // Drawing Canvas Touch Handlers
+  const handleTouchStartDrawing = (e) => {
+    if (activeTab !== 'draw' || uploadedImages.length === 0) return;
+    e.preventDefault();
+    const canvas = drawingCanvasRef.current;
+    if (!canvas) return;
+
+    const coords = getTouchCoords(e, canvas);
+    drawingCtxRef.current.beginPath();
+    drawingCtxRef.current.moveTo(coords.x, coords.y);
+    setIsDrawing(true);
+  };
+
+  const handleTouchMoveDrawing = (e) => {
+    if (!isDrawing || activeTab !== 'draw' || uploadedImages.length === 0) return;
+    e.preventDefault();
+    const canvas = drawingCanvasRef.current;
+    if (!canvas) return;
+
+    const coords = getTouchCoords(e, canvas);
+    drawingCtxRef.current.lineTo(coords.x, coords.y);
+    drawingCtxRef.current.stroke();
+  };
+
+  const handleTouchEndDrawing = (e) => {
+    e.preventDefault();
+    stopDrawing();
+  };
+
+  // Erasing Canvas Touch Handlers
+  const handleTouchStartErasing = (e) => {
+    if (activeTab !== 'erase' || uploadedImages.length === 0) return;
+    e.preventDefault();
+    const canvas = eraseCanvasRef.current;
+    if (!canvas) return;
+
+    const coords = getTouchCoords(e, canvas);
+    eraseCtxRef.current.beginPath();
+    eraseCtxRef.current.moveTo(coords.x, coords.y);
+    setIsErasing(true);
+    setHasEraseMarks(true);
+  };
+
+  const handleTouchMoveErasing = (e) => {
+    if (!isErasing || activeTab !== 'erase' || uploadedImages.length === 0) return;
+    e.preventDefault();
+    const canvas = eraseCanvasRef.current;
+    if (!canvas) return;
+
+    const coords = getTouchCoords(e, canvas);
+    eraseCtxRef.current.lineTo(coords.x, coords.y);
+    eraseCtxRef.current.stroke();
+  };
+
+  const handleTouchEndErasing = (e) => {
+    e.preventDefault();
+    stopErasing();
+  };
+
+  // Panning Touch Handlers
+  const handleTouchStartPanning = (e) => {
+    if (!editorImageContainerRef.current) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    setIsPanning(true);
+    setPanStart({ x: touch.clientX - panOffset.x, y: touch.clientY - panOffset.y });
+  };
+
+  const handleTouchMovePanning = (e) => {
+    const activeImage = uploadedImages[activeIdx];
+    if (!isPanning || !activeImage || !editorImageContainerRef.current) return;
+    e.preventDefault();
+    
+    const touch = e.touches[0];
+    const rect = editorImageContainerRef.current.getBoundingClientRect();
+    const W_c = rect.width;
+    const H_c = rect.height;
+
+    // Get image dimensions from target
+    const imgElement = e.target;
+    const W = imgElement.naturalWidth;
+    const H = imgElement.naturalHeight;
+
+    let W_r = W_c;
+    let H_r = H_c;
+    if (W / H > W_c / H_c) {
+      H_r = H_c;
+      W_r = H_c * (W / H);
+    } else {
+      W_r = W_c;
+      H_r = W_c * (H / W);
+    }
+
+    const W_v = W_r * panZoom;
+    const H_v = H_r * panZoom;
+
+    // Calculate maximum drag values
+    const maxDx = W_v > W_c ? (W_v - W_c) / 2 : 0;
+    const maxDy = H_v > H_c ? (H_v - H_c) / 2 : 0;
+
+    // Calculate new raw drag offsets
+    let newX = touch.clientX - panStart.x;
+    let newY = touch.clientY - panStart.y;
+
+    // Constrain within boundaries so no black background is visible
+    newX = Math.max(-maxDx, Math.min(maxDx, newX));
+    newY = Math.max(-maxDy, Math.min(maxDy, newY));
+
+    setPanOffset({ x: newX, y: newY });
+  };
+
+  const handleTouchEndPanning = (e) => {
+    e.preventDefault();
+    stopPanning();
+  };
+
   // 3. Stickers Operations
   const addSticker = (type) => {
     if (uploadedImages.length === 0) return;
@@ -1221,7 +1350,7 @@ function App() {
       try {
         const canvas = await html2canvas(posterRef.current, {
           useCORS: true,
-          scale: 2,
+          scale: 3.5,
           allowTaint: true,
           backgroundColor: '#ffffff',
           logging: false
@@ -1362,7 +1491,7 @@ function App() {
               <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.5rem', marginBottom: '1rem' }}>
                 对选中的图 {activeIdx + 1} 进行 AI 消除或动漫艺术化处理：
               </p>
-              <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <div className="editor-actions-row" style={{ display: 'flex', gap: '0.75rem' }}>
                 <button 
                   className="btn btn-primary" 
                   style={{ flex: 1, padding: '0.75rem 0.5rem', fontSize: '0.9rem', background: 'linear-gradient(135deg, #4f46e5, #6366f1)', boxShadow: '0 4px 12px rgba(79, 70, 229, 0.15)' }}
@@ -1446,6 +1575,9 @@ function App() {
                         onMouseMove={pan}
                         onMouseUp={stopPanning}
                         onMouseLeave={stopPanning}
+                        onTouchStart={handleTouchStartPanning}
+                        onTouchMove={handleTouchMovePanning}
+                        onTouchEnd={handleTouchEndPanning}
                         style={{ 
                           position: 'absolute', 
                           width: '100%', 
@@ -1476,6 +1608,9 @@ function App() {
                       onMouseMove={draw}
                       onMouseUp={stopDrawing}
                       onMouseLeave={stopDrawing}
+                      onTouchStart={handleTouchStartDrawing}
+                      onTouchMove={handleTouchMoveDrawing}
+                      onTouchEnd={handleTouchEndDrawing}
                     />
 
                     {/* Erase (Inpainting Mask) brush canvas layer */}
@@ -1487,6 +1622,9 @@ function App() {
                       onMouseMove={drawEraseMark}
                       onMouseUp={stopErasing}
                       onMouseLeave={stopErasing}
+                      onTouchStart={handleTouchStartErasing}
+                      onTouchMove={handleTouchMoveErasing}
+                      onTouchEnd={handleTouchEndErasing}
                     />
 
                     {/* Stickers Overlay */}

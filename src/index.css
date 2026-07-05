@@ -911,4 +911,130 @@ body {
   color: var(--xhs-red);
 }
 
+/* ==========================================================================
+   Mobile Responsive Optimizations (max-width: 768px)
+   ========================================================================== */
+@media (max-width: 768px) {
+  /* Header Layout */
+  .app-header {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 0.75rem !important;
+    padding: 0.75rem 1rem !important;
+  }
+
+  .logo-section {
+    justify-content: center !important;
+    gap: 0.5rem !important;
+  }
+
+  .logo-badge {
+    width: 32px !important;
+    height: 32px !important;
+    font-size: 1.1rem !important;
+    border-radius: 8px !important;
+  }
+
+  .logo-text h1 {
+    font-size: 1.05rem !important;
+    text-align: center !important;
+    line-height: 1.2 !important;
+  }
+
+  .logo-text p {
+    display: none !important; /* Hide subtitle on mobile to save vertical space */
+  }
+
+  .app-actions {
+    width: 100% !important;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 0.5rem !important;
+  }
+
+  .app-actions a, 
+  .app-actions button {
+    width: 100% !important;
+    padding: 0.5rem 0.25rem !important;
+    font-size: 0.75rem !important;
+    height: 36px !important;
+    box-sizing: border-box !important;
+    display: inline-flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+  }
+
+  /* Cards Padding */
+  .card {
+    padding: 0.85rem !important;
+    border-radius: var(--radius-sm) !important;
+  }
+
+  .card-title {
+    font-size: 0.9rem !important;
+    margin-bottom: 0.6rem !important;
+  }
+
+  .btn {
+    padding: 0.5rem 1rem !important;
+    font-size: 0.8rem !important;
+  }
+
+  /* Canvas Tabs */
+  .canvas-tabs {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 4px !important;
+  }
+
+  .canvas-tab-btn {
+    padding: 0.4rem 0.5rem !important;
+    font-size: 0.75rem !important;
+    flex: 1 1 30% !important; /* Row wrapping */
+    text-align: center !important;
+    white-space: nowrap !important;
+  }
+
+  /* Upload Area */
+  .upload-zone {
+    padding: 1rem 0.5rem !important;
+  }
+  
+  .upload-zone p {
+    font-size: 0.75rem !important;
+  }
+
+  /* Photo Grid and Thumbnail sizes */
+  .photo-manager-grid {
+    grid-template-columns: repeat(4, 1fr) !important;
+    gap: 0.4rem !important;
+  }
+
+  .photo-thumb-wrapper {
+    height: 60px !important;
+  }
+
+  /* Compact form elements */
+  textarea.form-control {
+    font-size: 0.8rem !important;
+    padding: 0.4rem !important;
+  }
+
+  .form-label {
+    font-size: 0.75rem !important;
+  }
+
+  /* AI Buttons wrap */
+  .editor-actions-row {
+    flex-direction: column !important;
+    gap: 0.5rem !important;
+  }
+
+  .editor-actions-row button {
+    width: 100% !important;
+    padding: 0.5rem 0.25rem !important;
+    font-size: 0.8rem !important;
+  }
+}
+
 
