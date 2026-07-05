@@ -132,7 +132,7 @@ function App() {
   const [uploadedImages, setUploadedImages] = useState([]); // [{ id, file, src, croppedSrc, metadata: { time, location }, cropBox, stickers: [], texts: [], drawings: null }]
   const [activeIdx, setActiveIdx] = useState(0); 
   const [globalMetadata, setGlobalMetadata] = useState({ time: '', location: '' });
-  const [activeTab, setActiveTab] = useState('draw'); // 'draw', 'sticker', 'text', 'erase'
+  const [activeTab, setActiveTab] = useState('pan'); // 'pan', 'sticker', 'text', 'erase'
   
   // Drawing Canvas States
   const [isDrawing, setIsDrawing] = useState(false);
@@ -1523,12 +1523,6 @@ function App() {
                   🔍 位置调整
                 </button>
                 <button 
-                  className={`canvas-tab-btn ${activeTab === 'draw' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('draw')}
-                >
-                  ✏️ 画笔手绘
-                </button>
-                <button 
                   className={`canvas-tab-btn ${activeTab === 'erase' ? 'active' : ''}`}
                   onClick={() => setActiveTab('erase')}
                 >
@@ -1598,20 +1592,6 @@ function App() {
                         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       />
                     )}
-
-                    {/* Paint brush canvas layer */}
-                    <canvas
-                      ref={drawingCanvasRef}
-                      className="drawing-canvas"
-                      style={{ pointerEvents: activeTab === 'draw' ? 'auto' : 'none' }}
-                      onMouseDown={startDrawing}
-                      onMouseMove={draw}
-                      onMouseUp={stopDrawing}
-                      onMouseLeave={stopDrawing}
-                      onTouchStart={handleTouchStartDrawing}
-                      onTouchMove={handleTouchMoveDrawing}
-                      onTouchEnd={handleTouchEndDrawing}
-                    />
 
                     {/* Erase (Inpainting Mask) brush canvas layer */}
                     <canvas
@@ -1791,36 +1771,6 @@ function App() {
                 </div>
               )}
 
-              {/* Draw Tab */}
-              {activeTab === 'draw' && (
-                <div>
-                  <div className="brush-controls">
-                    <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>画笔颜色:</span>
-                    {BRUSH_COLORS.map(c => (
-                      <div 
-                        key={c}
-                        className={`color-dot ${brushColor === c ? 'active' : ''}`}
-                        style={{ backgroundColor: c }}
-                        onClick={() => setBrushColor(c)}
-                      />
-                    ))}
-                    <button className="btn btn-secondary" style={{ marginLeft: 'auto', padding: '0.25rem 0.75rem', fontSize: '0.8rem' }} onClick={clearDrawings}>
-                      清空画笔
-                    </button>
-                  </div>
-                  <div style={{ marginTop: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>粗细:</span>
-                    <input 
-                      type="range" 
-                      min="1" 
-                      max="20" 
-                      value={brushWidth} 
-                      onChange={(e) => setBrushWidth(parseInt(e.target.value))}
-                      style={{ flex: 1, accentColor: 'var(--xhs-red)' }}
-                    />
-                  </div>
-                </div>
-              )}
 
               {/* Erase (Inpainting Mask) Tab */}
               {activeTab === 'erase' && (
