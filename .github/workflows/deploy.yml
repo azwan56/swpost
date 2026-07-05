@@ -71,6 +71,10 @@ jobs:
 
             cd /var/www/swpost/server || { echo "Directory not found!"; exit 1; }
             
+            # 安装或更新服务器依赖
+            echo "Installing production dependencies on ECS..."
+            npm install --omit=dev --registry=https://registry.npmmirror.com
+            
             # 确认 pm2 命令存在，若不存在则尝试使用绝对路径或安装
             if ! command -v pm2 &> /dev/null; then
               echo "PM2 not found in PATH, trying to install globally..."
