@@ -124,6 +124,10 @@ const compressImageForAnalysis = (file) => {
 };
 
 function App() {
+  // API base path — adapts automatically to Vite's base setting
+  // Local dev: '' (proxy handles /api), Production subpath: '/swpost'
+  const API_BASE = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+
   // App States
   const [uploadedImages, setUploadedImages] = useState([]); // [{ id, file, src, croppedSrc, metadata: { time, location }, cropBox, stickers: [], texts: [], drawings: null }]
   const [activeIdx, setActiveIdx] = useState(0); 
@@ -258,7 +262,7 @@ function App() {
 
     if (firstLat !== null && firstLon !== null && !globalMetadata.location) {
       try {
-        const res = await fetch(`/api/geocode?lat=${firstLat}&lon=${firstLon}`);
+        const res = await fetch(`${API_BASE}/api/geocode?lat=${firstLat}&lon=${firstLon}`);
         if (res.ok) {
           const data = await res.json();
           if (data.address) {
@@ -770,7 +774,7 @@ function App() {
       });
       formData.append('metadata', JSON.stringify(globalMetadata));
 
-      const res = await fetch('/api/generate', {
+      const res = await fetch(`${API_BASE}/api/generate`, {
         method: 'POST',
         body: formData
       });
@@ -916,7 +920,7 @@ function App() {
       const maskBase64 = maskCanvas.toDataURL('image/png');
 
       // 2. Call backend
-      const res = await fetch('/api/ai/remove-objects', {
+      const res = await fetch(`${API_BASE}/api/ai/remove-objects`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -963,7 +967,7 @@ function App() {
     setErrorMsg('');
 
     try {
-      const res = await fetch('/api/ai/style-transfer', {
+      const res = await fetch(`${API_BASE}/api/ai/style-transfer`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

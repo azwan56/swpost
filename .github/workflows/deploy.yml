@@ -1,0 +1,57 @@
+name: Deploy swpost to Alibaba Cloud ECS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 拉取代码
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 2. 设置 Node.js 环境
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # 3. 安装前端依赖并构建（设置 base 为 /swpost/）
+      - name: Install and build frontend
+        run: |
+          npm ci
+          VITE_BASE_PATH=/swpost/ npm run build
+
+      # 4. 安装后端依赖（仅 production）
+      - name: Install server dependencies
+        run: |
+          cd server
+          npm ci --omit=dev
+
+      # 5. 部署到 ECS：同步前端 dist/ + 后端 server/ 
+      - name: Deploy to ECS via SSH
+        uses: easingthemes/ssh-deploy@main
+        with:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          ARGS: "-rlgoDzvc --delete --exclude='.env'"
+          SOURCE: ""
+          REMOTE_HOST: ${{ secrets.ECS_HOST }}
+          REMOTE_USER: ${{ secrets.ECS_USER }}
+          TARGET: /var/www/swpost
+          EXCLUDE: ".git, node_modules, .env, .gitignore, .github"
+
+      # 6. 重启 PM2 进程
+      - name: Restart PM2
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.ECS_HOST }}
+          username: ${{ secrets.ECS_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /var/www/swpost/server
+            pm2 restart swpost-api || pm2 start index.js --name swpost-api
