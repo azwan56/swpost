@@ -172,6 +172,215 @@ function App() {
   const stickerRotateScaleRef = useRef(null);
   const textDragRef = useRef(null);
   const textRotateScaleRef = useRef(null);
+  
+  // Image Panning / Framing Adjust States & Refs
+  const editorImageContainerRef = useRef(null);
+  const [panZoom, setPanZoom] = useState(1);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+
+  // Initialize panning state when switching to 'pan' tab
+  const handleEnterPanTab = () => {
+    setActiveTab('pan');
+    const activeImage = uploadedImages[activeIdx];
+    if (!activeImage || !editorImageContainerRef.current) return;
+    
+    // Get container size
+    const rect = editorImageContainerRef.current.getBoundingClientRect();
+    const W_c = rect.width;
+    const H_c = rect.height;
+
+    // Load original image to get dimensions
+    const img = new Image();
+    img.src = activeImage.src;
+    img.onload = () => {
+      const W = img.naturalWidth;
+      const H = img.naturalHeight;
+      const targetRatio = W_c / H_c;
+
+      // Extract current cropBox percentages
+      const cb = activeImage.cropBox || { xmin: 0, ymin: 0, xmax: 100, ymax: 100 };
+      const cropWidthPercent = cb.xmax - cb.xmin;
+      const cropHeightPercent = cb.ymax - cb.ymin;
+
+      // Calculate panZoom
+      let zoom = 1;
+      if (W / H > targetRatio) {
+        zoom = 100 / cropHeightPercent;
+      } else {
+        zoom = 100 / cropWidthPercent;
+      }
+      setPanZoom(zoom);
+
+      // Calculate focus point percentages
+      const W_crop = (cropWidthPercent / 100) * W;
+      const H_crop = (cropHeightPercent / 100) * H;
+      const xmin = (cb.xmin / 100) * W;
+      const ymin = (cb.ymin / 100) * H;
+
+      const focusX = W > W_crop ? (xmin / (W - W_crop)) * 100 : 50;
+      const focusY = H > H_crop ? (ymin / (H - H_crop)) * 100 : 50;
+
+      // Calculate rendered dimensions
+      let W_r = W_c;
+      let H_r = H_c;
+      if (W / H > targetRatio) {
+        H_r = H_c;
+        W_r = H_c * (W / H);
+      } else {
+        W_r = W_c;
+        H_r = W_c * (H / W);
+      }
+      const W_v = W_r * zoom;
+      const H_v = H_r * zoom;
+
+      // Calculate panOffset
+      const offsetX = W_v > W_c ? ((50 - focusX) / 100) * (W_v - W_c) : 0;
+      const offsetY = H_v > H_c ? ((50 - focusY) / 100) * (H_v - H_c) : 0;
+
+      setPanOffset({ x: offsetX, y: offsetY });
+    };
+  };
+
+  const startPanning = (e) => {
+    e.preventDefault();
+    setIsPanning(true);
+    setPanStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
+  };
+
+  const pan = (e) => {
+    const activeImage = uploadedImages[activeIdx];
+    if (!isPanning || !activeImage || !editorImageContainerRef.current) return;
+    e.preventDefault();
+    
+    // Get container size
+    const rect = editorImageContainerRef.current.getBoundingClientRect();
+    const W_c = rect.width;
+    const H_c = rect.height;
+
+    // Get image dimensions from target
+    const imgElement = e.target;
+    const W = imgElement.naturalWidth;
+    const H = imgElement.naturalHeight;
+
+    let W_r = W_c;
+    let H_r = H_c;
+    if (W / H > W_c / H_c) {
+      H_r = H_c;
+      W_r = H_c * (W / H);
+    } else {
+      W_r = W_c;
+      H_r = W_c * (H / W);
+    }
+
+    const W_v = W_r * panZoom;
+    const H_v = H_r * panZoom;
+
+    // Calculate maximum drag values
+    const maxDx = W_v > W_c ? (W_v - W_c) / 2 : 0;
+    const maxDy = H_v > H_c ? (H_v - H_c) / 2 : 0;
+
+    // Calculate new raw drag offsets
+    let newX = e.clientX - panStart.x;
+    let newY = e.clientY - panStart.y;
+
+    // Constrain within boundaries so no black background is visible
+    newX = Math.max(-maxDx, Math.min(maxDx, newX));
+    newY = Math.max(-maxDy, Math.min(maxDy, newY));
+
+    setPanOffset({ x: newX, y: newY });
+  };
+
+  const stopPanning = () => {
+    setIsPanning(false);
+  };
+
+  const handleSavePanCrop = async () => {
+    const activeImage = uploadedImages[activeIdx];
+    if (!activeImage || !editorImageContainerRef.current) return;
+    setIsLoading(true);
+    setAiOperationName('重新裁切');
+
+    try {
+      const rect = editorImageContainerRef.current.getBoundingClientRect();
+      const W_c = rect.width;
+      const H_c = rect.height;
+
+      // Load original image to get dimensions
+      const img = new Image();
+      img.src = activeImage.src;
+      
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+      });
+
+      const W = img.naturalWidth;
+      const H = img.naturalHeight;
+
+      let W_r = W_c;
+      let H_r = H_c;
+      if (W / H > W_c / H_c) {
+        H_r = H_c;
+        W_r = H_c * (W / H);
+      } else {
+        W_r = W_c;
+        H_r = W_c * (H / W);
+      }
+
+      const W_v = W_r * panZoom;
+      const H_v = H_r * panZoom;
+
+      const focusX = W_v > W_c ? (50 - (panOffset.x / (W_v - W_c)) * 100) : 50;
+      const focusY = H_v > H_c ? (50 - (panOffset.y / (H_v - H_c)) * 100) : 50;
+
+      const targetRatio = W_c / H_c;
+      let W_crop, H_crop;
+      if (W / H > targetRatio) {
+        H_crop = H / panZoom;
+        W_crop = H_crop * targetRatio;
+      } else {
+        W_crop = W / panZoom;
+        H_crop = W_crop / targetRatio;
+      }
+
+      const xmin = (focusX / 100) * (W - W_crop);
+      const ymin = (focusY / 100) * (H - H_crop);
+      const xmax = xmin + W_crop;
+      const ymax = ymin + H_crop;
+
+      const newCropBox = {
+        xmin: Math.max(0, Math.min(100, (xmin / W) * 100)),
+        ymin: Math.max(0, Math.min(100, (ymin / H) * 100)),
+        xmax: Math.max(0, Math.min(100, (xmax / W) * 100)),
+        ymax: Math.max(0, Math.min(100, (ymax / H) * 100))
+      };
+
+      // Perform physical crop
+      const newCroppedSrc = await cropImagePhysically(activeImage.src, newCropBox);
+
+      setUploadedImages(prev => prev.map((item, idx) => {
+        if (idx === activeIdx) {
+          return {
+            ...item,
+            cropBox: newCropBox,
+            croppedSrc: newCroppedSrc,
+            isAIEdited: false // Allow re-cartoonization/eliminating on new crop
+          };
+        }
+        return item;
+      }));
+
+      // Switch back to drawing tab
+      setActiveTab('draw');
+    } catch (err) {
+      console.error(err);
+      setErrorMsg('调整裁剪位置失败：' + err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // 1. Handle Multiple Photos Upload
   const handlePhotosUpload = async (e) => {
@@ -1044,7 +1253,25 @@ function App() {
           </div>
         </div>
         
-        <div className="app-actions">
+        <div className="app-actions" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          <a 
+            href="https://vanpower.net" 
+            className="btn btn-secondary" 
+            style={{ 
+              display: 'inline-flex', 
+              alignItems: 'center', 
+              textDecoration: 'none', 
+              fontWeight: 600,
+              fontSize: '0.9rem',
+              padding: '0.6rem 1rem',
+              backgroundColor: '#f3f4f6',
+              border: '1px solid #d1d5db',
+              borderRadius: 'var(--radius-sm)',
+              color: '#374151'
+            }}
+          >
+            🏠 返回主页
+          </a>
           {uploadedImages.length > 0 && (
             <button className="btn btn-primary" onClick={exportPosterJPG}>
               📤 导出发布卡片 (JPG)
@@ -1161,6 +1388,12 @@ function App() {
             <div className="card">
               <div className="canvas-tabs">
                 <button 
+                  className={`canvas-tab-btn ${activeTab === 'pan' ? 'active' : ''}`}
+                  onClick={handleEnterPanTab}
+                >
+                  🔍 位置调整
+                </button>
+                <button 
                   className={`canvas-tab-btn ${activeTab === 'draw' ? 'active' : ''}`}
                   onClick={() => setActiveTab('draw')}
                 >
@@ -1194,6 +1427,7 @@ function App() {
                 <div className="annotation-wrapper" style={{ position: 'relative', width: '100%' }}>
                   
                   <div 
+                    ref={editorImageContainerRef}
                     className="grid-image-container" 
                     style={{ 
                       aspectRatio: '3/4', 
@@ -1202,13 +1436,36 @@ function App() {
                       overflow: 'hidden' 
                     }}
                   >
-                    {/* Cropped Base Image (Directly renders croppedSrc with cover fit) */}
-                    <img 
-                      src={activeImage.croppedSrc} 
-                      className="base-image" 
-                      alt="Active Editor"
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                    />
+                    {/* Render original image in 'pan' mode, otherwise render croppedSrc */}
+                    {activeTab === 'pan' ? (
+                      <img 
+                        src={activeImage.src} 
+                        className="pan-image" 
+                        alt="Adjust Position"
+                        onMouseDown={startPanning}
+                        onMouseMove={pan}
+                        onMouseUp={stopPanning}
+                        onMouseLeave={stopPanning}
+                        style={{ 
+                          position: 'absolute', 
+                          width: '100%', 
+                          height: '100%', 
+                          objectFit: 'cover',
+                          cursor: isPanning ? 'grabbing' : 'grab',
+                          transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${panZoom})`,
+                          transformOrigin: 'center center',
+                          userSelect: 'none',
+                          WebkitUserDrag: 'none'
+                        }}
+                      />
+                    ) : (
+                      <img 
+                        src={activeImage.croppedSrc} 
+                        className="base-image" 
+                        alt="Active Editor"
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                    )}
 
                     {/* Paint brush canvas layer */}
                     <canvas
@@ -1321,6 +1578,80 @@ function App() {
 
                 </div>
               </div>
+ 
+              {/* Pan Tab (Adjust framing) */}
+              {activeTab === 'pan' && (
+                <div>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+                    在上方照片区域中**直接按住并拖拽**以平移调整裁剪画面，使用下方滑块进行缩放：
+                  </p>
+                  
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', background: 'var(--bg-main)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', marginBottom: '0.75rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                      <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>🔍 画面缩放:</span>
+                      <input 
+                        type="range" 
+                        min="1" 
+                        max="3" 
+                        step="0.05"
+                        value={panZoom} 
+                        onChange={(e) => {
+                          const newZoom = parseFloat(e.target.value);
+                          setPanZoom(newZoom);
+                          
+                          // Dynamically clamp the panOffset when zooming out
+                          if (editorImageContainerRef.current) {
+                            const rect = editorImageContainerRef.current.getBoundingClientRect();
+                            const W_c = rect.width;
+                            const H_c = rect.height;
+                            const img = new Image();
+                            img.src = activeImage.src;
+                            img.onload = () => {
+                              const W = img.naturalWidth;
+                              const H = img.naturalHeight;
+                              let W_r = W_c, H_r = H_c;
+                              if (W / H > W_c / H_c) {
+                                H_r = H_c;
+                                W_r = H_c * (W / H);
+                              } else {
+                                W_r = W_c;
+                                H_r = W_c * (H / W);
+                              }
+                              const maxDx = (W_r * newZoom - W_c) / 2;
+                              const maxDy = (H_r * newZoom - H_c) / 2;
+                              setPanOffset(prev => ({
+                                x: Math.max(-maxDx, Math.min(maxDx, prev.x)),
+                                y: Math.max(-maxDy, Math.min(maxDy, prev.y))
+                              }));
+                            };
+                          }
+                        }}
+                        style={{ flex: 1, accentColor: 'var(--xhs-red)' }}
+                      />
+                      <span style={{ fontSize: '0.85rem', fontWeight: 600, minWidth: '2.5rem', textAlign: 'right' }}>
+                        {panZoom.toFixed(2)}x
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button 
+                      className="btn btn-secondary"
+                      style={{ flex: 1 }}
+                      onClick={() => setActiveTab('draw')}
+                    >
+                      取消
+                    </button>
+                    <button 
+                      className="btn btn-primary"
+                      style={{ flex: 2, background: 'linear-gradient(135deg, #10b981, #059669)' }}
+                      onClick={handleSavePanCrop}
+                    >
+                      💾 确认裁切并保存位置
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Draw Tab */}
               {activeTab === 'draw' && (
