@@ -1,0 +1,1725 @@
+import React, { useState, useRef, useEffect } from 'react';
+import ExifReader from 'exifreader';
+import html2canvas from 'html2canvas';
+
+// SVG Stickers Definition
+const STICKER_TEMPLATES = {
+  heart: (
+    <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 40 C12 18, 45 15, 50 35 C55 15, 88 18, 88 40 C88 65, 58 82, 50 88 C42 82, 12 65, 12 40 Z" fill="#fff0f2" stroke="#ff2442" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  ),
+  arrow: (
+    <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M20 20 C40 30, 60 30, 75 75" stroke="#ff2442" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M50 72 L75 75 L73 50" stroke="#ff2442" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  ),
+  sparkle: (
+    <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M50 10 L58 38 L86 38 L64 54 L72 82 L50 66 L28 82 L36 54 L14 38 L42 38 Z" fill="#fffde7" stroke="#ffeb3b" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  ),
+  speech: (
+    <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M15 50 C15 30, 35 15, 50 15 C65 15, 85 30, 85 50 C85 70, 65 80, 50 80 C42 80, 35 84, 25 88 C28 80, 15 70, 15 50 Z" fill="white" stroke="#222222" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round"/>
+      <circle cx="40" cy="50" r="3" fill="#222222"/>
+      <circle cx="50" cy="50" r="3" fill="#222222"/>
+      <circle cx="60" cy="50" r="3" fill="#222222"/>
+    </svg>
+  ),
+  highlight: (
+    <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <ellipse cx="50" cy="50" rx="40" ry="25" transform="rotate(-8 50 50)" stroke="#ff2442" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  )
+};
+
+const BRUSH_COLORS = ['#ff2442', '#3b82f6', '#10b981', '#f59e0b', '#000000', '#ffffff'];
+const TEXT_COLORS = ['#ffffff', '#ffeb3b', '#ff2442', '#ff6584', '#000000'];
+const TEXT_SUGGESTIONS = ['元气满满', '好治愈', '运动日常', '夏日清晨', '冲鸭', 'Vibe', '大自然', '好美', '开心'];
+
+// Helper: Physically crops the image using canvas, caps resolution at 1200px for massive speedup in style-transfer and inpainting
+const cropImagePhysically = (src, cropBox) => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      
+      // Convert percentage coordinates to pixels
+      const origX = (cropBox.xmin / 100) * img.naturalWidth;
+      const origY = (cropBox.ymin / 100) * img.naturalHeight;
+      const origWidth = ((cropBox.xmax - cropBox.xmin) / 100) * img.naturalWidth;
+      const origHeight = ((cropBox.ymax - cropBox.ymin) / 100) * img.naturalHeight;
+      
+      // Limit resolution to max 1200px width/height to make style transfer & network payloads highly optimized
+      const MAX_CROP_DIM = 1200;
+      let width = origWidth;
+      let height = origHeight;
+      let scale = 1;
+      
+      if (width > MAX_CROP_DIM || height > MAX_CROP_DIM) {
+        if (width > height) {
+          scale = MAX_CROP_DIM / width;
+        } else {
+          scale = MAX_CROP_DIM / height;
+        }
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+      }
+      
+      canvas.width = width;
+      canvas.height = height;
+      
+      ctx.drawImage(img, origX, origY, origWidth, origHeight, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', 0.9));
+    };
+    img.onerror = (err) => reject(new Error('Failed to load image for physical cropping: ' + err));
+    img.src = src;
+  });
+};
+
+// Helper: Compress/downscale original image files to max 1024px before uploading to backend for layout analysis
+const compressImageForAnalysis = (file) => {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        const MAX_DIM = 1024;
+        let width = img.width;
+        let height = img.height;
+        
+        if (width > height) {
+          if (width > MAX_DIM) {
+            height = Math.round((height * MAX_DIM) / width);
+            width = MAX_DIM;
+          }
+        } else {
+          if (height > MAX_DIM) {
+            width = Math.round((width * MAX_DIM) / height);
+            height = MAX_DIM;
+          }
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        canvas.toBlob((blob) => {
+          resolve(blob || file);
+        }, 'image/jpeg', 0.85); // 85% JPEG is perfect for model vision analysis
+      };
+      img.onerror = () => resolve(file); // fallback to original if image load fails
+      img.src = e.target.result;
+    };
+    reader.onerror = () => resolve(file); // fallback to original if read fails
+    reader.readAsDataURL(file);
+  });
+};
+
+function App() {
+  // App States
+  const [uploadedImages, setUploadedImages] = useState([]); // [{ id, file, src, croppedSrc, metadata: { time, location }, cropBox, stickers: [], texts: [], drawings: null }]
+  const [activeIdx, setActiveIdx] = useState(0); 
+  const [globalMetadata, setGlobalMetadata] = useState({ time: '', location: '' });
+  const [activeTab, setActiveTab] = useState('draw'); // 'draw', 'sticker', 'text', 'erase'
+  
+  // Drawing Canvas States
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [brushColor, setBrushColor] = useState('#ff2442');
+  const [brushWidth, setBrushWidth] = useState(4);
+  
+  // Erase (Inpainting Mask) Brush States
+  const [isErasing, setIsErasing] = useState(false);
+  const [eraseWidth, setEraseWidth] = useState(24);
+  const [hasEraseMarks, setHasEraseMarks] = useState(false);
+
+  // Active selection states
+  const [selectedStickerId, setSelectedStickerId] = useState(null);
+  const [selectedTextId, setSelectedTextId] = useState(null);
+  
+  // Custom Handwritten Text Inputs
+  const [customTextContent, setCustomTextContent] = useState('');
+  const [customTextColor, setCustomTextColor] = useState('#ffffff');
+  
+  // AI Generation & Processing Loading States
+  const [aiTitle, setAiTitle] = useState('');
+  const [aiBody, setAiBody] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [aiOperationName, setAiOperationName] = useState(''); // "大模型分析", "AI 消除", "吉卜力动漫化"
+  const [errorMsg, setErrorMsg] = useState('');
+  
+  // Refs
+  const fileInputRef = useRef(null);
+  const drawingCanvasRef = useRef(null);
+  const drawingCtxRef = useRef(null);
+  const eraseCanvasRef = useRef(null);
+  const eraseCtxRef = useRef(null);
+  const posterRef = useRef(null);
+  
+  // Interactive gesture drag/rotate refs
+  const stickerDragRef = useRef(null);
+  const stickerRotateScaleRef = useRef(null);
+  const textDragRef = useRef(null);
+  const textRotateScaleRef = useRef(null);
+
+  // 1. Handle Multiple Photos Upload
+  const handlePhotosUpload = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    setErrorMsg('');
+    const availableSlots = 4 - uploadedImages.length;
+    if (availableSlots <= 0) {
+      setErrorMsg('最多支持上传 4 张图片！');
+      return;
+    }
+    const filesToProcess = files.slice(0, availableSlots);
+    const newImages = [];
+    
+    for (const file of filesToProcess) {
+      const id = Math.random().toString(36).substring(2, 9);
+      
+      const src = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (event) => resolve(event.target.result);
+        reader.readAsDataURL(file);
+      });
+
+      let time = '';
+      let location = '';
+      let lat = null;
+      let lon = null;
+
+      try {
+        const tags = await ExifReader.load(file);
+        if (tags.DateTimeOriginal) {
+          const rawDate = tags.DateTimeOriginal.description;
+          const dateParts = rawDate.split(' ')[0].split(':');
+          if (dateParts.length === 3) {
+            time = `${dateParts[0]}-${dateParts[1]}-${dateParts[2]}`;
+          } else {
+            time = rawDate;
+          }
+        }
+        
+        if (tags.GPSLatitude && tags.GPSLongitude) {
+          const latNum = parseFloat(tags.GPSLatitude.description);
+          const lonNum = parseFloat(tags.GPSLongitude.description);
+          if (!isNaN(latNum) && !isNaN(lonNum)) {
+            const latRef = tags.GPSLatitudeRef?.description || 'N';
+            const lonRef = tags.GPSLongitudeRef?.description || 'E';
+            lat = latRef.includes('S') ? -Math.abs(latNum) : Math.abs(latNum);
+            lon = lonRef.includes('W') ? -Math.abs(lonNum) : Math.abs(lonNum);
+          }
+        }
+      } catch (err) {
+        console.warn('Metadata parsing failed:', err);
+      }
+
+      newImages.push({
+        id,
+        file,
+        src,
+        croppedSrc: src, // initially full image
+        metadata: { time, location, lat, lon },
+        cropBox: { ymin: 0, xmin: 0, ymax: 100, xmax: 100 },
+        stickers: [],
+        texts: [],
+        drawings: null
+      });
+    }
+
+    const updatedImages = [...uploadedImages, ...newImages];
+    setUploadedImages(updatedImages);
+    setActiveIdx(uploadedImages.length);
+    
+    let detectedTime = globalMetadata.time;
+    let firstLat = null, firstLon = null;
+
+    updatedImages.forEach(img => {
+      if (!detectedTime && img.metadata.time) detectedTime = img.metadata.time;
+      if (firstLat === null && img.metadata.lat !== null) {
+        firstLat = img.metadata.lat;
+        firstLon = img.metadata.lon;
+      }
+    });
+
+    if (!detectedTime) {
+      detectedTime = new Date().toISOString().split('T')[0];
+    }
+    setGlobalMetadata(prev => ({ ...prev, time: detectedTime }));
+
+    if (firstLat !== null && firstLon !== null && !globalMetadata.location) {
+      try {
+        const res = await fetch(`/api/geocode?lat=${firstLat}&lon=${firstLon}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.address) {
+            setGlobalMetadata(prev => ({ ...prev, location: data.address }));
+          }
+        }
+      } catch (err) {
+        console.error('Failed to geocode coordinates:', err);
+      }
+    }
+  };
+
+  const removeUploadedImage = (id, e) => {
+    e.stopPropagation();
+    const filtered = uploadedImages.filter(img => img.id !== id);
+    setUploadedImages(filtered);
+    
+    if (activeIdx >= filtered.length) {
+      setActiveIdx(Math.max(0, filtered.length - 1));
+    }
+  };
+
+  // 2. Local drawing & erase canvases initialization
+  useEffect(() => {
+    if (uploadedImages.length > 0 && activeIdx < uploadedImages.length) {
+      const activeImg = uploadedImages[activeIdx];
+
+      // Draw Canvas Setup
+      if (activeTab === 'draw' && drawingCanvasRef.current) {
+        const canvas = drawingCanvasRef.current;
+        const ctx = canvas.getContext('2d');
+        drawingCtxRef.current = ctx;
+
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+
+        ctx.strokeStyle = brushColor;
+        ctx.lineWidth = brushWidth;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        if (activeImg.drawings) {
+          const img = new Image();
+          img.onload = () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          };
+          img.src = activeImg.drawings;
+        } else {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+      }
+
+      // Erase Canvas Setup
+      if (activeTab === 'erase' && eraseCanvasRef.current) {
+        const canvas = eraseCanvasRef.current;
+        const ctx = canvas.getContext('2d');
+        eraseCtxRef.current = ctx;
+
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+
+        ctx.strokeStyle = 'rgba(255, 36, 66, 0.45)'; // Semi-transparent red erase highlighter
+        ctx.lineWidth = eraseWidth;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        setHasEraseMarks(false);
+      }
+    }
+  }, [activeIdx, uploadedImages.length, activeTab]);
+
+  useEffect(() => {
+    if (drawingCtxRef.current) {
+      drawingCtxRef.current.strokeStyle = brushColor;
+      drawingCtxRef.current.lineWidth = brushWidth;
+    }
+  }, [brushColor, brushWidth]);
+
+  useEffect(() => {
+    if (eraseCtxRef.current) {
+      eraseCtxRef.current.lineWidth = eraseWidth;
+    }
+  }, [eraseWidth]);
+
+  const saveCurrentDrawings = () => {
+    if (!drawingCanvasRef.current || uploadedImages.length === 0 || activeIdx >= uploadedImages.length) return;
+    const dataUrl = drawingCanvasRef.current.toDataURL();
+    setUploadedImages(prev => prev.map((img, idx) => {
+      if (idx === activeIdx) {
+        return { ...img, drawings: dataUrl };
+      }
+      return img;
+    }));
+  };
+
+  // Brush drawing events
+  const startDrawing = (e) => {
+    if (activeTab !== 'draw' || uploadedImages.length === 0) return;
+    const canvas = drawingCanvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    drawingCtxRef.current.beginPath();
+    drawingCtxRef.current.moveTo(x, y);
+    setIsDrawing(true);
+  };
+
+  const draw = (e) => {
+    if (!isDrawing || activeTab !== 'draw' || uploadedImages.length === 0) return;
+    const canvas = drawingCanvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    drawingCtxRef.current.lineTo(x, y);
+    drawingCtxRef.current.stroke();
+  };
+
+  const stopDrawing = () => {
+    if (isDrawing) {
+      setIsDrawing(false);
+      saveCurrentDrawings();
+    }
+  };
+
+  const clearDrawings = () => {
+    const canvas = drawingCanvasRef.current;
+    if (!canvas || !drawingCtxRef.current) return;
+    drawingCtxRef.current.clearRect(0, 0, canvas.width, canvas.height);
+    
+    setUploadedImages(prev => prev.map((img, idx) => {
+      if (idx === activeIdx) {
+        return { ...img, drawings: null };
+      }
+      return img;
+    }));
+  };
+
+  // Erase drawing events (Object Removal)
+  const startErasing = (e) => {
+    if (activeTab !== 'erase' || uploadedImages.length === 0) return;
+    const canvas = eraseCanvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    eraseCtxRef.current.beginPath();
+    eraseCtxRef.current.moveTo(x, y);
+    setIsErasing(true);
+    setHasEraseMarks(true);
+  };
+
+  const drawEraseMark = (e) => {
+    if (!isErasing || activeTab !== 'erase' || uploadedImages.length === 0) return;
+    const canvas = eraseCanvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    eraseCtxRef.current.lineTo(x, y);
+    eraseCtxRef.current.stroke();
+  };
+
+  const stopErasing = () => {
+    setIsErasing(false);
+  };
+
+  const clearEraseMarks = () => {
+    const canvas = eraseCanvasRef.current;
+    if (!canvas || !eraseCtxRef.current) return;
+    eraseCtxRef.current.clearRect(0, 0, canvas.width, canvas.height);
+    setHasEraseMarks(false);
+  };
+
+  // 3. Stickers Operations
+  const addSticker = (type) => {
+    if (uploadedImages.length === 0) return;
+    const newSticker = {
+      id: `sticker-${Date.now()}`,
+      type,
+      x: 75, 
+      y: 15,
+      scale: 0.7, 
+      rotation: 0,
+      width: 70,
+      height: 70,
+      text: type === 'speech' ? '哇哦!' : ''
+    };
+    setUploadedImages(prev => prev.map((img, idx) => {
+      if (idx === activeIdx) {
+        return { ...img, stickers: [...img.stickers, newSticker] };
+      }
+      return img;
+    }));
+    setSelectedStickerId(newSticker.id);
+    setSelectedTextId(null);
+    setActiveTab('sticker');
+  };
+
+  // 4. Handwritten Text Operations
+  const addHandwrittenText = (content) => {
+    if (uploadedImages.length === 0 || !content.trim()) return;
+    const newText = {
+      id: `text-${Date.now()}`,
+      content: content.trim(),
+      x: 50,
+      y: 80,
+      scale: 1.3,
+      rotation: -6,
+      color: customTextColor
+    };
+    setUploadedImages(prev => prev.map((img, idx) => {
+      if (idx === activeIdx) {
+        return { ...img, texts: [...(img.texts || []), newText] };
+      }
+      return img;
+    }));
+    setSelectedTextId(newText.id);
+    setSelectedStickerId(null);
+    setCustomTextContent('');
+  };
+
+  // Sticker mouse handlers
+  const handleStickerMouseDown = (e, sticker) => {
+    if (activeTab !== 'sticker') return;
+    e.stopPropagation();
+    setSelectedStickerId(sticker.id);
+    setSelectedTextId(null);
+
+    stickerDragRef.current = {
+      id: sticker.id,
+      startX: e.clientX,
+      startY: e.clientY,
+      startLeft: sticker.x,
+      startTop: sticker.y
+    };
+  };
+
+  const handleRotateScaleMouseDown = (e, sticker) => {
+    if (activeTab !== 'sticker') return;
+    e.stopPropagation();
+    e.preventDefault();
+
+    const element = document.getElementById(`sticker-${sticker.id}`);
+    const rect = element.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+
+    stickerRotateScaleRef.current = {
+      id: sticker.id,
+      centerX,
+      centerY,
+      startMouseX: e.clientX,
+      startMouseY: e.clientY,
+      startAngle: sticker.rotation,
+      startScale: sticker.scale
+    };
+  };
+
+  // Text mouse handlers
+  const handleTextMouseDown = (e, textObj) => {
+    if (activeTab !== 'text') return;
+    e.stopPropagation();
+    setSelectedTextId(textObj.id);
+    setSelectedStickerId(null);
+
+    textDragRef.current = {
+      id: textObj.id,
+      startX: e.clientX,
+      startY: e.clientY,
+      startLeft: textObj.x,
+      startTop: textObj.y
+    };
+  };
+
+  const handleTextRotateScaleMouseDown = (e, textObj) => {
+    if (activeTab !== 'text') return;
+    e.stopPropagation();
+    e.preventDefault();
+
+    const element = document.getElementById(`text-${textObj.id}`);
+    const rect = element.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+
+    textRotateScaleRef.current = {
+      id: textObj.id,
+      centerX,
+      centerY,
+      startMouseX: e.clientX,
+      startMouseY: e.clientY,
+      startAngle: textObj.rotation,
+      startScale: textObj.scale
+    };
+  };
+
+  // Global mousemove listeners
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      const container = document.querySelector('.annotation-wrapper');
+      if (!container) return;
+      const cRect = container.getBoundingClientRect();
+
+      if (stickerDragRef.current) {
+        const { id, startX, startY, startLeft, startTop } = stickerDragRef.current;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        const px = (dx / cRect.width) * 100;
+        const py = (dy / cRect.height) * 100;
+
+        setUploadedImages(prev => prev.map((img, idx) => {
+          if (idx === activeIdx) {
+            return {
+              ...img,
+              stickers: img.stickers.map(s => s.id === id ? { ...s, x: startLeft + px, y: startTop + py } : s)
+            };
+          }
+          return img;
+        }));
+      }
+
+      if (stickerRotateScaleRef.current) {
+        const { id, centerX, centerY, startMouseX, startMouseY, startAngle, startScale } = stickerRotateScaleRef.current;
+        const startDx = startMouseX - centerX;
+        const startDy = startMouseY - centerY;
+        const startDist = Math.sqrt(startDx * startDx + startDy * startDy);
+        const startRad = Math.atan2(startDy, startDx);
+
+        const dx = e.clientX - centerX;
+        const dy = e.clientY - centerY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const rad = Math.atan2(dy, dx);
+        const angleDiff = (rad - startRad) * (180 / Math.PI);
+        const scaleFactor = dist / startDist;
+
+        setUploadedImages(prev => prev.map((img, idx) => {
+          if (idx === activeIdx) {
+            return {
+              ...img,
+              stickers: img.stickers.map(s => s.id === id ? {
+                ...s,
+                rotation: startAngle + angleDiff,
+                scale: Math.max(0.2, Math.min(2.5, startScale * scaleFactor))
+              } : s)
+            };
+          }
+          return img;
+        }));
+      }
+
+      if (textDragRef.current) {
+        const { id, startX, startY, startLeft, startTop } = textDragRef.current;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        const px = (dx / cRect.width) * 100;
+        const py = (dy / cRect.height) * 100;
+
+        setUploadedImages(prev => prev.map((img, idx) => {
+          if (idx === activeIdx) {
+            return {
+              ...img,
+              texts: (img.texts || []).map(t => t.id === id ? { ...t, x: startLeft + px, y: startTop + py } : t)
+            };
+          }
+          return img;
+        }));
+      }
+
+      if (textRotateScaleRef.current) {
+        const { id, centerX, centerY, startMouseX, startMouseY, startAngle, startScale } = textRotateScaleRef.current;
+        const startDx = startMouseX - centerX;
+        const startDy = startMouseY - centerY;
+        const startDist = Math.sqrt(startDx * startDx + startDy * startDy);
+        const startRad = Math.atan2(startDy, startDx);
+
+        const dx = e.clientX - centerX;
+        const dy = e.clientY - centerY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const rad = Math.atan2(dy, dx);
+        const angleDiff = (rad - startRad) * (180 / Math.PI);
+        const scaleFactor = dist / startDist;
+
+        setUploadedImages(prev => prev.map((img, idx) => {
+          if (idx === activeIdx) {
+            return {
+              ...img,
+              texts: (img.texts || []).map(t => t.id === id ? {
+                ...t,
+                rotation: startAngle + angleDiff,
+                scale: Math.max(0.5, Math.min(3, startScale * scaleFactor))
+              } : t)
+            };
+          }
+          return img;
+        }));
+      }
+    };
+
+    const handleMouseUp = () => {
+      stickerDragRef.current = null;
+      stickerRotateScaleRef.current = null;
+      textDragRef.current = null;
+      textRotateScaleRef.current = null;
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [activeIdx]);
+
+  const deleteSticker = (id, e) => {
+    e.stopPropagation();
+    setUploadedImages(prev => prev.map((img, idx) => {
+      if (idx === activeIdx) {
+        return { ...img, stickers: img.stickers.filter(s => s.id !== id) };
+      }
+      return img;
+    }));
+    if (selectedStickerId === id) {
+      setSelectedStickerId(null);
+    }
+  };
+
+  const updateStickerText = (id, text) => {
+    setUploadedImages(prev => prev.map((img, idx) => {
+      if (idx === activeIdx) {
+        return {
+          ...img,
+          stickers: img.stickers.map(s => s.id === id ? { ...s, text } : s)
+        };
+      }
+      return img;
+    }));
+  };
+
+  const deleteText = (id, e) => {
+    e.stopPropagation();
+    setUploadedImages(prev => prev.map((img, idx) => {
+      if (idx === activeIdx) {
+        return { ...img, texts: (img.texts || []).filter(t => t.id !== id) };
+      }
+      return img;
+    }));
+    if (selectedTextId === id) {
+      setSelectedTextId(null);
+    }
+  };
+
+  const updateTextContent = (id, content) => {
+    setUploadedImages(prev => prev.map((img, idx) => {
+      if (idx === activeIdx) {
+        return {
+          ...img,
+          texts: (img.texts || []).map(t => t.id === id ? { ...t, content } : t)
+        };
+      }
+      return img;
+    }));
+  };
+
+  const updateTextColor = (id, color) => {
+    setUploadedImages(prev => prev.map((img, idx) => {
+      if (idx === activeIdx) {
+        return {
+          ...img,
+          texts: (img.texts || []).map(t => t.id === id ? { ...t, color } : t)
+        };
+      }
+      return img;
+    }));
+  };
+
+  // 6. Call Backend to Generate AI layouts, crops, stickers, and texts
+  const handleAIGeneration = async () => {
+    if (uploadedImages.length === 0) {
+      setErrorMsg('请先上传至少一张日常照片！');
+      return;
+    }
+
+    setIsLoading(true);
+    setAiOperationName('大模型分析并设计排版');
+    setErrorMsg('');
+    saveCurrentDrawings();
+
+    try {
+      // Compress/downscale original image files for the layout analyzer to save massive upload bandwidth
+      const formData = new FormData();
+      const compressedBlobs = await Promise.all(
+        uploadedImages.map(img => compressImageForAnalysis(img.file))
+      );
+      compressedBlobs.forEach((blob, idx) => {
+        formData.append('images', blob, `image-${idx}.jpg`);
+      });
+      formData.append('metadata', JSON.stringify(globalMetadata));
+
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'AI 排版与文案生成失败');
+      }
+
+      const data = await res.json();
+      
+      setAiTitle(data.title || '日常小确幸 ✨');
+      setAiBody(data.body || '');
+
+      if (data.images_config && Array.isArray(data.images_config)) {
+        // We will perform physical cropping for all images asynchronously
+        const updatedImages = await Promise.all(
+          uploadedImages.map(async (img, idx) => {
+            const config = data.images_config.find(c => c.index === idx);
+            if (config) {
+              const cropBox = config.crop_box || { ymin: 0, xmin: 0, ymax: 100, xmax: 100 };
+              
+              // 1. Crop the image physically if NOT already edited/cartoonized by AI
+              let croppedSrc = img.croppedSrc || img.src;
+              if (!img.isAIEdited) {
+                try {
+                  croppedSrc = await cropImagePhysically(img.src, cropBox);
+                } catch (cropErr) {
+                  console.error('Physical cropping failed for index', idx, cropErr);
+                }
+              }
+
+              // 2. Map AI generated stickers
+              const mappedStickers = (config.stickers || []).map((s, sIdx) => ({
+                id: `ai-sticker-${idx}-${sIdx}-${Date.now()}`,
+                type: s.type,
+                x: s.x ?? 75,
+                y: s.y ?? 15,
+                scale: s.scale ? Math.min(s.scale, 0.7) : 0.7, 
+                rotation: s.rotation ?? 0,
+                width: 70,
+                height: 70,
+                text: s.text || ''
+              }));
+
+              // 3. Map AI generated texts
+              const mappedTexts = (config.texts || []).map((t, tIdx) => ({
+                id: `ai-text-${idx}-${tIdx}-${Date.now()}`,
+                content: t.content || '美好',
+                x: t.x ?? 50,
+                y: t.y ?? 85,
+                scale: t.scale ?? 1.2,
+                rotation: t.rotation ?? -5,
+                color: t.color || '#ffffff'
+              }));
+
+              return {
+                ...img,
+                cropBox: img.isAIEdited ? img.cropBox : cropBox, // keep existing cropBox if edited
+                croppedSrc, // Set physically cropped image URL
+                stickers: mappedStickers,
+                texts: mappedTexts
+              };
+            }
+            return img;
+          })
+        );
+
+        setUploadedImages(updatedImages);
+      }
+
+      setSelectedStickerId(null);
+      setSelectedTextId(null);
+      setActiveIdx(0);
+      setActiveTab('text'); 
+
+    } catch (err) {
+      console.error(err);
+      setErrorMsg(err.message || '生成文案及裁剪失败，请稍后重试。');
+    } finally {
+      setIsLoading(false);
+      setAiOperationName('');
+    }
+  };
+
+  // 7. AI Image Tool: Object Removal (Inpainting)
+  const handleAIObjectRemoval = async () => {
+    if (uploadedImages.length === 0 || !activeImage || !hasEraseMarks) return;
+    
+    setIsLoading(true);
+    setAiOperationName('AI 消除杂物行人');
+    setErrorMsg('');
+
+    try {
+      // 1. Load the source image to get its actual pixel dimensions
+      const sourceImg = new Image();
+      sourceImg.crossOrigin = 'anonymous';
+      await new Promise((resolve, reject) => {
+        sourceImg.onload = resolve;
+        sourceImg.onerror = reject;
+        sourceImg.src = activeImage.croppedSrc;
+      });
+      const imgW = sourceImg.naturalWidth;
+      const imgH = sourceImg.naturalHeight;
+
+      // 2. Create a mask canvas at the SAME dimensions as the source image
+      const eraseCanvas = eraseCanvasRef.current;
+      const maskCanvas = document.createElement('canvas');
+      maskCanvas.width = imgW;
+      maskCanvas.height = imgH;
+      
+      const mCtx = maskCanvas.getContext('2d');
+      // Start with all black (unmasked area)
+      mCtx.fillStyle = '#000000';
+      mCtx.fillRect(0, 0, imgW, imgH);
+      
+      // Scale the erase strokes from display size to actual image size
+      const scaleX = imgW / eraseCanvas.width;
+      const scaleY = imgH / eraseCanvas.height;
+      mCtx.save();
+      mCtx.scale(scaleX, scaleY);
+      mCtx.drawImage(eraseCanvas, 0, 0);
+      mCtx.restore();
+      
+      // Convert any non-black pixel (the red brush strokes) to solid white
+      const imgData = mCtx.getImageData(0, 0, imgW, imgH);
+      const data = imgData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i + 3] > 0 && (data[i] > 0 || data[i + 1] > 0 || data[i + 2] > 0)) {
+          data[i] = 255;     // R
+          data[i + 1] = 255; // G
+          data[i + 2] = 255; // B
+          data[i + 3] = 255; // A
+        } else {
+          data[i] = 0;
+          data[i + 1] = 0;
+          data[i + 2] = 0;
+          data[i + 3] = 255;
+        }
+      }
+      mCtx.putImageData(imgData, 0, 0);
+      
+      const maskBase64 = maskCanvas.toDataURL('image/png');
+
+      // 2. Call backend
+      const res = await fetch('/api/ai/remove-objects', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          image: activeImage.croppedSrc,
+          mask: maskBase64
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'AI 局部重绘失败');
+      }
+
+      const result = await res.json();
+      
+      // 3. Update the croppedSrc with cleaned image
+      setUploadedImages(prev => prev.map((img, idx) => {
+        if (idx === activeIdx) {
+          return { ...img, croppedSrc: result.image, isAIEdited: true };
+        }
+        return img;
+      }));
+
+      // Clear erase marks
+      clearEraseMarks();
+
+    } catch (err) {
+      console.error(err);
+      setErrorMsg(err.message || 'AI 消除失败，请确保阿里云百炼通义万相接口可用。');
+    } finally {
+      setIsLoading(false);
+      setAiOperationName('');
+    }
+  };
+
+  // 8. AI Image Tool: Ghibli Cartoon Style
+  const handleAIGhibliCartoon = async () => {
+    if (uploadedImages.length === 0 || !activeImage) return;
+    
+    setIsLoading(true);
+    setAiOperationName('一键吉卜力卡通化');
+    setErrorMsg('');
+
+    try {
+      const res = await fetch('/api/ai/style-transfer', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          image: activeImage.croppedSrc
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || '动漫风格化失败');
+      }
+
+      const result = await res.json();
+      
+      // Update croppedSrc with the cartoonized version
+      setUploadedImages(prev => prev.map((img, idx) => {
+        if (idx === activeIdx) {
+          return { ...img, croppedSrc: result.image, isAIEdited: true };
+        }
+        return img;
+      }));
+
+    } catch (err) {
+      console.error(err);
+      setErrorMsg(err.message || 'AI 卡通化失败，请检查通义万相 Cosplay 接口额度或可用性。');
+    } finally {
+      setIsLoading(false);
+      setAiOperationName('');
+    }
+  };
+
+  // 9. Export Poster JPG
+  const exportPosterJPG = async () => {
+    if (!posterRef.current || uploadedImages.length === 0) return;
+    
+    setSelectedStickerId(null);
+    setSelectedTextId(null);
+
+    setTimeout(async () => {
+      try {
+        const canvas = await html2canvas(posterRef.current, {
+          useCORS: true,
+          scale: 2,
+          allowTaint: true,
+          backgroundColor: '#ffffff',
+          logging: false
+        });
+
+        const imageURL = canvas.toDataURL('image/jpeg', 0.95);
+        const link = document.createElement('a');
+        link.download = `xiaohongshu-collage-${Date.now()}.jpg`;
+        link.href = imageURL;
+        link.click();
+      } catch (err) {
+        console.error('Failed to export poster image:', err);
+        setErrorMsg('图片生成失败，请稍后重试。');
+      }
+    }, 150);
+  };
+
+  const activeImage = uploadedImages[activeIdx];
+
+  return (
+    <div className="app-container">
+      {/* Header */}
+      <header className="app-header">
+        <div className="logo-section">
+          <div className="logo-badge">书</div>
+          <div className="logo-text">
+            <h1>小红书智能拼图海报生成器</h1>
+            <p>防变形物理剪裁 · AI消除行人/杂物 · AI一键吉卜力卡通化</p>
+          </div>
+        </div>
+        
+        <div className="app-actions">
+          {uploadedImages.length > 0 && (
+            <button className="btn btn-primary" onClick={exportPosterJPG}>
+              📤 导出发布卡片 (JPG)
+            </button>
+          )}
+        </div>
+      </header>
+
+      {/* Loading Overlay */}
+      {isLoading && (
+        <div className="loading-overlay" style={{ position: 'fixed', width: '100vw', height: '100vh', top: 0, left: 0, zIndex: 1000 }}>
+          <div className="spinner"></div>
+          <div className="loading-text" style={{ fontSize: '1.2rem', fontWeight: 600 }}>{aiOperationName}中... 请稍候...</div>
+        </div>
+      )}
+
+      {/* Main Workspace */}
+      <main className="workspace">
+        
+        {/* Left editor side */}
+        <section className="editor-panel">
+          
+          {errorMsg && (
+            <div className="error-banner">
+              <span>⚠️ {errorMsg}</span>
+              <span className="error-close" onClick={() => setErrorMsg('')}>×</span>
+            </div>
+          )}
+
+          {/* 1. Upload */}
+          <div className="card">
+            <h2 className="card-title">📸 第一步：上传拼图照片 (1-4张)</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {uploadedImages.length < 4 && (
+                <div 
+                  className="upload-zone"
+                  onClick={() => fileInputRef.current?.click()}
+                  style={{ padding: '1.5rem 1rem' }}
+                >
+                  <div className="upload-icon" style={{ fontSize: '2rem' }}>📤</div>
+                  <p style={{ fontSize: '0.9rem' }}>添加 1-4 张图片 (支持多选，拼图绝不拉伸变形)</p>
+                  <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    style={{ display: 'none' }} 
+                    accept="image/*"
+                    multiple
+                    onChange={handlePhotosUpload}
+                  />
+                </div>
+              )}
+
+              {/* Uploaded Thumbnails Manager */}
+              {uploadedImages.length > 0 && (
+                <div>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>点击选中某张照片，进行 AI 去除杂物/吉卜力动漫化/手绘文字：</p>
+                  <div className="uploaded-images-list">
+                    {uploadedImages.map((img, idx) => (
+                      <div 
+                        key={img.id}
+                        className={`uploaded-image-thumbnail ${activeIdx === idx ? 'active' : ''}`}
+                        onClick={() => {
+                          saveCurrentDrawings();
+                          setActiveIdx(idx);
+                        }}
+                      >
+                        <img src={img.croppedSrc} alt={`Uploaded ${idx}`} />
+                        <button 
+                          className="uploaded-image-remove"
+                          onClick={(e) => removeUploadedImage(img.id, e)}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* AI Magic Tools Card */}
+          {uploadedImages.length > 0 && activeImage && (
+            <div className="card" style={{ border: '1px solid #c7d2fe', background: 'linear-gradient(to bottom, #ffffff, #fcfdff)' }}>
+              <h2 className="card-title" style={{ color: '#4f46e5', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                🪄 AI 智能修图魔法
+              </h2>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.5rem', marginBottom: '1rem' }}>
+                对选中的图 {activeIdx + 1} 进行 AI 消除或动漫艺术化处理：
+              </p>
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button 
+                  className="btn btn-primary" 
+                  style={{ flex: 1, padding: '0.75rem 0.5rem', fontSize: '0.9rem', background: 'linear-gradient(135deg, #4f46e5, #6366f1)', boxShadow: '0 4px 12px rgba(79, 70, 229, 0.15)' }}
+                  onClick={handleAIGhibliCartoon}
+                >
+                  🎨 一键吉卜力动漫化
+                </button>
+                <button 
+                  className={`btn ${activeTab === 'erase' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ flex: 1, padding: '0.75rem 0.5rem', fontSize: '0.9rem', borderColor: '#4f46e5', color: activeTab === 'erase' ? 'white' : '#4f46e5', fontWeight: 600 }}
+                  onClick={() => {
+                    setActiveTab('erase');
+                  }}
+                >
+                  🪄 涂抹消除路人/杂物
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 2. Photo Fine-Tuning & Drawings/Stickers */}
+          {uploadedImages.length > 0 && activeImage && (
+            <div className="card">
+              <div className="canvas-tabs">
+                <button 
+                  className={`canvas-tab-btn ${activeTab === 'draw' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('draw')}
+                >
+                  ✏️ 画笔手绘
+                </button>
+                <button 
+                  className={`canvas-tab-btn ${activeTab === 'erase' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('erase')}
+                >
+                  🪄 AI 消除杂物
+                </button>
+                <button 
+                  className={`canvas-tab-btn ${activeTab === 'sticker' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('sticker')}
+                >
+                  ✨ 贴纸装饰
+                </button>
+                <button 
+                  className={`canvas-tab-btn ${activeTab === 'text' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('text')}
+                >
+                  ✍️ 手写文案
+                </button>
+              </div>
+
+              {/* Editor Workspace Canvas */}
+              <div 
+                className="editor-canvas-container" 
+                style={{ overflow: 'visible', margin: '0.5rem 0' }}
+              >
+                <div className="annotation-wrapper" style={{ position: 'relative', width: '100%' }}>
+                  
+                  <div 
+                    className="grid-image-container" 
+                    style={{ 
+                      aspectRatio: '3/4', 
+                      width: '100%', 
+                      borderRadius: 'var(--radius-md)', 
+                      overflow: 'hidden' 
+                    }}
+                  >
+                    {/* Cropped Base Image (Directly renders croppedSrc with cover fit) */}
+                    <img 
+                      src={activeImage.croppedSrc} 
+                      className="base-image" 
+                      alt="Active Editor"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+
+                    {/* Paint brush canvas layer */}
+                    <canvas
+                      ref={drawingCanvasRef}
+                      className="drawing-canvas"
+                      style={{ pointerEvents: activeTab === 'draw' ? 'auto' : 'none' }}
+                      onMouseDown={startDrawing}
+                      onMouseMove={draw}
+                      onMouseUp={stopDrawing}
+                      onMouseLeave={stopDrawing}
+                    />
+
+                    {/* Erase (Inpainting Mask) brush canvas layer */}
+                    <canvas
+                      ref={eraseCanvasRef}
+                      className="drawing-canvas"
+                      style={{ pointerEvents: activeTab === 'erase' ? 'auto' : 'none', zIndex: 12, opacity: 0.8 }}
+                      onMouseDown={startErasing}
+                      onMouseMove={drawEraseMark}
+                      onMouseUp={stopErasing}
+                      onMouseLeave={stopErasing}
+                    />
+
+                    {/* Stickers Overlay */}
+                    <div 
+                      className="stickers-container"
+                      style={{ pointerEvents: activeTab === 'sticker' ? 'auto' : 'none' }}
+                      onClick={() => { setSelectedStickerId(null); setSelectedTextId(null); }}
+                    >
+                      {activeImage.stickers.map((s) => (
+                        <div
+                          key={s.id}
+                          id={`sticker-${s.id}`}
+                          className={`sticker-item ${selectedStickerId === s.id ? 'selected' : ''}`}
+                          style={{
+                            left: `${s.x}%`,
+                            top: `${s.y}%`,
+                            transform: `translate(-50%, -50%) rotate(${s.rotation}deg) scale(${s.scale})`,
+                            width: `${s.width}px`,
+                            height: `${s.height}px`
+                          }}
+                          onMouseDown={(e) => handleStickerMouseDown(e, s)}
+                        >
+                          {STICKER_TEMPLATES[s.type]}
+                          
+                          {s.type === 'speech' && (
+                            <div style={{
+                              position: 'absolute',
+                              top: '25%',
+                              left: '12%',
+                              width: '76%',
+                              height: '40%',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '12px',
+                              fontWeight: '600',
+                              color: '#222',
+                              textAlign: 'center',
+                              overflow: 'hidden',
+                              wordBreak: 'break-all'
+                            }}>
+                              {s.text}
+                            </div>
+                          )}
+
+                          {selectedStickerId === s.id && activeTab === 'sticker' && (
+                            <>
+                              <div className="sticker-delete-btn" onClick={(e) => deleteSticker(s.id, e)}>✕</div>
+                              <div className="sticker-rotate-btn" onMouseDown={(e) => handleRotateScaleMouseDown(e, s)}>⟳</div>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Handwritten Texts Overlay */}
+                    <div
+                      className="stickers-container"
+                      style={{ pointerEvents: activeTab === 'text' ? 'auto' : 'none', zIndex: 18 }}
+                      onClick={() => { setSelectedTextId(null); setSelectedStickerId(null); }}
+                    >
+                      {(activeImage.texts || []).map((t) => (
+                        <div
+                          key={t.id}
+                          id={`text-${t.id}`}
+                          className={`handwritten-text-item ${selectedTextId === t.id ? 'selected' : ''}`}
+                          style={{
+                            left: `${t.x}%`,
+                            top: `${t.y}%`,
+                            transform: `translate(-50%, -50%) rotate(${t.rotation}deg) scale(${t.scale})`,
+                            color: t.color,
+                            fontSize: '20px'
+                          }}
+                          onMouseDown={(e) => handleTextMouseDown(e, t)}
+                        >
+                          {t.content}
+
+                          {selectedTextId === t.id && activeTab === 'text' && (
+                            <>
+                              <div className="text-delete-btn" onClick={(e) => deleteText(t.id, e)}>✕</div>
+                              <div className="text-rotate-btn" onMouseDown={(e) => handleTextRotateScaleMouseDown(e, t)}>⟳</div>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                  </div>
+
+                </div>
+              </div>
+
+              {/* Draw Tab */}
+              {activeTab === 'draw' && (
+                <div>
+                  <div className="brush-controls">
+                    <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>画笔颜色:</span>
+                    {BRUSH_COLORS.map(c => (
+                      <div 
+                        key={c}
+                        className={`color-dot ${brushColor === c ? 'active' : ''}`}
+                        style={{ backgroundColor: c }}
+                        onClick={() => setBrushColor(c)}
+                      />
+                    ))}
+                    <button className="btn btn-secondary" style={{ marginLeft: 'auto', padding: '0.25rem 0.75rem', fontSize: '0.8rem' }} onClick={clearDrawings}>
+                      清空画笔
+                    </button>
+                  </div>
+                  <div style={{ marginTop: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>粗细:</span>
+                    <input 
+                      type="range" 
+                      min="1" 
+                      max="20" 
+                      value={brushWidth} 
+                      onChange={(e) => setBrushWidth(parseInt(e.target.value))}
+                      style={{ flex: 1, accentColor: 'var(--xhs-red)' }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Erase (Inpainting Mask) Tab */}
+              {activeTab === 'erase' && (
+                <div>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+                    使用画笔涂抹覆盖照片中不需要的**行人、杂物或垃圾桶**，然后点击下方按钮一键将其抹去：
+                  </p>
+                  
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', background: 'var(--bg-main)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', marginBottom: '0.75rem' }}>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>涂抹粗细:</span>
+                    <input 
+                      type="range" 
+                      min="10" 
+                      max="50" 
+                      value={eraseWidth} 
+                      onChange={(e) => setEraseWidth(parseInt(e.target.value))}
+                      style={{ flex: 1, accentColor: 'var(--xhs-red)' }}
+                    />
+                    <button className="btn btn-secondary" style={{ padding: '0.25rem 0.75rem', fontSize: '0.8rem' }} onClick={clearEraseMarks}>
+                      清空标记
+                    </button>
+                  </div>
+
+                  <button 
+                    className="btn btn-primary"
+                    style={{ width: '100%', background: 'linear-gradient(135deg, #4f46e5, #818cf8)' }}
+                    onClick={handleAIObjectRemoval}
+                    disabled={!hasEraseMarks}
+                  >
+                    🪄 AI 一键消除涂抹标记区域
+                  </button>
+                </div>
+              )}
+
+              {/* Sticker Tab */}
+              {activeTab === 'sticker' && (
+                <div style={{ marginTop: '0.5rem' }}>
+                  <p style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>添加趣味贴纸 (已进行防人物遮挡设计)：</p>
+                  <div className="sticker-library">
+                    <div className="sticker-option" onClick={() => addSticker('heart')} title="爱心">{STICKER_TEMPLATES.heart}</div>
+                    <div className="sticker-option" onClick={() => addSticker('arrow')} title="箭头">{STICKER_TEMPLATES.arrow}</div>
+                    <div className="sticker-option" onClick={() => addSticker('sparkle')} title="闪烁">{STICKER_TEMPLATES.sparkle}</div>
+                    <div className="sticker-option" onClick={() => addSticker('speech')} title="气泡框">{STICKER_TEMPLATES.speech}</div>
+                    <div className="sticker-option" onClick={() => addSticker('highlight')} title="圈圈">{STICKER_TEMPLATES.highlight}</div>
+                  </div>
+
+                  {selectedStickerId && activeImage.stickers.find(s => s.id === selectedStickerId)?.type === 'speech' && (
+                    <div className="form-group" style={{ marginTop: '1rem' }}>
+                      <label className="form-label">✍️ 修改气泡框文字</label>
+                      <input 
+                        type="text"
+                        maxLength="6"
+                        className="form-control"
+                        placeholder="输入气泡短句"
+                        value={activeImage.stickers.find(s => s.id === selectedStickerId)?.text || ''}
+                        onChange={(e) => updateStickerText(selectedStickerId, e.target.value)}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Handwritten Text Tab */}
+              {activeTab === 'text' && (
+                <div style={{ marginTop: '0.5rem' }}>
+                  <div className="form-group">
+                    <label className="form-label" style={{ fontWeight: 600 }}>✍️ 自定义添加手写文案</label>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <input 
+                        type="text" 
+                        className="form-control" 
+                        placeholder="例如：夏日午后" 
+                        value={customTextContent}
+                        onChange={(e) => setCustomTextContent(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && addHandwrittenText(customTextContent)}
+                      />
+                      <button 
+                        className="btn btn-primary" 
+                        onClick={() => addHandwrittenText(customTextContent)}
+                        disabled={!customTextContent.trim()}
+                      >
+                        添加
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="form-group" style={{ marginTop: '0.5rem' }}>
+                    <label className="form-label">手写字颜色</label>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      {TEXT_COLORS.map(c => (
+                        <div 
+                          key={c}
+                          className={`color-dot ${customTextColor === c ? 'active' : ''}`}
+                          style={{ backgroundColor: c, border: c === '#ffffff' ? '1px solid #ddd' : 'none' }}
+                          onClick={() => {
+                            setCustomTextColor(c);
+                            if (selectedTextId) updateTextColor(selectedTextId, c);
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: '1rem' }}>
+                    <label className="form-label">✨ 常用手写词推荐：</label>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                      {TEXT_SUGGESTIONS.map(word => (
+                        <button 
+                          key={word}
+                          className="ratio-btn" 
+                          style={{ flex: 'none', padding: '0.25rem 0.75rem', borderRadius: '12px' }}
+                          onClick={() => addHandwrittenText(word)}
+                        >
+                          + {word}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {selectedTextId && (
+                    <div className="form-group" style={{ marginTop: '1.25rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
+                      <label className="form-label">📝 编辑选中文字</label>
+                      <input 
+                        type="text"
+                        className="form-control"
+                        value={activeImage.texts?.find(t => t.id === selectedTextId)?.content || ''}
+                        onChange={(e) => updateTextContent(selectedTextId, e.target.value)}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+
+            </div>
+          )}
+
+          {/* 3. Metadata */}
+          {uploadedImages.length > 0 && (
+            <div className="card">
+              <h2 className="card-title">📍 第二步：确认全局属性</h2>
+              <div className="form-group">
+                <label className="form-label">发布日期</label>
+                <input 
+                  type="date" 
+                  className="form-control" 
+                  value={globalMetadata.time} 
+                  onChange={(e) => setGlobalMetadata({ ...globalMetadata, time: e.target.value })}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">显示地点</label>
+                <input 
+                  type="text" 
+                  className="form-control" 
+                  placeholder="可手动填入显示地点" 
+                  value={globalMetadata.location} 
+                  onChange={(e) => setGlobalMetadata({ ...globalMetadata, location: e.target.value })}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* 4. AI Post */}
+          {uploadedImages.length > 0 && (
+            <div className="card">
+              <h2 className="card-title">🤖 第三步：AI 排版与文章生成</h2>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                百炼 AI 将重新分析这 {uploadedImages.length} 张图片，**自动进行防变形物理裁切**，并在空白处排版手写词和贴纸。
+              </p>
+              <button 
+                className="btn btn-primary" 
+                style={{ width: '100%' }}
+                onClick={handleAIGeneration}
+                disabled={isLoading}
+              >
+                ✨ AI 一键智能裁切与文章生成
+              </button>
+
+              {(aiTitle || aiBody) && (
+                <div style={{ marginTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <div className="form-group">
+                    <label className="form-label">海报标题</label>
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      value={aiTitle} 
+                      onChange={(e) => setAiTitle(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">海报正文</label>
+                    <textarea 
+                      className="form-control" 
+                      rows="8" 
+                      value={aiBody} 
+                      onChange={(e) => setAiBody(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+        </section>
+
+        {/* Right Preview Side */}
+        <section className="preview-panel">
+          <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+            <h2 className="card-title" style={{ margin: 0 }}>📊 小红书排版卡片预览</h2>
+            {uploadedImages.length > 0 && (
+              <button className="btn btn-secondary" style={{ padding: '0.4rem 1rem', fontSize: '0.85rem' }} onClick={exportPosterJPG}>
+                💾 导出图片
+              </button>
+            )}
+          </div>
+
+          <div className="poster-container-wrapper">
+            <div id="xiaohongshu-card" className="poster-card" ref={posterRef}>
+              
+              {/* Collage grid (no warp, cover fit on physically cropped images) */}
+              <div className="poster-image-area">
+                {uploadedImages.length > 0 ? (
+                  <div className={`poster-image-grid poster-image-grid-${uploadedImages.length}`}>
+                    {uploadedImages.map((img, idx) => (
+                      <div 
+                        key={img.id}
+                        className={`grid-image-container grid-item-${idx}`}
+                      >
+                        {/* Cropped Base Image - rendered as background cover to fix html2canvas object-fit cover rendering bug */}
+                        <div 
+                          style={{ 
+                            width: '100%', 
+                            height: '100%', 
+                            backgroundImage: `url(${img.croppedSrc})`,
+                            backgroundSize: 'cover',
+                            backgroundPosition: 'center',
+                            backgroundRepeat: 'no-repeat',
+                            display: 'block' 
+                          }}
+                        />
+
+                        {/* Hand drawings overlay */}
+                        {img.drawings && (
+                          <img 
+                            src={img.drawings} 
+                            className="grid-drawing-canvas" 
+                            alt={`Drawings ${idx}`}
+                          />
+                        )}
+
+                        {/* Stickers Overlay */}
+                        <div className="grid-stickers-layer">
+                          {img.stickers.map((s) => (
+                            <div
+                              key={s.id}
+                              style={{
+                                position: 'absolute',
+                                left: `${s.x}%`,
+                                top: `${s.y}%`,
+                                transform: `translate(-50%, -50%) rotate(${s.rotation}deg) scale(${s.scale})`,
+                                width: `${s.width}px`,
+                                height: `${s.height}px`,
+                                transformOrigin: 'center center'
+                              }}
+                            >
+                              {STICKER_TEMPLATES[s.type]}
+                              
+                              {s.type === 'speech' && (
+                                <div style={{
+                                  position: 'absolute',
+                                  top: '25%',
+                                  left: '12%',
+                                  width: '76%',
+                                  height: '40%',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '12px',
+                                  fontWeight: '600',
+                                  color: '#222',
+                                  textAlign: 'center',
+                                  overflow: 'hidden',
+                                  wordBreak: 'break-all'
+                                }}>
+                                  {s.text}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Handwritten Texts Overlay */}
+                        <div className="grid-stickers-layer" style={{ zIndex: 18 }}>
+                          {(img.texts || []).map((t) => (
+                            <div
+                              key={t.id}
+                              style={{
+                                position: 'absolute',
+                                left: `${t.x}%`,
+                                top: `${t.y}%`,
+                                transform: `translate(-50%, -50%) rotate(${t.rotation}deg) scale(${t.scale})`,
+                                color: t.color,
+                                fontFamily: "'Long Cang', 'Zhi Mang Xing', 'Caveat', cursive, sans-serif",
+                                fontSize: '20px',
+                                transformOrigin: 'center center',
+                                whiteSpace: 'nowrap',
+                                fontWeight: '500',
+                                textShadow: `
+                                  1.5px 1.5px 0px rgba(0,0,0,0.8),
+                                  -1.5px -1.5px 0px rgba(0,0,0,0.8),
+                                  1.5px -1.5px 0px rgba(0,0,0,0.8),
+                                  -1.5px 1.5px 0px rgba(0,0,0,0.8),
+                                  0px 1.5px 0px rgba(0,0,0,0.8),
+                                  0px -1.5px 0px rgba(0,0,0,0.8),
+                                  1.5px 0px 0px rgba(0,0,0,0.8),
+                                  -1.5px 0px 0px rgba(0,0,0,0.8)
+                                `
+                              }}
+                            >
+                              {t.content}
+                            </div>
+                          ))}
+                        </div>
+
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ height: '300px', backgroundColor: '#e9ecef', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6c757d', flexDirection: 'column', gap: '0.5rem' }}>
+                    <span>🌅 多图拼图区域</span>
+                  </div>
+                )}
+
+                {/* Location and Date Bar overlay */}
+                {(globalMetadata.location || globalMetadata.time) && (
+                  <div className="poster-meta-bar">
+                    <div className="poster-meta-item">
+                      {globalMetadata.location && `📍 ${globalMetadata.location}`}
+                    </div>
+                    <div className="poster-meta-item">
+                      {globalMetadata.time && `📅 ${globalMetadata.time}`}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Text Area */}
+              <div className="poster-content-area">
+                <h3 className="poster-title">
+                  {aiTitle || '日常碎碎念 ✨'}
+                </h3>
+                <div className="poster-body">
+                  {aiBody || '上传图片并一键生成，AI将自动为您进行智能排版...✍️'}
+                </div>
+                
+                {/* Poster Footer */}
+                <div className="poster-footer">
+                  <div className="poster-author">
+                    <div className="poster-avatar">R</div>
+                    <div className="poster-author-name">RedNote-Life</div>
+                  </div>
+                  <div className="poster-brand-watermark">REDNOTE</div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}
+
+export default App;

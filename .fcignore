@@ -1,0 +1,18 @@
+# Ignore development files when deploying to Aliyun FC
+/node_modules
+/src
+/public
+/client
+.git
+.gitignore
+.fcignore
+*.log
+/server/.env
+/server/node_modules
+# Note: server/node_modules will be installed on Aliyun FC build stage if using build,
+# or we can upload it if we don't ignore it. Usually we ignore server/node_modules
+# and use FC's pre-compilation, or we upload it. Since it's light, we can let FC build it or upload it.
+# Let's ignore it and run npm install during build, or we can upload it if it's small.
+# Actually, not ignoring server/node_modules is safer if they deploy directly without online build.
+# Let's not ignore server/node_modules so it uploads the pre-installed modules, making deployment zero-build.
+# So we only ignore the root /node_modules.
