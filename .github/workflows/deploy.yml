@@ -53,5 +53,21 @@ jobs:
           username: ${{ secrets.ECS_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            # 兼容加载用户环境
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+            
+            # 加载系统常用环境变量
+            export PATH="/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin:$PATH"
+            
             cd /var/www/swpost/server
+            
+            # 确认 pm2 命令存在，若不存在则尝试使用绝对路径或安装
+            if ! command -v pm2 &> /dev/null; then
+              echo "PM2 not found in PATH, trying to install globally..."
+              npm install -g pm2
+            fi
+            
+            # 重新启动应用
             pm2 restart swpost-api || pm2 start index.js --name swpost-api
