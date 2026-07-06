@@ -99,6 +99,50 @@ const cropImagePhysically = (src, cropBox) => {
   });
 };
 
+// Helper: Resize and compress base64 image if it exceeds maxDim or is too large to prevent backend payload issues
+const resizeImageBase64 = (dataUrl, maxDim = 1600, quality = 0.85) => {
+  return new Promise((resolve) => {
+    if (!dataUrl || dataUrl.length < 1500000) {
+      resolve(dataUrl);
+      return;
+    }
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      let width = img.width;
+      let height = img.height;
+      if (width <= maxDim && height <= maxDim && dataUrl.length < 2500000) {
+        resolve(dataUrl);
+        return;
+      }
+      if (width > height) {
+        if (width > maxDim) {
+          height = Math.round((height * maxDim) / width);
+          width = maxDim;
+        }
+      } else {
+        if (height > maxDim) {
+          width = Math.round((width * maxDim) / height);
+          height = maxDim;
+        }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      
+      const compressed = canvas.toDataURL('image/jpeg', quality);
+      console.log(`[Resize] Compressed image from ${img.width}x${img.height} (len: ${dataUrl.length}) to ${width}x${height} (len: ${compressed.length})`);
+      resolve(compressed);
+    };
+    img.onerror = () => {
+      resolve(dataUrl);
+    };
+    img.src = dataUrl;
+  });
+};
+
 // Helper: Compress/downscale original image files to max 1024px before uploading to backend for layout analysis
 const compressImageForAnalysis = (file) => {
   return new Promise((resolve) => {
@@ -1506,13 +1550,16 @@ function App() {
     setErrorMsg('');
 
     try {
+      // 0. Compress the source image first if it's too large to prevent payload size errors
+      const compressedImage = await resizeImageBase64(activeImage.croppedSrc, 1600, 0.85);
+
       // 1. Load the source image to get its actual pixel dimensions
       const sourceImg = new Image();
       sourceImg.crossOrigin = 'anonymous';
       await new Promise((resolve, reject) => {
         sourceImg.onload = resolve;
         sourceImg.onerror = reject;
-        sourceImg.src = activeImage.croppedSrc;
+        sourceImg.src = compressedImage;
       });
       const imgW = sourceImg.naturalWidth;
       const imgH = sourceImg.naturalHeight;
@@ -1563,7 +1610,7 @@ function App() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          image: activeImage.croppedSrc,
+          image: compressedImage,
           mask: maskBase64
         })
       });
@@ -1615,13 +1662,16 @@ function App() {
     setErrorMsg('');
 
     try {
+      // 0. Compress the image first if it's too large to prevent payload size errors
+      const compressedImage = await resizeImageBase64(activeImage.croppedSrc, 1600, 0.85);
+
       const res = await fetch(`${API_BASE}/api/ai/style-transfer`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          image: activeImage.croppedSrc,
+          image: compressedImage,
           style: styleName
         })
       });
