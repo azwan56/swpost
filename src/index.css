@@ -1193,8 +1193,8 @@ body {
 /* Sprocket holes styling */
 .film-sprocket-strip {
   position: absolute !important;
-  left: 14px !important;
-  right: 14px !important;
+  left: 8px !important;
+  right: 8px !important;
   display: flex !important;
   justify-content: space-between !important;
   z-index: 10 !important;
@@ -1211,26 +1211,28 @@ body {
 .film-sprocket-hole {
   width: 12px !important;
   height: 8px !important;
-  background-color: #020202 !important;
+  background-color: #ffffff !important; /* White color representing background paper showing through holes */
   border-radius: 1.5px !important;
-  border: 1px solid #1c1c1c !important;
+  border: none !important;
+  box-shadow: inset 1px 1px 2px rgba(0, 0, 0, 0.5) !important; /* Inner shadow for punched-hole depth */
 }
 
 /* Film markings text (exposures, barcode, brand) */
 .film-marking-text {
   position: absolute !important;
-  left: 18px !important;
-  right: 18px !important;
+  left: 8px !important;
+  right: 8px !important;
   display: flex !important;
   justify-content: space-between !important;
   align-items: center !important;
   font-family: 'Courier New', Courier, monospace !important;
-  font-size: 8.5px !important;
+  font-size: 7.5px !important;
   font-weight: 700 !important;
-  letter-spacing: 1.5px !important;
+  letter-spacing: 1px !important;
   text-transform: uppercase !important;
   z-index: 10 !important;
   user-select: none !important;
+  overflow: hidden !important;
 }
 
 .film-marking-text.top {
@@ -1245,6 +1247,10 @@ body {
 
 .film-marking-text span {
   display: inline-block !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: clip !important;
+  min-width: 0 !important;
 }
 
 .film-barcode-mark {
