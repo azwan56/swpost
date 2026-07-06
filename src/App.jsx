@@ -2219,7 +2219,11 @@ function App() {
                 className="editor-canvas-container" 
                 style={{ overflow: 'visible', margin: '0.5rem 0' }}
               >
-                <div className="annotation-wrapper" style={{ position: 'relative', width: '100%' }}>
+                <div 
+                  className="annotation-wrapper" 
+                  style={{ position: 'relative', width: '100%' }}
+                  onClick={() => { setSelectedStickerId(null); setSelectedTextId(null); setSelectedTagId(null); }}
+                >
                   
                   <div 
                     ref={editorImageContainerRef}
@@ -2282,8 +2286,7 @@ function App() {
                     {/* Stickers Overlay */}
                     <div 
                       className="stickers-container"
-                      style={{ pointerEvents: activeTab === 'sticker' ? 'auto' : 'none' }}
-                      onClick={() => { setSelectedStickerId(null); setSelectedTextId(null); }}
+                      style={{ pointerEvents: 'none', zIndex: 15 }}
                     >
                       {activeImage.stickers.map((s) => (
                         <div
@@ -2295,7 +2298,8 @@ function App() {
                             top: `${s.y}%`,
                             transform: `translate(-50%, -50%) rotate(${s.rotation}deg) scale(${s.scale})`,
                             width: `${s.width}px`,
-                            height: `${s.height}px`
+                            height: `${s.height}px`,
+                            pointerEvents: activeTab === 'sticker' ? 'auto' : 'none'
                           }}
                           onMouseDown={(e) => handleStickerMouseDown(e, s)}
                           onTouchStart={(e) => handleStickerTouchStart(e, s)}
@@ -2336,8 +2340,7 @@ function App() {
                     {/* Handwritten Texts Overlay */}
                     <div
                       className="stickers-container"
-                      style={{ pointerEvents: activeTab === 'text' ? 'auto' : 'none', zIndex: 18 }}
-                      onClick={() => { setSelectedTextId(null); setSelectedStickerId(null); }}
+                      style={{ pointerEvents: 'none', zIndex: 18 }}
                     >
                       {(activeImage.texts || []).map((t) => (
                         <div
@@ -2349,7 +2352,8 @@ function App() {
                             top: `${t.y}%`,
                             transform: `translate(-50%, -50%) rotate(${t.rotation}deg) scale(${t.scale})`,
                             color: t.color,
-                            fontSize: '20px'
+                            fontSize: '20px',
+                            pointerEvents: activeTab === 'text' ? 'auto' : 'none'
                           }}
                           onMouseDown={(e) => handleTextMouseDown(e, t)}
                           onTouchStart={(e) => handleTextTouchStart(e, t)}
@@ -2369,8 +2373,7 @@ function App() {
                     {/* Smart Dot Tags Overlay */}
                     <div
                       className="stickers-container"
-                      style={{ pointerEvents: activeTab === 'sticker' ? 'auto' : 'none', zIndex: 19 }}
-                      onClick={() => { setSelectedTextId(null); setSelectedStickerId(null); setSelectedTagId(null); }}
+                      style={{ pointerEvents: 'none', zIndex: 19 }}
                     >
                       {(activeImage.tags || []).map((tag) => (
                         <div
@@ -2378,7 +2381,8 @@ function App() {
                           className={`xhs-tag-container tag-direction-${tag.direction} ${selectedTagId === tag.id ? 'selected' : ''}`}
                           style={{
                             left: `${tag.x}%`,
-                            top: `${tag.y}%`
+                            top: `${tag.y}%`,
+                            pointerEvents: activeTab === 'sticker' ? 'auto' : 'none'
                           }}
                           onMouseDown={(e) => handleTagMouseDown(e, tag)}
                           onTouchStart={(e) => handleTagTouchStart(e, tag)}
