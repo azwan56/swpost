@@ -1037,4 +1037,188 @@ body {
   }
 }
 
+/* ==========================================================================
+   EXIF Camera Info Frames & Watermarks
+   ========================================================================== */
+.poster-image-area.frame-leica-white {
+  background-color: #ffffff !important;
+  padding: 16px 16px 54px 16px !important;
+  position: relative !important;
+  box-sizing: border-box !important;
+}
 
+.poster-image-area.frame-leica-black {
+  background-color: #0b0b0b !important;
+  padding: 16px 16px 54px 16px !important;
+  position: relative !important;
+  box-sizing: border-box !important;
+}
+
+.poster-image-area.frame-hasselblad {
+  background-color: #121212 !important;
+  padding: 18px 18px 58px 18px !important;
+  position: relative !important;
+  box-sizing: border-box !important;
+}
+
+.poster-image-area.frame-polaroid {
+  background-color: #fcfbf9 !important;
+  padding: 14px 14px 62px 14px !important;
+  position: relative !important;
+  box-sizing: border-box !important;
+  box-shadow: inset 0 0 10px rgba(0,0,0,0.05) !important;
+}
+
+/* Exif Info Bar */
+.exif-frame-bar {
+  position: absolute !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 50px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding: 0 20px !important;
+  box-sizing: border-box !important;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif !important;
+  font-size: 10px !important;
+  font-weight: 500 !important;
+  user-select: none !important;
+  line-height: 1.2 !important;
+  z-index: 15 !important;
+}
+
+.frame-leica-white .exif-frame-bar {
+  color: #333333 !important;
+  background-color: #ffffff !important;
+}
+
+.frame-leica-black .exif-frame-bar {
+  color: #dddddd !important;
+  background-color: #0b0b0b !important;
+}
+
+.frame-hasselblad .exif-frame-bar {
+  color: #e5e5e5 !important;
+  background-color: #121212 !important;
+  border-top: 1px solid #222222 !important;
+}
+
+.frame-polaroid .exif-frame-bar {
+  color: #4a4a4a !important;
+  background-color: #fcfbf9 !important;
+  font-family: 'Long Cang', 'Zhi Mang Xing', cursive, sans-serif !important;
+  font-size: 1.15rem !important;
+  justify-content: center !important;
+  text-align: center !important;
+}
+
+/* Leica Dot */
+.leica-red-dot {
+  width: 22px !important;
+  height: 22px !important;
+  background-color: #e21a22 !important;
+  border-radius: 50% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: #ffffff !important;
+  font-size: 6.5px !important;
+  font-weight: 900 !important;
+  font-family: "Arial Black", Gadget, sans-serif !important;
+  letter-spacing: -0.5px !important;
+  box-shadow: 0 1px 3px rgba(226,26,34,0.4) !important;
+  margin: 0 auto !important;
+}
+
+.hasselblad-logo-text {
+  font-weight: 800 !important;
+  font-size: 9px !important;
+  letter-spacing: 2px !important;
+  color: #ffffff !important;
+  text-transform: uppercase !important;
+}
+
+.exif-left-params {
+  font-size: 10px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.5px !important;
+  text-transform: uppercase !important;
+  display: flex !important;
+  gap: 8px !important;
+}
+
+.exif-right-model {
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.5px !important;
+  text-align: right !important;
+}
+
+.exif-date-sub {
+  font-size: 8px !important;
+  font-weight: 400 !important;
+  color: #888888 !important;
+  display: block !important;
+}
+
+/* ==========================================================================
+   Movie Split-Screen & Cinematic Subtitles Layout
+   ========================================================================== */
+.poster-image-area.frame-movie-split {
+  padding: 0 !important;
+  background-color: #000000 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 3px !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+.poster-image-area.frame-movie-split .poster-image-grid {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 3px !important;
+  width: 100% !important;
+  height: auto !important;
+}
+
+.poster-image-area.frame-movie-split .grid-image-container {
+  aspect-ratio: 2.35 / 1 !important; /* Cinematic widescreen aspect ratio */
+  width: 100% !important;
+  height: auto !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+/* Subtitle overlay placement */
+.movie-subtitle-overlay {
+  position: absolute !important;
+  bottom: 8px !important;
+  left: 0 !important;
+  right: 0 !important;
+  text-align: center !important;
+  padding: 4px 10px !important;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.95), -1px -1px 3px rgba(0, 0, 0, 0.95) !important;
+  z-index: 25 !important;
+  pointer-events: none !important;
+}
+
+.movie-subtitle-cn {
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  letter-spacing: 1px !important;
+  margin-bottom: 2px !important;
+  color: #ffffff !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+}
+
+.movie-subtitle-en {
+  font-size: 8px !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.8px !important;
+  opacity: 0.9 !important;
+  color: #dddddd !important;
+  font-family: 'Courier New', Courier, monospace, sans-serif !important;
+}

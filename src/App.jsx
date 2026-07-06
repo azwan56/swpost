@@ -134,6 +134,32 @@ function App() {
   const [globalMetadata, setGlobalMetadata] = useState({ time: '', location: '' });
   const [activeTab, setActiveTab] = useState('pan'); // 'pan', 'sticker', 'text', 'erase'
   
+  // Camera Frame & EXIF parameters states
+  const [selectedFrame, setSelectedFrame] = useState('none'); // 'none', 'leica-white', 'leica-black', 'hasselblad', 'polaroid'
+  const [exifParams, setExifParams] = useState({
+    make: 'FUJIFILM',
+    model: 'X-T5',
+    fNumber: 'f/2.8',
+    iso: 'ISO 200',
+    focal: '35mm',
+    shutter: '1/250s',
+    date: '2026.07.06'
+  });
+  
+  // Cinematic Subtitle States
+  const [movieSubtitleCn, setMovieSubtitleCn] = useState('“生活没有标准答案，每个人都在走自己的路。”');
+  const [movieSubtitleEn, setMovieSubtitleEn] = useState('There are no standard answers in life, everyone is on their own way.');
+  
+  // Movie Subtitle AI States
+  const [isGeneratingSubtitle, setIsGeneratingSubtitle] = useState(false);
+  const [movieTheme, setMovieTheme] = useState('生活');
+  const [isGeneratingTags, setIsGeneratingTags] = useState(false);
+  
+  // AI Copywriting States
+  const [generatedCopyOptions, setGeneratedCopyOptions] = useState([]);
+  const [activeCopyOptionIdx, setActiveCopyOptionIdx] = useState(0);
+  const [isGeneratingCopy, setIsGeneratingCopy] = useState(false);
+  
   // Drawing Canvas States
   const [isDrawing, setIsDrawing] = useState(false);
   const [brushColor, setBrushColor] = useState('#ff2442');
@@ -147,10 +173,12 @@ function App() {
   // Active selection states
   const [selectedStickerId, setSelectedStickerId] = useState(null);
   const [selectedTextId, setSelectedTextId] = useState(null);
+  const [selectedTagId, setSelectedTagId] = useState(null);
   
-  // Custom Handwritten Text Inputs
+  // Custom Inputs & Overlays
   const [customTextContent, setCustomTextContent] = useState('');
   const [customTextColor, setCustomTextColor] = useState('#ffffff');
+  const [customTagText, setCustomTagText] = useState('');
   
   // AI Generation & Processing Loading States
   const [aiTitle, setAiTitle] = useState('');
@@ -172,6 +200,7 @@ function App() {
   const stickerRotateScaleRef = useRef(null);
   const textDragRef = useRef(null);
   const textRotateScaleRef = useRef(null);
+  const tagDragRef = useRef(null);
   
   // Image Panning / Framing Adjust States & Refs
   const editorImageContainerRef = useRef(null);
@@ -409,6 +438,15 @@ function App() {
       let location = '';
       let lat = null;
       let lon = null;
+      let exif = {
+        make: '',
+        model: '',
+        fNumber: '',
+        iso: '',
+        focal: '',
+        shutter: '',
+        date: ''
+      };
 
       try {
         const tags = await ExifReader.load(file);
@@ -416,10 +454,11 @@ function App() {
           const rawDate = tags.DateTimeOriginal.description;
           const dateParts = rawDate.split(' ')[0].split(':');
           if (dateParts.length === 3) {
-            time = `${dateParts[0]}-${dateParts[1]}-${dateParts[2]}`;
+            time = `${dateParts[0]}.${dateParts[1]}.${dateParts[2]}`;
           } else {
             time = rawDate;
           }
+          exif.date = time;
         }
         
         if (tags.GPSLatitude && tags.GPSLongitude) {
@@ -430,6 +469,39 @@ function App() {
             const lonRef = tags.GPSLongitudeRef?.description || 'E';
             lat = latRef.includes('S') ? -Math.abs(latNum) : Math.abs(latNum);
             lon = lonRef.includes('W') ? -Math.abs(lonNum) : Math.abs(lonNum);
+          }
+        }
+
+        // Camera EXIF data
+        exif.make = tags.Make?.description || '';
+        exif.model = tags.Model?.description || '';
+        
+        if (tags.FNumber?.value) {
+          exif.fNumber = `f/${parseFloat(tags.FNumber.value).toFixed(1)}`;
+        } else if (tags.FNumber?.description) {
+          exif.fNumber = tags.FNumber.description.startsWith('f/') ? tags.FNumber.description : `f/${tags.FNumber.description}`;
+        }
+
+        const rawIso = tags.ISOSpeedRatings?.value || tags.ISOSpeedRatings?.description;
+        if (rawIso) {
+          exif.iso = `ISO ${rawIso}`;
+        }
+
+        const rawFocal = tags.FocalLength?.value || tags.FocalLength?.description;
+        if (rawFocal) {
+          const numFocal = parseFloat(rawFocal);
+          exif.focal = !isNaN(numFocal) ? `${Math.round(numFocal)}mm` : rawFocal;
+        }
+
+        const rawShutter = tags.ExposureTime?.description;
+        if (rawShutter) {
+          exif.shutter = rawShutter;
+        } else if (tags.ExposureTime?.value) {
+          const s = parseFloat(tags.ExposureTime.value);
+          if (s >= 1) {
+            exif.shutter = `${s.toFixed(1)}s`;
+          } else {
+            exif.shutter = `1/${Math.round(1 / s)}s`;
           }
         }
       } catch (err) {
@@ -445,7 +517,8 @@ function App() {
         cropBox: { ymin: 0, xmin: 0, ymax: 100, xmax: 100 },
         stickers: [],
         texts: [],
-        drawings: null
+        drawings: null,
+        exif
       });
     }
 
@@ -493,6 +566,24 @@ function App() {
       setActiveIdx(Math.max(0, filtered.length - 1));
     }
   };
+
+  // Synchronize EXIF parameters when active image changes
+  useEffect(() => {
+    if (uploadedImages.length > 0 && uploadedImages[activeIdx]) {
+      const activeImg = uploadedImages[activeIdx];
+      if (activeImg.exif) {
+        setExifParams({
+          make: activeImg.exif.make || 'FUJIFILM',
+          model: activeImg.exif.model || 'X-T5',
+          fNumber: activeImg.exif.fNumber || 'f/2.8',
+          iso: activeImg.exif.iso || 'ISO 200',
+          focal: activeImg.exif.focal || '35mm',
+          shutter: activeImg.exif.shutter || '1/250s',
+          date: activeImg.exif.date || new Date().toLocaleDateString('zh-CN').replace(/\//g, '.')
+        });
+      }
+    }
+  }, [activeIdx, uploadedImages]);
 
   // 2. Local drawing & erase canvases initialization
   useEffect(() => {
@@ -836,6 +927,84 @@ function App() {
     setCustomTextContent('');
   };
 
+  // Tag mouse handlers
+  const handleTagMouseDown = (e, tagObj) => {
+    if (activeTab !== 'sticker') return;
+    e.stopPropagation();
+    setSelectedTagId(tagObj.id);
+    setSelectedStickerId(null);
+    setSelectedTextId(null);
+
+    tagDragRef.current = {
+      id: tagObj.id,
+      startX: e.clientX,
+      startY: e.clientY,
+      startLeft: tagObj.x,
+      startTop: tagObj.y
+    };
+  };
+
+  const addDotTag = (text = '今日穿搭 ✨') => {
+    if (uploadedImages.length === 0 || !activeImage) return;
+    const newTag = {
+      id: 'tag-' + Date.now(),
+      x: 50,
+      y: 50,
+      text: text,
+      direction: 'right'
+    };
+    setUploadedImages(prev => prev.map((img, idx) => {
+      if (idx === activeIdx) {
+        return {
+          ...img,
+          tags: [...(img.tags || []), newTag]
+        };
+      }
+      return img;
+    }));
+    setSelectedTagId(newTag.id);
+    setCustomTagText('');
+  };
+
+  const deleteDotTag = (tagId, e) => {
+    if (e) e.stopPropagation();
+    setUploadedImages(prev => prev.map((img, idx) => {
+      if (idx === activeIdx) {
+        return {
+          ...img,
+          tags: (img.tags || []).filter(t => t.id !== tagId)
+        };
+      }
+      return img;
+    }));
+    if (selectedTagId === tagId) setSelectedTagId(null);
+  };
+
+  const toggleTagDirection = (tagId, e) => {
+    if (e) e.stopPropagation();
+    setUploadedImages(prev => prev.map((img, idx) => {
+      if (idx === activeIdx) {
+        return {
+          ...img,
+          tags: (img.tags || []).map(t => t.id === tagId ? { ...t, direction: t.direction === 'right' ? 'left' : 'right' } : t)
+        };
+      }
+      return img;
+    }));
+  };
+
+  const updateTagText = (tagId, newText) => {
+    setUploadedImages(prev => prev.map((img, idx) => {
+      if (idx === activeIdx) {
+        return {
+          ...img,
+          tags: (img.tags || []).map(t => t.id === tagId ? { ...t, text: newText } : t)
+        };
+      }
+      return img;
+    }));
+  };
+
   // Sticker mouse handlers
   const handleStickerMouseDown = (e, sticker) => {
     if (activeTab !== 'sticker') return;
@@ -1010,6 +1179,24 @@ function App() {
           return img;
         }));
       }
+
+      if (tagDragRef.current) {
+        const { id, startX, startY, startLeft, startTop } = tagDragRef.current;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        const px = (dx / cRect.width) * 100;
+        const py = (dy / cRect.height) * 100;
+
+        setUploadedImages(prev => prev.map((img, idx) => {
+          if (idx === activeIdx) {
+            return {
+              ...img,
+              tags: (img.tags || []).map(t => t.id === id ? { ...t, x: Math.max(0, Math.min(100, startLeft + px)), y: Math.max(0, Math.min(100, startTop + py)) } : t)
+            };
+          }
+          return img;
+        }));
+      }
     };
 
     const handleMouseUp = () => {
@@ -1017,6 +1204,7 @@ function App() {
       stickerRotateScaleRef.current = null;
       textDragRef.current = null;
       textRotateScaleRef.current = null;
+      tagDragRef.current = null;
     };
 
     window.addEventListener('mousemove', handleMouseMove);
@@ -1296,16 +1484,60 @@ function App() {
     }
   };
 
-  // 8. AI Image Tool: Ghibli Cartoon Style
-  const handleAIGhibliCartoon = async () => {
+  // 8. AI Image Tool: Style Transfer (Ghibli, Claymation, Sketch)
+  const handleAIStyleTransfer = async (styleName) => {
     if (uploadedImages.length === 0 || !activeImage) return;
     
     setIsLoading(true);
-    setAiOperationName('一键吉卜力卡通化');
+    const styleLabel = styleName === 'clay' ? '泥塑黏土化' : styleName === 'sketch' ? '铅笔素描化' : '吉卜力卡通化';
+    setAiOperationName(styleLabel);
     setErrorMsg('');
 
     try {
       const res = await fetch(`${API_BASE}/api/ai/style-transfer`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          image: activeImage.croppedSrc,
+          style: styleName
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || '风格化重绘失败');
+      }
+
+      const result = await res.json();
+      
+      // Update croppedSrc with the style-transferred version
+      setUploadedImages(prev => prev.map((img, idx) => {
+        if (idx === activeIdx) {
+          return { ...img, croppedSrc: result.image, isAIEdited: true };
+        }
+        return img;
+      }));
+
+    } catch (err) {
+      console.error(err);
+      setErrorMsg(err.message || `AI 风格化（${styleLabel}）失败，请确保接口正常配置或可用。`);
+    } finally {
+      setIsLoading(false);
+      setAiOperationName('');
+    }
+  };
+
+  // AI Copywriting Generator (vision-based)
+  const handleGenerateAICopy = async () => {
+    if (uploadedImages.length === 0 || !activeImage) return;
+
+    setIsGeneratingCopy(true);
+    setErrorMsg('');
+
+    try {
+      const res = await fetch(`${API_BASE}/api/ai/generate-copy`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -1317,25 +1549,122 @@ function App() {
 
       if (!res.ok) {
         const errData = await res.json();
-        throw new Error(errData.error || '动漫风格化失败');
+        throw new Error(errData.error || '文案生成失败');
       }
 
       const result = await res.json();
-      
-      // Update croppedSrc with the cartoonized version
-      setUploadedImages(prev => prev.map((img, idx) => {
-        if (idx === activeIdx) {
-          return { ...img, croppedSrc: result.image, isAIEdited: true };
-        }
-        return img;
-      }));
-
+      if (result.options && result.options.length > 0) {
+        setGeneratedCopyOptions(result.options);
+        setActiveCopyOptionIdx(0);
+        
+        // Auto apply the first option to the poster text areas
+        setAiTitle(result.options[0].title);
+        setAiBody(`${result.options[0].body}\n\n${result.options[0].tags}`);
+      } else {
+        throw new Error('未返回有效的文案选项');
+      }
     } catch (err) {
-      console.error(err);
-      setErrorMsg(err.message || 'AI 卡通化失败，请检查通义万相 Cosplay 接口额度或可用性。');
+      console.error('AICopy error:', err);
+      setErrorMsg(err.message || 'AI 文案生成失败，请检查火山引擎 Vision 接口可用性。');
     } finally {
-      setIsLoading(false);
-      setAiOperationName('');
+      setIsGeneratingCopy(false);
+    }
+  };
+
+  const applyCopyOption = (idx) => {
+    if (!generatedCopyOptions[idx]) return;
+    setActiveCopyOptionIdx(idx);
+    const opt = generatedCopyOptions[idx];
+    setAiTitle(opt.title);
+    setAiBody(`${opt.body}\n\n${opt.tags}`);
+  };
+
+  // AI Movie Subtitle Generator
+  const handleGenerateMovieSubtitle = async (themeWord) => {
+    setIsGeneratingSubtitle(true);
+    setErrorMsg('');
+
+    try {
+      const res = await fetch(`${API_BASE}/api/ai/generate-subtitles`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          theme: themeWord || movieTheme
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || '台词生成失败');
+      }
+
+      const result = await res.json();
+      if (result.cn && result.en) {
+        setMovieSubtitleCn(result.cn);
+        setMovieSubtitleEn(result.en);
+      } else {
+        throw new Error('未返回有效的双语台词');
+      }
+    } catch (err) {
+      console.error('Subtitle AI error:', err);
+      setErrorMsg(err.message || 'AI 台词生成失败，请检查火山引擎 DeepSeek 接口可用性。');
+    } finally {
+      setIsGeneratingSubtitle(false);
+    }
+  };
+
+  // AI Dot Tags Recommender
+  const handleRecommendDotTags = async () => {
+    if (uploadedImages.length === 0 || !activeImage) return;
+
+    setIsGeneratingTags(true);
+    setErrorMsg('');
+
+    try {
+      const res = await fetch(`${API_BASE}/api/ai/recommend-tags`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          image: activeImage.croppedSrc
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || '推荐标签失败');
+      }
+
+      const result = await res.json();
+      if (result.tags && result.tags.length > 0) {
+        setUploadedImages(prev => prev.map((img, idx) => {
+          if (idx === activeIdx) {
+            const currentTags = img.tags || [];
+            const mappedNewTags = result.tags.map((t, tIdx) => ({
+              id: 'tag-ai-' + Date.now() + '-' + tIdx,
+              x: t.x || 50,
+              y: t.y || 50,
+              text: t.text || '新标签',
+              direction: t.direction || 'right'
+            }));
+            return {
+              ...img,
+              tags: [...currentTags, ...mappedNewTags]
+            };
+          }
+          return img;
+        }));
+      } else {
+        throw new Error('未返回有效的推荐标签');
+      }
+    } catch (err) {
+      console.error('RecommendTags AI error:', err);
+      setErrorMsg(err.message || 'AI 标签推荐失败，请检查火山引擎 Vision 接口可用性。');
+    } finally {
+      setIsGeneratingTags(false);
     }
   };
 
@@ -1489,26 +1818,42 @@ function App() {
                 🪄 AI 智能修图魔法
               </h2>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.5rem', marginBottom: '1rem' }}>
-                对选中的图 {activeIdx + 1} 进行 AI 消除或动漫艺术化处理：
+                对选中的图 {activeIdx + 1} 进行 AI 艺术化风格重绘或消除杂物：
               </p>
-              <div className="editor-actions-row" style={{ display: 'flex', gap: '0.75rem' }}>
+              
+              {/* Style options */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', marginBottom: '0.75rem' }}>
                 <button 
                   className="btn btn-primary" 
-                  style={{ flex: 1, padding: '0.75rem 0.5rem', fontSize: '0.9rem', background: 'linear-gradient(135deg, #4f46e5, #6366f1)', boxShadow: '0 4px 12px rgba(79, 70, 229, 0.15)' }}
-                  onClick={handleAIGhibliCartoon}
+                  style={{ padding: '0.6rem 0.25rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #4f46e5, #6366f1)', border: 'none' }}
+                  onClick={() => handleAIStyleTransfer('cartoon')}
                 >
-                  🎨 一键吉卜力动漫化
+                  🎨 治愈吉卜力
                 </button>
                 <button 
-                  className={`btn ${activeTab === 'erase' ? 'btn-primary' : 'btn-secondary'}`}
-                  style={{ flex: 1, padding: '0.75rem 0.5rem', fontSize: '0.9rem', borderColor: '#4f46e5', color: activeTab === 'erase' ? 'white' : '#4f46e5', fontWeight: 600 }}
-                  onClick={() => {
-                    setActiveTab('erase');
-                  }}
+                  className="btn btn-primary" 
+                  style={{ padding: '0.6rem 0.25rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #ec4899, #d946ef)', border: 'none' }}
+                  onClick={() => handleAIStyleTransfer('clay')}
                 >
-                  🪄 涂抹消除路人/杂物
+                  🧸 软萌泥塑风
+                </button>
+                <button 
+                  className="btn btn-primary" 
+                  style={{ padding: '0.6rem 0.25rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #6b7280, #374151)', border: 'none' }}
+                  onClick={() => handleAIStyleTransfer('sketch')}
+                >
+                  ✏️ 铅笔素描风
                 </button>
               </div>
+
+              {/* Erase button */}
+              <button 
+                className={`btn ${activeTab === 'erase' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ width: '100%', padding: '0.6rem 0.5rem', fontSize: '0.85rem', borderColor: '#4f46e5', color: activeTab === 'erase' ? 'white' : '#4f46e5', fontWeight: 600 }}
+                onClick={() => setActiveTab('erase')}
+              >
+                🪄 开启涂抹消除路人/杂物模式
+              </button>
             </div>
           )}
 
@@ -1521,6 +1866,12 @@ function App() {
                   onClick={handleEnterPanTab}
                 >
                   🔍 位置调整
+                </button>
+                <button 
+                  className={`canvas-tab-btn ${activeTab === 'frame' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('frame')}
+                >
+                  📷 经典画框
                 </button>
                 <button 
                   className={`canvas-tab-btn ${activeTab === 'erase' ? 'active' : ''}`}
@@ -1539,6 +1890,12 @@ function App() {
                   onClick={() => setActiveTab('text')}
                 >
                   ✍️ 手写文案
+                </button>
+                <button 
+                  className={`canvas-tab-btn ${activeTab === 'ai-copy' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('ai-copy')}
+                >
+                  🤖 AI文案
                 </button>
               </div>
 
@@ -1692,6 +2049,49 @@ function App() {
                       ))}
                     </div>
 
+                    {/* Smart Dot Tags Overlay */}
+                    <div
+                      className="stickers-container"
+                      style={{ pointerEvents: activeTab === 'sticker' ? 'auto' : 'none', zIndex: 19 }}
+                      onClick={() => { setSelectedTextId(null); setSelectedStickerId(null); setSelectedTagId(null); }}
+                    >
+                      {(activeImage.tags || []).map((tag) => (
+                        <div
+                          key={tag.id}
+                          className={`xhs-tag-container tag-direction-${tag.direction} ${selectedTagId === tag.id ? 'selected' : ''}`}
+                          style={{
+                            left: `${tag.x}%`,
+                            top: `${tag.y}%`
+                          }}
+                          onMouseDown={(e) => handleTagMouseDown(e, tag)}
+                          title="拖动位置，双击切换指向"
+                          onDoubleClick={(e) => toggleTagDirection(tag.id, e)}
+                        >
+                          {tag.direction === 'left' ? (
+                            <>
+                              <div className="xhs-tag-label">{tag.text}</div>
+                              <div className="xhs-tag-dot"><div className="xhs-tag-dot-pulse"></div></div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="xhs-tag-dot"><div className="xhs-tag-dot-pulse"></div></div>
+                              <div className="xhs-tag-label">{tag.text}</div>
+                            </>
+                          )}
+
+                          {selectedTagId === tag.id && activeTab === 'sticker' && (
+                            <div 
+                              className="sticker-delete-btn" 
+                              style={{ top: '-15px', right: '-15px' }}
+                              onClick={(e) => deleteDotTag(tag.id, e)}
+                            >
+                              ✕
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
                   </div>
 
                 </div>
@@ -1756,9 +2156,9 @@ function App() {
                     <button 
                       className="btn btn-secondary"
                       style={{ flex: 1 }}
-                      onClick={() => setActiveTab('draw')}
+                      onClick={() => { setPanOffset({ x: 0, y: 0 }); setPanZoom(1); }}
                     >
-                      取消
+                      重置位置
                     </button>
                     <button 
                       className="btn btn-primary"
@@ -1768,6 +2168,281 @@ function App() {
                       💾 确认裁切并保存位置
                     </button>
                   </div>
+                </div>
+              )}
+
+              {/* Frame Tab (Camera Borders) */}
+              {activeTab === 'frame' && (
+                <div>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+                    选择一款高质感相机 EXIF 水印边框，照片参数支持手动修改：
+                  </p>
+                  
+                  {/* Select Frame Type */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.4rem', marginBottom: '1rem' }}>
+                    {[
+                      { id: 'none', name: '🚫 无边框' },
+                      { id: 'leica-white', name: '📸 徕卡白' },
+                      { id: 'leica-black', name: '📸 徕卡黑' },
+                      { id: 'hasselblad', name: '🌌 哈苏黑' },
+                      { id: 'polaroid', name: '🎞️ 宝丽来' },
+                      { id: 'movie-split', name: '🎞️ 电影分屏' }
+                    ].map(f => (
+                      <button
+                        key={f.id}
+                        className={`btn ${selectedFrame === f.id ? 'btn-primary' : 'btn-secondary'}`}
+                        style={{ padding: '0.4rem 0.25rem', fontSize: '0.75rem', whiteSpace: 'nowrap' }}
+                        onClick={() => setSelectedFrame(f.id)}
+                      >
+                        {f.name}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Manual EXIF parameters editing */}
+                  {selectedFrame !== 'none' && selectedFrame !== 'movie-split' && (
+                    <div style={{ background: 'var(--bg-main)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>🏷️ 编辑相机参数：</span>
+                      
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                        <div>
+                          <label className="form-label" style={{ fontSize: '0.75rem' }}>相机品牌</label>
+                          <input 
+                            type="text" 
+                            className="form-control" 
+                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+                            value={exifParams.make}
+                            onChange={(e) => setExifParams(prev => ({ ...prev, make: e.target.value }))}
+                          />
+                        </div>
+                        <div>
+                          <label className="form-label" style={{ fontSize: '0.75rem' }}>相机型号</label>
+                          <input 
+                            type="text" 
+                            className="form-control" 
+                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+                            value={exifParams.model}
+                            onChange={(e) => setExifParams(prev => ({ ...prev, model: e.target.value }))}
+                          />
+                        </div>
+                      </div>
+
+                      {selectedFrame !== 'polaroid' && (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '0.4rem' }}>
+                          <div>
+                            <label className="form-label" style={{ fontSize: '0.7rem' }}>焦距</label>
+                            <input 
+                              type="text" 
+                              className="form-control" 
+                              style={{ padding: '0.25rem 0.25rem', fontSize: '0.75rem' }}
+                              value={exifParams.focal}
+                              onChange={(e) => setExifParams(prev => ({ ...prev, focal: e.target.value }))}
+                            />
+                          </div>
+                          <div>
+                            <label className="form-label" style={{ fontSize: '0.7rem' }}>光圈</label>
+                            <input 
+                              type="text" 
+                              className="form-control" 
+                              style={{ padding: '0.25rem 0.25rem', fontSize: '0.75rem' }}
+                              value={exifParams.fNumber}
+                              onChange={(e) => setExifParams(prev => ({ ...prev, fNumber: e.target.value }))}
+                            />
+                          </div>
+                          <div>
+                            <label className="form-label" style={{ fontSize: '0.7rem' }}>快门</label>
+                            <input 
+                              type="text" 
+                              className="form-control" 
+                              style={{ padding: '0.25rem 0.25rem', fontSize: '0.75rem' }}
+                              value={exifParams.shutter}
+                              onChange={(e) => setExifParams(prev => ({ ...prev, shutter: e.target.value }))}
+                            />
+                          </div>
+                          <div>
+                            <label className="form-label" style={{ fontSize: '0.7rem' }}>ISO</label>
+                            <input 
+                              type="text" 
+                              className="form-control" 
+                              style={{ padding: '0.25rem 0.25rem', fontSize: '0.75rem' }}
+                              value={exifParams.iso}
+                              onChange={(e) => setExifParams(prev => ({ ...prev, iso: e.target.value }))}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      <div>
+                        <label className="form-label" style={{ fontSize: '0.75rem' }}>拍摄日期/文字说明</label>
+                        <input 
+                          type="text" 
+                          className="form-control" 
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+                          value={exifParams.date}
+                          onChange={(e) => setExifParams(prev => ({ ...prev, date: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Movie Subtitles editing panel */}
+                  {selectedFrame === 'movie-split' && (
+                    <div style={{ background: 'var(--bg-main)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>🎞️ 编辑双语电影字幕：</span>
+                      
+                      <div>
+                        <label className="form-label" style={{ fontSize: '0.75rem' }}>中文台词</label>
+                        <input 
+                          type="text" 
+                          className="form-control" 
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+                          value={movieSubtitleCn}
+                          onChange={(e) => setMovieSubtitleCn(e.target.value)}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="form-label" style={{ fontSize: '0.75rem' }}>英文台词 (English Subtitle)</label>
+                        <input 
+                          type="text" 
+                          className="form-control" 
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+                          value={movieSubtitleEn}
+                          onChange={(e) => setMovieSubtitleEn(e.target.value)}
+                        />
+                      </div>
+
+                      {/* AI Subtitle Generator Section */}
+                      <div style={{ borderTop: '1px dotted var(--border-color)', paddingTop: '0.5rem', marginTop: '0.25rem' }}>
+                        <label className="form-label" style={{ fontSize: '0.75rem' }}>🤖 AI 电影台词灵感生成</label>
+                        <div style={{ display: 'flex', gap: '0.25rem', marginBottom: '0.5rem' }}>
+                          <input 
+                            type="text" 
+                            className="form-control" 
+                            placeholder="台词主题，如: 青春、遗憾、重逢" 
+                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', flex: 1 }}
+                            value={movieTheme}
+                            onChange={(e) => setMovieTheme(e.target.value)}
+                          />
+                          <button
+                            className="btn btn-primary"
+                            style={{ padding: '0.25rem 0.75rem', fontSize: '0.8rem', whiteSpace: 'nowrap' }}
+                            onClick={() => handleGenerateMovieSubtitle()}
+                            disabled={isGeneratingSubtitle}
+                          >
+                            {isGeneratingSubtitle ? '生成中...' : 'AI 生成'}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Preset quotes buttons */}
+                      <div style={{ borderTop: '1px dotted var(--border-color)', paddingTop: '0.5rem' }}>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>💡 经典预设台词：</span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.25rem' }}>
+                          {[
+                            {
+                              label: '🌅 关于人生道路',
+                              cn: '“生活没有标准答案，每个人都在走自己的路。”',
+                              en: 'There are no standard answers in life, everyone is on their own way.'
+                            },
+                            {
+                              label: '✨ 关于不期而遇',
+                              cn: '“这世上所有的不期而遇，都是努力过后的惊喜。”',
+                              en: 'All unexpected encounters in this world are surprises after hard work.'
+                            },
+                            {
+                              label: '🎬 关于主角配角',
+                              cn: '“人生就像一部电影，我们都是自己故事里的主角。”',
+                              en: 'Life is like a movie, we are all the protagonists of our own stories.'
+                            }
+                          ].map((q, idx) => (
+                            <button
+                              key={idx}
+                              className="btn btn-secondary"
+                              style={{ textAlign: 'left', padding: '0.3rem 0.5rem', fontSize: '0.7rem', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                              onClick={() => {
+                                setMovieSubtitleCn(q.cn);
+                                setMovieSubtitleEn(q.en);
+                              }}
+                            >
+                              {q.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* AI Copywriting Panel */}
+              {activeTab === 'ai-copy' && (
+                <div>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+                    通过 Doubao 视觉大模型识别当前选中的图片，一键生成 3 种爆款小红书文案风格：
+                  </p>
+                  
+                  <button
+                    className="btn btn-primary"
+                    style={{ width: '100%', marginBottom: '1rem', background: 'linear-gradient(135deg, #6366f1, #4f46e5)' }}
+                    onClick={handleGenerateAICopy}
+                    disabled={isGeneratingCopy}
+                  >
+                    {isGeneratingCopy ? '🤖 正在分析图片并撰写文案...' : '🚀 一键智能生成文案 (3款)'}
+                  </button>
+
+                  {generatedCopyOptions.length > 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                      {/* Copy options selector tabs */}
+                      <div style={{ display: 'flex', gap: '0.25rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
+                        {generatedCopyOptions.map((opt, idx) => (
+                          <button
+                            key={idx}
+                            className={`btn ${activeCopyOptionIdx === idx ? 'btn-primary' : 'btn-secondary'}`}
+                            style={{ flex: 1, padding: '0.4rem 0.25rem', fontSize: '0.75rem' }}
+                            onClick={() => applyCopyOption(idx)}
+                          >
+                            {opt.styleName}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Content Card */}
+                      <div style={{ background: 'var(--bg-main)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', position: 'relative' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                          <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                            ✨ {generatedCopyOptions[activeCopyOptionIdx].styleName}
+                          </span>
+                          <button
+                            className="btn btn-secondary"
+                            style={{ padding: '0.2rem 0.5rem', fontSize: '0.7rem' }}
+                            onClick={() => {
+                              const opt = generatedCopyOptions[activeCopyOptionIdx];
+                              const fullText = `【${opt.title}】\n\n${opt.body}\n\n${opt.tags}`;
+                              navigator.clipboard.writeText(fullText);
+                              alert('文案已复制到剪贴板！');
+                            }}
+                          >
+                            📋 复制全部文案
+                          </button>
+                        </div>
+
+                        <div style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px dotted var(--border-color)' }}>
+                          标题：{generatedCopyOptions[activeCopyOptionIdx].title}
+                        </div>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)', whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>
+                          {generatedCopyOptions[activeCopyOptionIdx].body}
+                        </div>
+                        <div style={{ fontSize: '0.8rem', color: '#4f46e5', fontWeight: 600, marginTop: '0.5rem' }}>
+                          {generatedCopyOptions[activeCopyOptionIdx].tags}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-secondary)', border: '1px dashed var(--border-color)', borderRadius: 'var(--radius-sm)' }}>
+                      💡 点击上方按钮，让 AI 帮您写文案吧！
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1830,6 +2505,74 @@ function App() {
                       />
                     </div>
                   )}
+
+                  {/* Interactive Dot Tags Section */}
+                  <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1rem', marginTop: '1rem' }}>
+                    <p style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>📍 仿小红书「智能圆点标签」：</p>
+                    
+                    <button
+                      className="btn btn-primary"
+                      style={{ width: '100%', marginBottom: '0.75rem', background: 'linear-gradient(135deg, #10b981, #059669)', fontSize: '0.8rem', padding: '0.5rem', border: 'none' }}
+                      onClick={handleRecommendDotTags}
+                      disabled={isGeneratingTags}
+                    >
+                      {isGeneratingTags ? '🤖 正在分析画面并打标...' : '🤖 AI 一键智能图像识别打标'}
+                    </button>
+
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                      在图片上方双击标签可切换左右指针，按住可自由拖拽调整，或手动输入添加：
+                    </p>
+                    
+                    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                      <input 
+                        type="text" 
+                        className="form-control" 
+                        placeholder="标签内容，如: 今日穿搭 #ootd" 
+                        style={{ padding: '0.4rem', fontSize: '0.8rem' }}
+                        value={customTagText}
+                        onChange={(e) => setCustomTagText(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && addDotTag(customTagText)}
+                      />
+                      <button 
+                        className="btn btn-primary" 
+                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', whiteSpace: 'nowrap' }}
+                        onClick={() => addDotTag(customTagText)}
+                        disabled={!customTagText.trim()}
+                      >
+                        添加标签
+                      </button>
+                    </div>
+
+                    {/* Show select edit tag info */}
+                    {selectedTagId && activeImage.tags && activeImage.tags.find(t => t.id === selectedTagId) && (
+                      <div style={{ background: 'var(--bg-main)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-primary)' }}>📝 修改选中标签：</span>
+                        <input 
+                          type="text" 
+                          className="form-control" 
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+                          value={activeImage.tags.find(t => t.id === selectedTagId)?.text || ''}
+                          onChange={(e) => updateTagText(selectedTagId, e.target.value)}
+                        />
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <button 
+                            className="btn btn-secondary" 
+                            style={{ flex: 1, padding: '0.25rem 0.5rem', fontSize: '0.7rem' }}
+                            onClick={(e) => toggleTagDirection(selectedTagId, e)}
+                          >
+                            🔄 切换指针
+                          </button>
+                          <button 
+                            className="btn btn-secondary" 
+                            style={{ flex: 1, padding: '0.25rem 0.5rem', fontSize: '0.7rem', color: '#ef4444' }}
+                            onClick={(e) => deleteDotTag(selectedTagId, e)}
+                          >
+                            🗑️ 删除标签
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -1992,7 +2735,7 @@ function App() {
             <div id="xiaohongshu-card" className="poster-card" ref={posterRef}>
               
               {/* Collage grid (no warp, cover fit on physically cropped images) */}
-              <div className="poster-image-area">
+              <div className={`poster-image-area ${selectedFrame !== 'none' ? `frame-${selectedFrame}` : ''}`}>
                 {uploadedImages.length > 0 ? (
                   <div className={`poster-image-grid poster-image-grid-${uploadedImages.length}`}>
                     {uploadedImages.map((img, idx) => (
@@ -2096,6 +2839,35 @@ function App() {
                           ))}
                         </div>
 
+                        {/* Smart Dot Tags Overlay */}
+                        <div className="grid-stickers-layer" style={{ zIndex: 19 }}>
+                          {(img.tags || []).map((tag) => (
+                            <div
+                              key={tag.id}
+                              className={`xhs-tag-container tag-direction-${tag.direction}`}
+                              style={{
+                                position: 'absolute',
+                                left: `${tag.x}%`,
+                                top: `${tag.y}%`,
+                                transform: 'translate(-50%, -50%)',
+                                transformOrigin: 'center center'
+                              }}
+                            >
+                              {tag.direction === 'left' ? (
+                                <>
+                                  <div className="xhs-tag-label">{tag.text}</div>
+                                  <div className="xhs-tag-dot"><div className="xhs-tag-dot-pulse"></div></div>
+                                </>
+                              ) : (
+                                <>
+                                  <div className="xhs-tag-dot"><div className="xhs-tag-dot-pulse"></div></div>
+                                  <div className="xhs-tag-label">{tag.text}</div>
+                                </>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+
                       </div>
                     ))}
                   </div>
@@ -2106,7 +2878,7 @@ function App() {
                 )}
 
                 {/* Location and Date Bar overlay */}
-                {(globalMetadata.location || globalMetadata.time) && (
+                {selectedFrame === 'none' && (globalMetadata.location || globalMetadata.time) && (
                   <div className="poster-meta-bar">
                     <div className="poster-meta-item">
                       {globalMetadata.location && `📍 ${globalMetadata.location}`}
@@ -2114,6 +2886,45 @@ function App() {
                     <div className="poster-meta-item">
                       {globalMetadata.time && `📅 ${globalMetadata.time}`}
                     </div>
+                  </div>
+                )}
+
+                {/* EXIF Camera Info Watermark Overlay */}
+                {selectedFrame !== 'none' && selectedFrame !== 'movie-split' && (
+                  <div className="exif-frame-bar">
+                    {selectedFrame === 'polaroid' ? (
+                      <div style={{ width: '100%', textAlign: 'center', letterSpacing: '1px' }}>
+                        {exifParams.date} · {exifParams.model || 'Moment'}
+                      </div>
+                    ) : (
+                      <>
+                        <div className="exif-left-params">
+                          <span>{exifParams.focal}</span>
+                          <span>{exifParams.fNumber}</span>
+                          <span>{exifParams.shutter}</span>
+                          <span>{exifParams.iso}</span>
+                        </div>
+                        
+                        {selectedFrame.startsWith('leica') ? (
+                          <div className="leica-red-dot">LEICA</div>
+                        ) : selectedFrame === 'hasselblad' ? (
+                          <div className="hasselblad-logo-text">HASSELBLAD</div>
+                        ) : null}
+
+                        <div className="exif-right-model">
+                          <div>{exifParams.make} {exifParams.model}</div>
+                          <span className="exif-date-sub">{exifParams.date}</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* Cinematic Subtitles overlay for movie-split frame */}
+                {selectedFrame === 'movie-split' && (
+                  <div className="movie-subtitle-overlay">
+                    <div className="movie-subtitle-cn">{movieSubtitleCn}</div>
+                    <div className="movie-subtitle-en">{movieSubtitleEn}</div>
                   </div>
                 )}
               </div>

@@ -385,10 +385,10 @@ function ensureDataUri(base64Image) {
   return `data:image/jpeg;base64,${base64Image}`;
 }
 
-// AI 3. Style Transfer (Ghibli cartoonization)
+// AI 3. Style Transfer (Ghibli, Claymation, Sketch)
 app.post('/api/ai/style-transfer', async (req, res) => {
   try {
-    const { image } = req.body;
+    const { image, style = 'cartoon' } = req.body;
     if (!image) {
       return res.status(400).json({ error: 'Image base64 data is required.' });
     }
@@ -404,8 +404,15 @@ app.post('/api/ai/style-transfer', async (req, res) => {
     // ===== Option A: Try Volcano Ark Doubao-Seedream first if key is present =====
     if (volcApiKey) {
       try {
-        console.log('Attempting Ghibli style transfer using Volcano Ark (Doubao Seedream)...');
+        console.log(`Attempting style transfer (${style}) using Volcano Ark (Doubao Seedream)...`);
         
+        let prompt = '将参考图转换成极其精美的吉卜力动画风格，宫崎骏工作室手绘画风，温暖治愈的水彩线条，梦幻柔和的动漫光影，明亮清新的色彩，高清原画品质';
+        if (style === 'clay') {
+          prompt = '将参考图重新渲染成软萌可爱的3D泥塑黏土人偶玩具风格，黏土橡皮泥材质，温润反光表面，明亮清新的色彩，纯色背景，高分辨率，3d clay illustration';
+        } else if (style === 'sketch') {
+          prompt = '将参考图重新渲染成手绘黑白铅笔素描艺术画，精致素描线条，艺术阴影阴线，高清艺术写实素描画风格，纯净纸张质感';
+        }
+
         const volcResponse = await fetch('https://ark.cn-beijing.volces.com/api/v3/images/generations', {
           method: 'POST',
           headers: {
@@ -414,7 +421,7 @@ app.post('/api/ai/style-transfer', async (req, res) => {
           },
           body: JSON.stringify({
             model: 'doubao-seedream-5-0-260128',
-            prompt: '将参考图转换成极其精美的吉卜力动画风格，宫崎骏工作室手绘画风，温暖治愈的水彩线条，梦幻柔和的动漫光影，明亮清新的色彩，高清原画品质',
+            prompt: prompt,
             image: [imageDataUri],
             size: '2048x2048',
             n: 1
@@ -697,6 +704,271 @@ app.post('/api/ai/remove-objects', async (req, res) => {
     res.status(500).json({ 
       error: `AI 消除失败: ${error.message}。若遇到权限或余额问题，请在阿里云百炼控制台确认图像重绘服务状态。` 
     });
+  }
+});
+
+// AI 5. Generate Xiaohongshu Copywriting (Multi-modal)
+app.post('/api/ai/generate-copy', async (req, res) => {
+  try {
+    const { image } = req.body;
+    if (!image) {
+      return res.status(400).json({ error: 'Image base64 data is required.' });
+    }
+
+    const volcKey = process.env.VOLC_API_KEY;
+    if (!volcKey) {
+      return res.status(500).json({ error: 'Volcano Ark Key is not configured on the server.' });
+    }
+
+    const imageDataUri = ensureDataUri(image);
+
+    console.log('Generating Xiaohongshu copy using Volcano Vision model...');
+    const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${volcKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'doubao-seed-1-6-vision-250815',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: `你是一个小红书运营大师与视觉策划博主。请分析这张图片，为用户生成3款不同情感路线的小红书爆款文案。每一款文案必须包含：
+1. 【爆款标题】（包含吸睛的Emoji，字数在20字以内）
+2. 【笔记正文】（包含Emoji排版，空行，内容活泼，适合社交分享，字数在150字左右）
+3. 【推荐话题标签】（例如 #日常碎片 #我的日常）
+这三款的风格分别应为：
+- 风格一：文艺生活碎片（温暖治愈，故事感强）
+- 风格二：元气干货日记（活泼幽默，带有生活感悟或实用建议）
+- 风格三：极简高级态度（文笔简练，有个性）
+
+请直接输出规范的 JSON 格式数据，以便系统直接解析，结构如下：
+{
+  "options": [
+    {
+      "styleName": "文艺生活碎片",
+      "title": "标题...",
+      "body": "正文内容...",
+      "tags": "#标签1 #标签2"
+    },
+    ...
+  ]
+}
+不要输出任何 Markdown 格式包裹（如 \`\`\`json 标记），不要输出任何解释性话语，直接返回纯 JSON 对象。`
+              },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: imageDataUri
+                }
+              }
+            ]
+          }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Volcano Vision API failed: ${response.status} - ${errText}`);
+    }
+
+    const data = await response.json();
+    let text = data.choices?.[0]?.message?.content?.trim();
+    if (!text) {
+      throw new Error('Empty response from Volcano Vision model.');
+    }
+
+    // Clean Markdown code block wrapper if present
+    if (text.startsWith('```')) {
+      text = text.replace(/^```(?:json)?\n/, '').replace(/\n```$/, '').trim();
+    }
+
+    try {
+      const parsed = JSON.parse(text);
+      res.json(parsed);
+    } catch (parseErr) {
+      console.warn('JSON parsing failed, returning raw text. Text was:', text);
+      // Create a fallback option if JSON parsing fails
+      res.json({
+        options: [
+          {
+            styleName: '智能生成文案',
+            title: '日常小美好 ✨',
+            body: text,
+            tags: '#日常碎片 #AI生活记录'
+          }
+        ]
+      });
+    }
+  } catch (error) {
+    console.error('Copy generation error:', error);
+    res.status(500).json({ error: `文案生成失败: ${error.message}` });
+  }
+});
+
+// AI 6. Generate Movie Subtitles (Text-based)
+app.post('/api/ai/generate-subtitles', async (req, res) => {
+  try {
+    const { theme = '生活' } = req.body;
+    const volcKey = process.env.VOLC_API_KEY;
+    if (!volcKey) {
+      return res.status(500).json({ error: 'Volcano Ark Key is not configured on the server.' });
+    }
+
+    console.log(`Generating cinematic subtitles for theme: ${theme}...`);
+    const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${volcKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'deepseek-v4-flash-260425',
+        messages: [
+          {
+            role: 'user',
+            content: `你是一个金牌电影编剧。请根据主题“${theme}”，创作一句非常有电影画面感、故事感、哲理的经典电影台词。
+必须输出双语格式：
+1. 中文台词（20字以内）
+2. 英文台词
+
+请直接输出规范的 JSON 格式数据，以便系统直接解析，结构如下：
+{
+  "cn": "台词内容...",
+  "en": "Subtitle translation..."
+}
+不要输出任何 Markdown 格式包裹（如 \`\`\`json 标记），不要输出任何解释性话语，直接返回纯 JSON 对象。`
+          }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Volcano Subtitles API failed: ${response.status} - ${errText}`);
+    }
+
+    const data = await response.json();
+    let text = data.choices?.[0]?.message?.content?.trim();
+    if (!text) {
+      throw new Error('Empty response from Volcano Subtitles model.');
+    }
+
+    // Clean Markdown code block wrapper if present
+    if (text.startsWith('```')) {
+      text = text.replace(/^```(?:json)?\n/, '').replace(/\n```$/, '').trim();
+    }
+
+    try {
+      const parsed = JSON.parse(text);
+      res.json(parsed);
+    } catch (parseErr) {
+      console.warn('JSON parsing failed for subtitles, returning fallback.');
+      res.json({
+        cn: '“生活没有标准答案，每个人都在走自己的路。”',
+        en: 'There are no standard answers in life, everyone is on their own way.'
+      });
+    }
+  } catch (error) {
+    console.error('Subtitle generation error:', error);
+    res.status(500).json({ error: `台词生成失败: ${error.message}` });
+  }
+});
+
+// AI 7. Recommend Dot Tags (Multi-modal)
+app.post('/api/ai/recommend-tags', async (req, res) => {
+  try {
+    const { image } = req.body;
+    if (!image) {
+      return res.status(400).json({ error: 'Image base64 data is required.' });
+    }
+
+    const volcKey = process.env.VOLC_API_KEY;
+    if (!volcKey) {
+      return res.status(500).json({ error: 'Volcano Ark Key is not configured on the server.' });
+    }
+
+    const imageDataUri = ensureDataUri(image);
+
+    console.log('Recommending Xiaohongshu dot tags using Volcano Vision model...');
+    const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${volcKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'doubao-seed-1-6-vision-250815',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: `分析这张图片，识别出画面里的3个最核心的主体（如人物穿戴的衣服、背景中的地标、美味的食物、当时的心情），为每个主体推荐一个适合放在图片上的小红书标签，并给出推荐的相对坐标(x, y)，坐标范围为 0-100（例如 50, 50 表示正中心）。
+
+请直接输出规范的 JSON 格式数据，以便系统直接解析，结构如下：
+{
+  "tags": [
+    {
+      "text": "标签文字...",
+      "x": 45,
+      "y": 60,
+      "direction": "right"
+    },
+    ...
+  ]
+}
+不要输出任何 Markdown 格式包裹（如 \`\`\`json 标记），不要输出任何解释性话语，直接返回纯 JSON 对象。`
+              },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: imageDataUri
+                }
+              }
+            ]
+          }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Volcano Vision Tags API failed: ${response.status} - ${errText}`);
+    }
+
+    const data = await response.json();
+    let text = data.choices?.[0]?.message?.content?.trim();
+    if (!text) {
+      throw new Error('Empty response from Volcano Vision Tags model.');
+    }
+
+    // Clean Markdown code block wrapper if present
+    if (text.startsWith('```')) {
+      text = text.replace(/^```(?:json)?\n/, '').replace(/\n```$/, '').trim();
+    }
+
+    try {
+      const parsed = JSON.parse(text);
+      res.json(parsed);
+    } catch (parseErr) {
+      console.warn('JSON parsing failed for tags, returning fallback.');
+      res.json({
+        tags: [
+          { text: '夏日美好 ✨', x: 30, y: 40, direction: 'right' },
+          { text: '今日碎片 📷', x: 70, y: 60, direction: 'left' }
+        ]
+      });
+    }
+  } catch (error) {
+    console.error('Tag recommendation error:', error);
+    res.status(500).json({ error: `标签推荐失败: ${error.message}` });
   }
 });
 
