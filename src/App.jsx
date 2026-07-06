@@ -488,6 +488,22 @@ function App() {
     }
   };
 
+  const getActiveCellAspectRatio = () => {
+    if (selectedFrame === 'movie-split') {
+      return '2.35/1';
+    }
+    const count = uploadedImages.length;
+    if (count === 0) return '3/4';
+    if (count === 1) return '3/4';
+    if (count === 2) return '3/8';
+    if (count === 4) return '3/4';
+    if (count === 3) {
+      if (activeIdx === 0) return '9/22';
+      return '15/22';
+    }
+    return '3/4';
+  };
+
   // 1. Handle Multiple Photos Upload
   const handlePhotosUpload = async (e) => {
     const files = Array.from(e.target.files || []);
@@ -1541,13 +1557,23 @@ function App() {
 
       const result = await res.json();
       
-      // 3. Update the croppedSrc with cleaned image
+      // 3. Update the base src and croppedSrc with cleaned image and reset crop parameters
       setUploadedImages(prev => prev.map((img, idx) => {
         if (idx === activeIdx) {
-          return { ...img, croppedSrc: result.image, isAIEdited: true };
+          return { 
+            ...img, 
+            src: result.image, 
+            croppedSrc: result.image, 
+            cropBox: { xmin: 0, ymin: 0, xmax: 100, ymax: 100 },
+            isAIEdited: true 
+          };
         }
         return img;
       }));
+
+      // Reset panning offsets for the new base image
+      setPanOffset({ x: 0, y: 0 });
+      setPanZoom(1);
 
       // Clear erase marks
       clearEraseMarks();
@@ -1589,13 +1615,23 @@ function App() {
 
       const result = await res.json();
       
-      // Update croppedSrc with the style-transferred version
+      // Update base src and croppedSrc with the style-transferred version and reset crop parameters
       setUploadedImages(prev => prev.map((img, idx) => {
         if (idx === activeIdx) {
-          return { ...img, croppedSrc: result.image, isAIEdited: true };
+          return { 
+            ...img, 
+            src: result.image, 
+            croppedSrc: result.image, 
+            cropBox: { xmin: 0, ymin: 0, xmax: 100, ymax: 100 },
+            isAIEdited: true 
+          };
         }
         return img;
       }));
+
+      // Reset panning offsets for the new styled base image
+      setPanOffset({ x: 0, y: 0 });
+      setPanZoom(1);
 
     } catch (err) {
       console.error(err);
@@ -1987,7 +2023,7 @@ function App() {
                     ref={editorImageContainerRef}
                     className="grid-image-container" 
                     style={{ 
-                      aspectRatio: '3/4', 
+                      aspectRatio: getActiveCellAspectRatio(), 
                       width: '100%', 
                       borderRadius: 'var(--radius-md)', 
                       overflow: 'hidden' 
