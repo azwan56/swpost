@@ -507,8 +507,8 @@ function App() {
   };
 
   const getActiveCellAspectRatio = () => {
-    if (selectedFrame === 'movie-split') {
-      return '2.35/1';
+    if (selectedFrame === 'film-roll') {
+      return '3/2';
     }
     const count = uploadedImages.length;
     if (count === 0) return '3/4';
@@ -1610,7 +1610,7 @@ function App() {
     if (uploadedImages.length === 0 || !activeImage) return;
     
     setIsLoading(true);
-    const styleLabel = styleName === 'clay' ? '泥塑黏土化' : styleName === 'sketch' ? '铅笔素描化' : '吉卜力卡通化';
+    const styleLabel = styleName === 'clay' ? '泥塑黏土化' : styleName === 'japanese-film' ? '日式胶片风' : '吉卜力卡通化';
     setAiOperationName(styleLabel);
     setErrorMsg('');
 
@@ -1970,10 +1970,10 @@ function App() {
                 </button>
                 <button 
                   className="btn btn-primary" 
-                  style={{ padding: '0.6rem 0.25rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #6b7280, #374151)', border: 'none' }}
-                  onClick={() => handleAIStyleTransfer('sketch')}
+                  style={{ padding: '0.6rem 0.25rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #d97706, #92400e)', border: 'none' }}
+                  onClick={() => handleAIStyleTransfer('japanese-film')}
                 >
-                  ✏️ 铅笔素描风
+                  🎞️ 日式胶片风
                 </button>
               </div>
 
@@ -2323,7 +2323,7 @@ function App() {
                       { id: 'leica-black', name: '📸 徕卡黑' },
                       { id: 'hasselblad', name: '🌌 哈苏黑' },
                       { id: 'polaroid', name: '🎞️ 宝丽来' },
-                      { id: 'movie-split', name: '🎞️ 电影分屏' }
+                      { id: 'film-roll', name: '🎞️ 胶卷底片' }
                     ].map(f => (
                       <button
                         key={f.id}
@@ -2337,7 +2337,7 @@ function App() {
                   </div>
 
                   {/* Manual EXIF parameters editing */}
-                  {selectedFrame !== 'none' && selectedFrame !== 'movie-split' && (
+                  {selectedFrame !== 'none' && selectedFrame !== 'film-roll' && (
                     <div style={{ background: 'var(--bg-main)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                       <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>🏷️ 编辑相机参数：</span>
                       
@@ -2422,91 +2422,13 @@ function App() {
                     </div>
                   )}
 
-                  {/* Movie Subtitles editing panel */}
-                  {selectedFrame === 'movie-split' && (
+                  {/* Film Roll info panel */}
+                  {selectedFrame === 'film-roll' && (
                     <div style={{ background: 'var(--bg-main)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>🎞️ 编辑双语电影字幕：</span>
-                      
-                      <div>
-                        <label className="form-label" style={{ fontSize: '0.75rem' }}>中文台词</label>
-                        <input 
-                          type="text" 
-                          className="form-control" 
-                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
-                          value={movieSubtitleCn}
-                          onChange={(e) => setMovieSubtitleCn(e.target.value)}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="form-label" style={{ fontSize: '0.75rem' }}>英文台词 (English Subtitle)</label>
-                        <input 
-                          type="text" 
-                          className="form-control" 
-                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
-                          value={movieSubtitleEn}
-                          onChange={(e) => setMovieSubtitleEn(e.target.value)}
-                        />
-                      </div>
-
-                      {/* AI Subtitle Generator Section */}
-                      <div style={{ borderTop: '1px dotted var(--border-color)', paddingTop: '0.5rem', marginTop: '0.25rem' }}>
-                        <label className="form-label" style={{ fontSize: '0.75rem' }}>🤖 AI 电影台词灵感生成</label>
-                        <div style={{ display: 'flex', gap: '0.25rem', marginBottom: '0.5rem' }}>
-                          <input 
-                            type="text" 
-                            className="form-control" 
-                            placeholder="台词主题，如: 青春、遗憾、重逢" 
-                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', flex: 1 }}
-                            value={movieTheme}
-                            onChange={(e) => setMovieTheme(e.target.value)}
-                          />
-                          <button
-                            className="btn btn-primary"
-                            style={{ padding: '0.25rem 0.75rem', fontSize: '0.8rem', whiteSpace: 'nowrap' }}
-                            onClick={() => handleGenerateMovieSubtitle()}
-                            disabled={isGeneratingSubtitle}
-                          >
-                            {isGeneratingSubtitle ? '生成中...' : 'AI 生成'}
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Preset quotes buttons */}
-                      <div style={{ borderTop: '1px dotted var(--border-color)', paddingTop: '0.5rem' }}>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>💡 经典预设台词：</span>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.25rem' }}>
-                          {[
-                            {
-                              label: '🌅 关于人生道路',
-                              cn: '“生活没有标准答案，每个人都在走自己的路。”',
-                              en: 'There are no standard answers in life, everyone is on their own way.'
-                            },
-                            {
-                              label: '✨ 关于不期而遇',
-                              cn: '“这世上所有的不期而遇，都是努力过后的惊喜。”',
-                              en: 'All unexpected encounters in this world are surprises after hard work.'
-                            },
-                            {
-                              label: '🎬 关于主角配角',
-                              cn: '“人生就像一部电影，我们都是自己故事里的主角。”',
-                              en: 'Life is like a movie, we are all the protagonists of our own stories.'
-                            }
-                          ].map((q, idx) => (
-                            <button
-                              key={idx}
-                              className="btn btn-secondary"
-                              style={{ textAlign: 'left', padding: '0.3rem 0.5rem', fontSize: '0.7rem', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                              onClick={() => {
-                                setMovieSubtitleCn(q.cn);
-                                setMovieSubtitleEn(q.en);
-                              }}
-                            >
-                              {q.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>🎞️ 胶卷底片边框已启用：</span>
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: 0, lineHeight: '1.4' }}>
+                        当前已选择高质感胶卷底片边框。底片代号已设为 <strong>FUJI FILM RDPIII</strong> 并在底部显示 <strong>ISO 100</strong>。图片裁剪比率已自动调整为 35mm 胶卷底片经典的 <strong>3:2</strong> 比例。
+                      </p>
                     </div>
                   )}
                 </div>
@@ -3045,7 +2967,7 @@ function App() {
                 )}
 
                 {/* EXIF Camera Info Watermark Overlay */}
-                {selectedFrame !== 'none' && selectedFrame !== 'movie-split' && (
+                {selectedFrame !== 'none' && selectedFrame !== 'film-roll' && (
                   <div className="exif-frame-bar">
                     {selectedFrame === 'polaroid' ? (
                       <div style={{ width: '100%', textAlign: 'center', letterSpacing: '1px' }}>
@@ -3075,12 +2997,31 @@ function App() {
                   </div>
                 )}
 
-                {/* Cinematic Subtitles overlay for movie-split frame */}
-                {selectedFrame === 'movie-split' && (
-                  <div className="movie-subtitle-overlay">
-                    <div className="movie-subtitle-cn">{movieSubtitleCn}</div>
-                    <div className="movie-subtitle-en">{movieSubtitleEn}</div>
-                  </div>
+                {/* Film Roll Sprockets & Markings */}
+                {selectedFrame === 'film-roll' && (
+                  <>
+                    <div className="film-sprocket-strip top">
+                      {Array.from({ length: 9 }).map((_, i) => (
+                        <div key={i} className="film-sprocket-hole" />
+                      ))}
+                    </div>
+                    <div className="film-marking-text top">
+                      <span>▲ 24</span>
+                      <span>FUJI FILM RDPIII</span>
+                      <span>24A</span>
+                    </div>
+                    
+                    <div className="film-sprocket-strip bottom">
+                      {Array.from({ length: 9 }).map((_, i) => (
+                        <div key={i} className="film-sprocket-hole" />
+                      ))}
+                    </div>
+                    <div className="film-marking-text bottom">
+                      <span className="film-barcode-mark">||| | || || |||</span>
+                      <span>ISO 100</span>
+                      <span>25</span>
+                    </div>
+                  </>
                 )}
               </div>
 

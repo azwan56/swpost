@@ -409,8 +409,8 @@ app.post('/api/ai/style-transfer', async (req, res) => {
         let prompt = '将参考图转换成极其精美的吉卜力动画风格，宫崎骏工作室手绘画风，温暖治愈的水彩线条，梦幻柔和的动漫光影，明亮清新的色彩，高清原画品质';
         if (style === 'clay') {
           prompt = '将参考图重新渲染成软萌可爱的3D泥塑黏土人偶玩具风格，黏土橡皮泥材质，温润反光表面，明亮清新的色彩，纯色背景，高分辨率，3d clay illustration';
-        } else if (style === 'sketch') {
-          prompt = '将参考图重新渲染成手绘黑白铅笔素描艺术画，精致素描线条，艺术阴影阴线，高清艺术写实素描画风格，纯净纸张质感';
+        } else if (style === 'japanese-film') {
+          prompt = '将参考图重新渲染成精美的复古日式胶片风格照片，温暖怀旧的色彩，富士胶片质感，柔和微细颗粒感，自然采光，analog camera photography, Fuji film look, retro warm vintage tones, high quality';
         }
 
         const volcResponse = await fetch('https://ark.cn-beijing.volces.com/api/v3/images/generations', {
@@ -451,25 +451,32 @@ app.post('/api/ai/style-transfer', async (req, res) => {
       throw new Error('Volcano Ark failed and DashScope is not configured.');
     }
 
-    console.log('Running fallback Ghibli style transfer using Aliyun DashScope (Wanx)...');
+    console.log(`Running fallback style transfer (${style}) using Aliyun DashScope (Wanx)...`);
     // Submit Style Transfer task
     const imageeditUrl = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/image2image/image-synthesis';
     const reprintUrl = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation';
     
-    // ===== Attempt 1: wanx2.1-imageedit with stylization_all (highest quality Ghibli) =====
+    let dashscopePrompt = '转换成吉卜力动画风格，宫崎骏工作室风格，柔和水彩质感，温暖明亮的色调，细腻的手绘线条，梦幻唯美的动漫画风';
+    if (style === 'clay') {
+      dashscopePrompt = '重新渲染成软萌可爱的3D泥塑黏土人偶玩具风格，黏土橡皮泥材质，温润反光表面，明亮清新的色彩，纯色背景，3d clay illustration';
+    } else if (style === 'japanese-film') {
+      dashscopePrompt = '重新渲染成精美的复古日式胶片风格照片，温暖怀旧的色彩，富士胶片质感，柔和微细颗粒感，自然采光，Fuji film look, retro warm vintage tones';
+    }
+
+    // ===== Attempt 1: wanx2.1-imageedit with stylization_all (highest quality style transfer) =====
     let payload = {
       model: 'wanx2.1-imageedit',
       input: {
         base_image_url: imageDataUri,
         function: 'stylization_all',
-        prompt: '转换成吉卜力动画风格，宫崎骏工作室风格，柔和水彩质感，温暖明亮的色调，细腻的手绘线条，梦幻唯美的动漫画风'
+        prompt: dashscopePrompt
       },
       parameters: {
         n: 1
       }
     };
 
-    console.log('Submitting task to wanx2.1-imageedit (stylization_all, Ghibli)...');
+    console.log(`Submitting task to wanx2.1-imageedit (stylization_all, style: ${style})...`);
     let taskResponse = await fetch(imageeditUrl, {
       method: 'POST',
       headers: {
