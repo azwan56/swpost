@@ -321,8 +321,85 @@ function App() {
     setPanOffset({ x: newX, y: newY });
   };
 
+  const autoSavePanCrop = async (zoomVal = panZoom, offsetVal = panOffset) => {
+    const activeImage = uploadedImages[activeIdx];
+    if (!activeImage || !editorImageContainerRef.current) return;
+
+    try {
+      const rect = editorImageContainerRef.current.getBoundingClientRect();
+      const W_c = rect.width;
+      const H_c = rect.height;
+
+      const img = new Image();
+      img.src = activeImage.src;
+      
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+      });
+
+      const W = img.naturalWidth;
+      const H = img.naturalHeight;
+
+      let W_r = W_c;
+      let H_r = H_c;
+      if (W / H > W_c / H_c) {
+        H_r = H_c;
+        W_r = H_c * (W / H);
+      } else {
+        W_r = W_c;
+        H_r = W_c * (H / W);
+      }
+
+      const W_v = W_r * zoomVal;
+      const H_v = H_r * zoomVal;
+
+      const focusX = W_v > W_c ? (50 - (offsetVal.x / (W_v - W_c)) * 100) : 50;
+      const focusY = H_v > H_c ? (50 - (offsetVal.y / (H_v - H_c)) * 100) : 50;
+
+      const targetRatio = W_c / H_c;
+      let W_crop, H_crop;
+      if (W / H > targetRatio) {
+        H_crop = H / zoomVal;
+        W_crop = H_crop * targetRatio;
+      } else {
+        W_crop = W / zoomVal;
+        H_crop = W_crop / targetRatio;
+      }
+
+      const xmin = (focusX / 100) * (W - W_crop);
+      const ymin = (focusY / 100) * (H - H_crop);
+      const xmax = xmin + W_crop;
+      const ymax = ymin + H_crop;
+
+      const newCropBox = {
+        xmin: Math.max(0, Math.min(100, (xmin / W) * 100)),
+        ymin: Math.max(0, Math.min(100, (ymin / H) * 100)),
+        xmax: Math.max(0, Math.min(100, (xmax / W) * 100)),
+        ymax: Math.max(0, Math.min(100, (ymax / H) * 100))
+      };
+
+      const newCroppedSrc = await cropImagePhysically(activeImage.src, newCropBox);
+
+      setUploadedImages(prev => prev.map((item, idx) => {
+        if (idx === activeIdx) {
+          return {
+            ...item,
+            cropBox: newCropBox,
+            croppedSrc: newCroppedSrc,
+            isAIEdited: false
+          };
+        }
+        return item;
+      }));
+    } catch (err) {
+      console.error('Silent auto crop failed:', err);
+    }
+  };
+
   const stopPanning = () => {
     setIsPanning(false);
+    autoSavePanCrop();
   };
 
   const handleSavePanCrop = async () => {
@@ -2144,6 +2221,8 @@ function App() {
                             };
                           }
                         }}
+                        onMouseUp={() => autoSavePanCrop()}
+                        onTouchEnd={() => autoSavePanCrop()}
                         style={{ flex: 1, accentColor: 'var(--xhs-red)' }}
                       />
                       <span style={{ fontSize: '0.85rem', fontWeight: 600, minWidth: '2.5rem', textAlign: 'right' }}>
@@ -2156,7 +2235,11 @@ function App() {
                     <button 
                       className="btn btn-secondary"
                       style={{ flex: 1 }}
-                      onClick={() => { setPanOffset({ x: 0, y: 0 }); setPanZoom(1); }}
+                      onClick={() => { 
+                        setPanOffset({ x: 0, y: 0 }); 
+                        setPanZoom(1); 
+                        autoSavePanCrop(1, { x: 0, y: 0 });
+                      }}
                     >
                       重置位置
                     </button>
@@ -2165,7 +2248,7 @@ function App() {
                       style={{ flex: 2, background: 'linear-gradient(135deg, #10b981, #059669)' }}
                       onClick={handleSavePanCrop}
                     >
-                      💾 确认裁切并保存位置
+                      ✅ 完成并保存位置
                     </button>
                   </div>
                 </div>
@@ -2744,17 +2827,35 @@ function App() {
                         className={`grid-image-container grid-item-${idx}`}
                       >
                         {/* Cropped Base Image - rendered as background cover to fix html2canvas object-fit cover rendering bug */}
-                        <div 
-                          style={{ 
-                            width: '100%', 
-                            height: '100%', 
-                            backgroundImage: `url(${img.croppedSrc})`,
-                            backgroundSize: 'cover',
-                            backgroundPosition: 'center',
-                            backgroundRepeat: 'no-repeat',
-                            display: 'block' 
-                          }}
-                        />
+                        {activeTab === 'pan' && idx === activeIdx ? (
+                          <div style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
+                            <img 
+                              src={img.src} 
+                              alt="Live Position Adjustment"
+                              style={{
+                                position: 'absolute',
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'cover',
+                                transform: `translate(${(editorImageContainerRef.current?.getBoundingClientRect()?.width ? (panOffset.x / editorImageContainerRef.current.getBoundingClientRect().width) * 100 : 0)}%, ${(editorImageContainerRef.current?.getBoundingClientRect()?.height ? (panOffset.y / editorImageContainerRef.current.getBoundingClientRect().height) * 100 : 0)}%) scale(${panZoom})`,
+                                transformOrigin: 'center center',
+                                pointerEvents: 'none'
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <div 
+                            style={{ 
+                              width: '100%', 
+                              height: '100%', 
+                              backgroundImage: `url(${img.croppedSrc})`,
+                              backgroundSize: 'cover',
+                              backgroundPosition: 'center',
+                              backgroundRepeat: 'no-repeat',
+                              display: 'block' 
+                            }}
+                          />
+                        )}
 
                         {/* Hand drawings overlay */}
                         {img.drawings && (
