@@ -207,6 +207,22 @@ function App() {
     shutter: '1/250s',
     date: '2026.07.06'
   });
+
+  const handleUpdateExif = (field, value) => {
+    setExifParams(prev => ({ ...prev, [field]: value }));
+    setUploadedImages(prev => prev.map((img, idx) => {
+      if (idx === activeIdx) {
+        return {
+          ...img,
+          exif: {
+            ...(img.exif || {}),
+            [field]: value
+          }
+        };
+      }
+      return img;
+    }));
+  };
   
   // Cinematic Subtitle States
   const [movieSubtitleCn, setMovieSubtitleCn] = useState('“生活没有标准答案，每个人都在走自己的路。”');
@@ -1099,6 +1115,24 @@ function App() {
     };
   };
 
+  const handleTagTouchStart = (e, tagObj) => {
+    if (activeTab !== 'sticker') return;
+    if (!e.touches || e.touches.length === 0) return;
+    e.stopPropagation();
+    setSelectedTagId(tagObj.id);
+    setSelectedStickerId(null);
+    setSelectedTextId(null);
+
+    const touch = e.touches[0];
+    tagDragRef.current = {
+      id: tagObj.id,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      startLeft: tagObj.x,
+      startTop: tagObj.y
+    };
+  };
+
   const addDotTag = (text = '今日穿搭 ✨') => {
     if (uploadedImages.length === 0 || !activeImage) return;
     const newTag = {
@@ -1234,17 +1268,99 @@ function App() {
     };
   };
 
-  // Global mousemove listeners
+  // Sticker touch start handlers
+  const handleStickerTouchStart = (e, sticker) => {
+    if (activeTab !== 'sticker') return;
+    if (!e.touches || e.touches.length === 0) return;
+    e.stopPropagation();
+    setSelectedStickerId(sticker.id);
+    setSelectedTextId(null);
+
+    const touch = e.touches[0];
+    stickerDragRef.current = {
+      id: sticker.id,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      startLeft: sticker.x,
+      startTop: sticker.y
+    };
+  };
+
+  const handleRotateScaleTouchStart = (e, sticker) => {
+    if (activeTab !== 'sticker') return;
+    if (!e.touches || e.touches.length === 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+
+    const element = document.getElementById(`sticker-${sticker.id}`);
+    const rect = element.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+
+    const touch = e.touches[0];
+    stickerRotateScaleRef.current = {
+      id: sticker.id,
+      centerX,
+      centerY,
+      startMouseX: touch.clientX,
+      startMouseY: touch.clientY,
+      startAngle: sticker.rotation,
+      startScale: sticker.scale
+    };
+  };
+
+  // Text touch start handlers
+  const handleTextTouchStart = (e, textObj) => {
+    if (activeTab !== 'text') return;
+    if (!e.touches || e.touches.length === 0) return;
+    e.stopPropagation();
+    setSelectedTextId(textObj.id);
+    setSelectedStickerId(null);
+
+    const touch = e.touches[0];
+    textDragRef.current = {
+      id: textObj.id,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      startLeft: textObj.x,
+      startTop: textObj.y
+    };
+  };
+
+  const handleTextRotateScaleTouchStart = (e, textObj) => {
+    if (activeTab !== 'text') return;
+    if (!e.touches || e.touches.length === 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+
+    const element = document.getElementById(`text-${textObj.id}`);
+    const rect = element.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+
+    const touch = e.touches[0];
+    textRotateScaleRef.current = {
+      id: textObj.id,
+      centerX,
+      centerY,
+      startMouseX: touch.clientX,
+      startMouseY: touch.clientY,
+      startAngle: textObj.rotation,
+      startScale: textObj.scale
+    };
+  };
+
+  // Global mouse/touch move listeners
   useEffect(() => {
-    const handleMouseMove = (e) => {
+    const handleMove = (clientX, clientY) => {
       const container = document.querySelector('.annotation-wrapper');
       if (!container) return;
       const cRect = container.getBoundingClientRect();
 
       if (stickerDragRef.current) {
         const { id, startX, startY, startLeft, startTop } = stickerDragRef.current;
-        const dx = e.clientX - startX;
-        const dy = e.clientY - startY;
+        const dx = clientX - startX;
+        const dy = clientY - startY;
         const px = (dx / cRect.width) * 100;
         const py = (dy / cRect.height) * 100;
 
@@ -1266,8 +1382,8 @@ function App() {
         const startDist = Math.sqrt(startDx * startDx + startDy * startDy);
         const startRad = Math.atan2(startDy, startDx);
 
-        const dx = e.clientX - centerX;
-        const dy = e.clientY - centerY;
+        const dx = clientX - centerX;
+        const dy = clientY - centerY;
         const dist = Math.sqrt(dx * dx + dy * dy);
         const rad = Math.atan2(dy, dx);
         const angleDiff = (rad - startRad) * (180 / Math.PI);
@@ -1290,8 +1406,8 @@ function App() {
 
       if (textDragRef.current) {
         const { id, startX, startY, startLeft, startTop } = textDragRef.current;
-        const dx = e.clientX - startX;
-        const dy = e.clientY - startY;
+        const dx = clientX - startX;
+        const dy = clientY - startY;
         const px = (dx / cRect.width) * 100;
         const py = (dy / cRect.height) * 100;
 
@@ -1313,8 +1429,8 @@ function App() {
         const startDist = Math.sqrt(startDx * startDx + startDy * startDy);
         const startRad = Math.atan2(startDy, startDx);
 
-        const dx = e.clientX - centerX;
-        const dy = e.clientY - centerY;
+        const dx = clientX - centerX;
+        const dy = clientY - centerY;
         const dist = Math.sqrt(dx * dx + dy * dy);
         const rad = Math.atan2(dy, dx);
         const angleDiff = (rad - startRad) * (180 / Math.PI);
@@ -1337,8 +1453,8 @@ function App() {
 
       if (tagDragRef.current) {
         const { id, startX, startY, startLeft, startTop } = tagDragRef.current;
-        const dx = e.clientX - startX;
-        const dy = e.clientY - startY;
+        const dx = clientX - startX;
+        const dy = clientY - startY;
         const px = (dx / cRect.width) * 100;
         const py = (dy / cRect.height) * 100;
 
@@ -1354,7 +1470,20 @@ function App() {
       }
     };
 
-    const handleMouseUp = () => {
+    const handleMouseMove = (e) => {
+      handleMove(e.clientX, e.clientY);
+    };
+
+    const handleTouchMove = (e) => {
+      if (e.touches && e.touches.length > 0) {
+        if (stickerDragRef.current || stickerRotateScaleRef.current || textDragRef.current || textRotateScaleRef.current || tagDragRef.current) {
+          e.preventDefault();
+        }
+        handleMove(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    };
+
+    const handleEnd = () => {
       stickerDragRef.current = null;
       stickerRotateScaleRef.current = null;
       textDragRef.current = null;
@@ -1363,10 +1492,15 @@ function App() {
     };
 
     window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('mouseup', handleEnd);
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
+    window.addEventListener('touchend', handleEnd);
+    
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('mouseup', handleEnd);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleEnd);
     };
   }, [activeIdx]);
 
@@ -2164,6 +2298,7 @@ function App() {
                             height: `${s.height}px`
                           }}
                           onMouseDown={(e) => handleStickerMouseDown(e, s)}
+                          onTouchStart={(e) => handleStickerTouchStart(e, s)}
                         >
                           {STICKER_TEMPLATES[s.type]}
                           
@@ -2191,7 +2326,7 @@ function App() {
                           {selectedStickerId === s.id && activeTab === 'sticker' && (
                             <>
                               <div className="sticker-delete-btn" onClick={(e) => deleteSticker(s.id, e)}>✕</div>
-                              <div className="sticker-rotate-btn" onMouseDown={(e) => handleRotateScaleMouseDown(e, s)}>⟳</div>
+                              <div className="sticker-rotate-btn" onMouseDown={(e) => handleRotateScaleMouseDown(e, s)} onTouchStart={(e) => handleRotateScaleTouchStart(e, s)}>⟳</div>
                             </>
                           )}
                         </div>
@@ -2217,13 +2352,14 @@ function App() {
                             fontSize: '20px'
                           }}
                           onMouseDown={(e) => handleTextMouseDown(e, t)}
+                          onTouchStart={(e) => handleTextTouchStart(e, t)}
                         >
                           {t.content}
 
                           {selectedTextId === t.id && activeTab === 'text' && (
                             <>
                               <div className="text-delete-btn" onClick={(e) => deleteText(t.id, e)}>✕</div>
-                              <div className="text-rotate-btn" onMouseDown={(e) => handleTextRotateScaleMouseDown(e, t)}>⟳</div>
+                              <div className="text-rotate-btn" onMouseDown={(e) => handleTextRotateScaleMouseDown(e, t)} onTouchStart={(e) => handleTextRotateScaleTouchStart(e, t)}>⟳</div>
                             </>
                           )}
                         </div>
@@ -2245,6 +2381,7 @@ function App() {
                             top: `${tag.y}%`
                           }}
                           onMouseDown={(e) => handleTagMouseDown(e, tag)}
+                          onTouchStart={(e) => handleTagTouchStart(e, tag)}
                           title="拖动位置，双击切换指向"
                           onDoubleClick={(e) => toggleTagDirection(tag.id, e)}
                         >
@@ -2399,7 +2536,7 @@ function App() {
                             className="form-control" 
                             style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
                             value={exifParams.make}
-                            onChange={(e) => setExifParams(prev => ({ ...prev, make: e.target.value }))}
+                            onChange={(e) => handleUpdateExif('make', e.target.value)}
                           />
                         </div>
                         <div>
@@ -2409,7 +2546,7 @@ function App() {
                             className="form-control" 
                             style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
                             value={exifParams.model}
-                            onChange={(e) => setExifParams(prev => ({ ...prev, model: e.target.value }))}
+                            onChange={(e) => handleUpdateExif('model', e.target.value)}
                           />
                         </div>
                       </div>
@@ -2423,7 +2560,7 @@ function App() {
                               className="form-control" 
                               style={{ padding: '0.25rem 0.25rem', fontSize: '0.75rem' }}
                               value={exifParams.focal}
-                              onChange={(e) => setExifParams(prev => ({ ...prev, focal: e.target.value }))}
+                              onChange={(e) => handleUpdateExif('focal', e.target.value)}
                             />
                           </div>
                           <div>
@@ -2433,7 +2570,7 @@ function App() {
                               className="form-control" 
                               style={{ padding: '0.25rem 0.25rem', fontSize: '0.75rem' }}
                               value={exifParams.fNumber}
-                              onChange={(e) => setExifParams(prev => ({ ...prev, fNumber: e.target.value }))}
+                              onChange={(e) => handleUpdateExif('fNumber', e.target.value)}
                             />
                           </div>
                           <div>
@@ -2443,7 +2580,7 @@ function App() {
                               className="form-control" 
                               style={{ padding: '0.25rem 0.25rem', fontSize: '0.75rem' }}
                               value={exifParams.shutter}
-                              onChange={(e) => setExifParams(prev => ({ ...prev, shutter: e.target.value }))}
+                              onChange={(e) => handleUpdateExif('shutter', e.target.value)}
                             />
                           </div>
                           <div>
@@ -2453,7 +2590,7 @@ function App() {
                               className="form-control" 
                               style={{ padding: '0.25rem 0.25rem', fontSize: '0.75rem' }}
                               value={exifParams.iso}
-                              onChange={(e) => setExifParams(prev => ({ ...prev, iso: e.target.value }))}
+                              onChange={(e) => handleUpdateExif('iso', e.target.value)}
                             />
                           </div>
                         </div>
@@ -2466,7 +2603,7 @@ function App() {
                           className="form-control" 
                           style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
                           value={exifParams.date}
-                          onChange={(e) => setExifParams(prev => ({ ...prev, date: e.target.value }))}
+                          onChange={(e) => handleUpdateExif('date', e.target.value)}
                         />
                       </div>
                     </div>
@@ -2844,157 +2981,216 @@ function App() {
             <div id="xiaohongshu-card" className="poster-card" ref={posterRef}>
               
               {/* Collage grid (no warp, cover fit on physically cropped images) */}
-              <div className={`poster-image-area ${selectedFrame !== 'none' ? `frame-${selectedFrame}` : ''}`}>
+              <div className="poster-image-area">
                 {uploadedImages.length > 0 ? (
                   <div className={`poster-image-grid poster-image-grid-${uploadedImages.length}`}>
                     {uploadedImages.map((img, idx) => (
                       <div 
                         key={img.id}
-                        className={`grid-image-container grid-item-${idx}`}
+                        className={`grid-cell-frame-wrapper grid-item-${idx} ${selectedFrame !== 'none' ? `frame-${selectedFrame}` : ''}`}
                       >
-                        {/* Cropped Base Image - rendered as background cover to fix html2canvas object-fit cover rendering bug */}
-                        {activeTab === 'pan' && idx === activeIdx ? (
-                          <div style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
-                            <img 
-                              src={img.src} 
-                              alt="Live Position Adjustment"
-                              style={{
-                                position: 'absolute',
-                                width: '100%',
-                                height: '100%',
-                                objectFit: 'cover',
-                                transform: `translate(${(editorImageContainerRef.current?.getBoundingClientRect()?.width ? (panOffset.x / editorImageContainerRef.current.getBoundingClientRect().width) * 100 : 0)}%, ${(editorImageContainerRef.current?.getBoundingClientRect()?.height ? (panOffset.y / editorImageContainerRef.current.getBoundingClientRect().height) * 100 : 0)}%) scale(${panZoom})`,
-                                transformOrigin: 'center center',
-                                pointerEvents: 'none'
+                        <div className="grid-image-container">
+                          {/* Cropped Base Image - rendered as background cover to fix html2canvas object-fit cover rendering bug */}
+                          {activeTab === 'pan' && idx === activeIdx ? (
+                            <div style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
+                              <img 
+                                src={img.src} 
+                                alt="Live Position Adjustment"
+                                style={{
+                                  position: 'absolute',
+                                  width: '100%',
+                                  height: '100%',
+                                  objectFit: 'cover',
+                                  transform: `translate(${(editorImageContainerRef.current?.getBoundingClientRect()?.width ? (panOffset.x / editorImageContainerRef.current.getBoundingClientRect().width) * 100 : 0)}%, ${(editorImageContainerRef.current?.getBoundingClientRect()?.height ? (panOffset.y / editorImageContainerRef.current.getBoundingClientRect().height) * 100 : 0)}%) scale(${panZoom})`,
+                                  transformOrigin: 'center center',
+                                  pointerEvents: 'none'
+                                }}
+                              />
+                            </div>
+                          ) : (
+                            <div 
+                              style={{ 
+                                width: '100%', 
+                                height: '100%', 
+                                backgroundImage: `url(${img.croppedSrc})`,
+                                backgroundSize: 'cover',
+                                backgroundPosition: 'center',
+                                backgroundRepeat: 'no-repeat',
+                                display: 'block' 
                               }}
                             />
-                          </div>
-                        ) : (
-                          <div 
-                            style={{ 
-                              width: '100%', 
-                              height: '100%', 
-                              backgroundImage: `url(${img.croppedSrc})`,
-                              backgroundSize: 'cover',
-                              backgroundPosition: 'center',
-                              backgroundRepeat: 'no-repeat',
-                              display: 'block' 
-                            }}
-                          />
-                        )}
+                          )}
 
-                        {/* Hand drawings overlay */}
-                        {img.drawings && (
-                          <img 
-                            src={img.drawings} 
-                            className="grid-drawing-canvas" 
-                            alt={`Drawings ${idx}`}
-                          />
-                        )}
+                          {/* Hand drawings overlay */}
+                          {img.drawings && (
+                            <img 
+                              src={img.drawings} 
+                              className="grid-drawing-canvas" 
+                              alt={`Drawings ${idx}`}
+                            />
+                          )}
 
-                        {/* Stickers Overlay */}
-                        <div className="grid-stickers-layer">
-                          {img.stickers.map((s) => (
-                            <div
-                              key={s.id}
-                              style={{
-                                position: 'absolute',
-                                left: `${s.x}%`,
-                                top: `${s.y}%`,
-                                transform: `translate(-50%, -50%) rotate(${s.rotation}deg) scale(${s.scale})`,
-                                width: `${s.width}px`,
-                                height: `${s.height}px`,
-                                transformOrigin: 'center center'
-                              }}
-                            >
-                              {STICKER_TEMPLATES[s.type]}
-                              
-                              {s.type === 'speech' && (
-                                <div style={{
+                          {/* Stickers Overlay */}
+                          <div className="grid-stickers-layer">
+                            {img.stickers.map((s) => (
+                              <div
+                                key={s.id}
+                                style={{
                                   position: 'absolute',
-                                  top: '25%',
-                                  left: '12%',
-                                  width: '76%',
-                                  height: '40%',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  fontSize: '12px',
-                                  fontWeight: '600',
-                                  color: '#222',
-                                  textAlign: 'center',
-                                  overflow: 'hidden',
-                                  wordBreak: 'break-all'
-                                }}>
-                                  {s.text}
+                                  left: `${s.x}%`,
+                                  top: `${s.y}%`,
+                                  transform: `translate(-50%, -50%) rotate(${s.rotation}deg) scale(${s.scale})`,
+                                  width: `${s.width}px`,
+                                  height: `${s.height}px`,
+                                  transformOrigin: 'center center'
+                                }}
+                              >
+                                {STICKER_TEMPLATES[s.type]}
+                                
+                                {s.type === 'speech' && (
+                                  <div style={{
+                                    position: 'absolute',
+                                    top: '25%',
+                                    left: '12%',
+                                    width: '76%',
+                                    height: '40%',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontSize: '12px',
+                                    fontWeight: '600',
+                                    color: '#222',
+                                    textAlign: 'center',
+                                    overflow: 'hidden',
+                                    wordBreak: 'break-all'
+                                  }}>
+                                    {s.text}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* Handwritten Texts Overlay */}
+                          <div className="grid-stickers-layer" style={{ zIndex: 18 }}>
+                            {(img.texts || []).map((t) => (
+                              <div
+                                key={t.id}
+                                style={{
+                                  position: 'absolute',
+                                  left: `${t.x}%`,
+                                  top: `${t.y}%`,
+                                  transform: `translate(-50%, -50%) rotate(${t.rotation}deg) scale(${t.scale})`,
+                                  color: t.color,
+                                  fontFamily: "'Long Cang', 'Zhi Mang Xing', 'Caveat', cursive, sans-serif",
+                                  fontSize: '20px',
+                                  transformOrigin: 'center center',
+                                  whiteSpace: 'nowrap',
+                                  fontWeight: '500',
+                                  textShadow: `
+                                    1.5px 1.5px 0px rgba(0,0,0,0.8),
+                                    -1.5px -1.5px 0px rgba(0,0,0,0.8),
+                                    1.5px -1.5px 0px rgba(0,0,0,0.8),
+                                    -1.5px 1.5px 0px rgba(0,0,0,0.8),
+                                    0px 1.5px 0px rgba(0,0,0,0.8),
+                                    0px -1.5px 0px rgba(0,0,0,0.8),
+                                    1.5px 0px 0px rgba(0,0,0,0.8),
+                                    -1.5px 0px 0px rgba(0,0,0,0.8)
+                                  `
+                                }}
+                              >
+                                {t.content}
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* Smart Dot Tags Overlay */}
+                          <div className="grid-stickers-layer" style={{ zIndex: 19 }}>
+                            {(img.tags || []).map((tag) => (
+                              <div
+                                key={tag.id}
+                                className={`xhs-tag-container tag-direction-${tag.direction}`}
+                                style={{
+                                  position: 'absolute',
+                                  left: `${tag.x}%`,
+                                  top: `${tag.y}%`,
+                                  transform: 'translate(-50%, -50%)',
+                                  transformOrigin: 'center center'
+                                }}
+                              >
+                                {tag.direction === 'left' ? (
+                                  <>
+                                    <div className="xhs-tag-label">{tag.text}</div>
+                                    <div className="xhs-tag-dot"><div className="xhs-tag-dot-pulse"></div></div>
+                                  </>
+                                ) : (
+                                  <>
+                                    <div className="xhs-tag-dot"><div className="xhs-tag-dot-pulse"></div></div>
+                                    <div className="xhs-tag-label">{tag.text}</div>
+                                  </>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* EXIF Camera Info Watermark Overlay (applied inside cell) */}
+                        {selectedFrame !== 'none' && selectedFrame !== 'film-roll' && (
+                          <div className="exif-frame-bar">
+                            {selectedFrame === 'polaroid' ? (
+                              <div style={{ width: '100%', textAlign: 'center', letterSpacing: '1px' }}>
+                                {img.exif?.date || exifParams.date} · {img.exif?.model || exifParams.model || 'Moment'}
+                              </div>
+                            ) : (
+                              <>
+                                <div className="exif-left-params">
+                                  <span>{img.exif?.focal || exifParams.focal}</span>
+                                  <span>{img.exif?.fNumber || exifParams.fNumber}</span>
+                                  <span>{img.exif?.shutter || exifParams.shutter}</span>
+                                  <span>{img.exif?.iso || exifParams.iso}</span>
                                 </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
+                                
+                                {selectedFrame.startsWith('leica') ? (
+                                  <div className="leica-red-dot">LEICA</div>
+                                ) : selectedFrame === 'hasselblad' ? (
+                                  <div className="hasselblad-logo-text">HASSELBLAD</div>
+                                ) : null}
 
-                        {/* Handwritten Texts Overlay */}
-                        <div className="grid-stickers-layer" style={{ zIndex: 18 }}>
-                          {(img.texts || []).map((t) => (
-                            <div
-                              key={t.id}
-                              style={{
-                                position: 'absolute',
-                                left: `${t.x}%`,
-                                top: `${t.y}%`,
-                                transform: `translate(-50%, -50%) rotate(${t.rotation}deg) scale(${t.scale})`,
-                                color: t.color,
-                                fontFamily: "'Long Cang', 'Zhi Mang Xing', 'Caveat', cursive, sans-serif",
-                                fontSize: '20px',
-                                transformOrigin: 'center center',
-                                whiteSpace: 'nowrap',
-                                fontWeight: '500',
-                                textShadow: `
-                                  1.5px 1.5px 0px rgba(0,0,0,0.8),
-                                  -1.5px -1.5px 0px rgba(0,0,0,0.8),
-                                  1.5px -1.5px 0px rgba(0,0,0,0.8),
-                                  -1.5px 1.5px 0px rgba(0,0,0,0.8),
-                                  0px 1.5px 0px rgba(0,0,0,0.8),
-                                  0px -1.5px 0px rgba(0,0,0,0.8),
-                                  1.5px 0px 0px rgba(0,0,0,0.8),
-                                  -1.5px 0px 0px rgba(0,0,0,0.8)
-                                `
-                              }}
-                            >
-                              {t.content}
-                            </div>
-                          ))}
-                        </div>
+                                <div className="exif-right-model">
+                                  <div>{img.exif?.make || exifParams.make} {img.exif?.model || exifParams.model}</div>
+                                  <span className="exif-date-sub">{img.exif?.date || exifParams.date}</span>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )}
 
-                        {/* Smart Dot Tags Overlay */}
-                        <div className="grid-stickers-layer" style={{ zIndex: 19 }}>
-                          {(img.tags || []).map((tag) => (
-                            <div
-                              key={tag.id}
-                              className={`xhs-tag-container tag-direction-${tag.direction}`}
-                              style={{
-                                position: 'absolute',
-                                left: `${tag.x}%`,
-                                top: `${tag.y}%`,
-                                transform: 'translate(-50%, -50%)',
-                                transformOrigin: 'center center'
-                              }}
-                            >
-                              {tag.direction === 'left' ? (
-                                <>
-                                  <div className="xhs-tag-label">{tag.text}</div>
-                                  <div className="xhs-tag-dot"><div className="xhs-tag-dot-pulse"></div></div>
-                                </>
-                              ) : (
-                                <>
-                                  <div className="xhs-tag-dot"><div className="xhs-tag-dot-pulse"></div></div>
-                                  <div className="xhs-tag-label">{tag.text}</div>
-                                </>
-                              )}
+                        {/* Film Roll Sprockets & Markings (applied inside cell) */}
+                        {selectedFrame === 'film-roll' && (
+                          <>
+                            <div className="film-sprocket-strip top">
+                              {Array.from({ length: 9 }).map((_, i) => (
+                                <div key={i} className="film-sprocket-hole" />
+                              ))}
                             </div>
-                          ))}
-                        </div>
-
+                            <div className="film-marking-text top">
+                              <span>▲ {24 + idx * 2}</span>
+                              <span>FUJI FILM RDPIII</span>
+                              <span>{24 + idx * 2}A</span>
+                            </div>
+                            
+                            <div className="film-sprocket-strip bottom">
+                              {Array.from({ length: 9 }).map((_, i) => (
+                                <div key={i} className="film-sprocket-hole" />
+                              ))}
+                            </div>
+                            <div className="film-marking-text bottom">
+                              <span className="film-barcode-mark">||| | || || |||</span>
+                              <span>ISO 100</span>
+                              <span>{25 + idx * 2}</span>
+                            </div>
+                          </>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -3014,64 +3210,6 @@ function App() {
                       {globalMetadata.time && `📅 ${globalMetadata.time}`}
                     </div>
                   </div>
-                )}
-
-                {/* EXIF Camera Info Watermark Overlay */}
-                {selectedFrame !== 'none' && selectedFrame !== 'film-roll' && (
-                  <div className="exif-frame-bar">
-                    {selectedFrame === 'polaroid' ? (
-                      <div style={{ width: '100%', textAlign: 'center', letterSpacing: '1px' }}>
-                        {exifParams.date} · {exifParams.model || 'Moment'}
-                      </div>
-                    ) : (
-                      <>
-                        <div className="exif-left-params">
-                          <span>{exifParams.focal}</span>
-                          <span>{exifParams.fNumber}</span>
-                          <span>{exifParams.shutter}</span>
-                          <span>{exifParams.iso}</span>
-                        </div>
-                        
-                        {selectedFrame.startsWith('leica') ? (
-                          <div className="leica-red-dot">LEICA</div>
-                        ) : selectedFrame === 'hasselblad' ? (
-                          <div className="hasselblad-logo-text">HASSELBLAD</div>
-                        ) : null}
-
-                        <div className="exif-right-model">
-                          <div>{exifParams.make} {exifParams.model}</div>
-                          <span className="exif-date-sub">{exifParams.date}</span>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
-
-                {/* Film Roll Sprockets & Markings */}
-                {selectedFrame === 'film-roll' && (
-                  <>
-                    <div className="film-sprocket-strip top">
-                      {Array.from({ length: 9 }).map((_, i) => (
-                        <div key={i} className="film-sprocket-hole" />
-                      ))}
-                    </div>
-                    <div className="film-marking-text top">
-                      <span>▲ 24</span>
-                      <span>FUJI FILM RDPIII</span>
-                      <span>24A</span>
-                    </div>
-                    
-                    <div className="film-sprocket-strip bottom">
-                      {Array.from({ length: 9 }).map((_, i) => (
-                        <div key={i} className="film-sprocket-hole" />
-                      ))}
-                    </div>
-                    <div className="film-marking-text bottom">
-                      <span className="film-barcode-mark">||| | || || |||</span>
-                      <span>ISO 100</span>
-                      <span>25</span>
-                    </div>
-                  </>
                 )}
               </div>
 
