@@ -717,7 +717,7 @@ app.post('/api/ai/remove-objects', async (req, res) => {
 // AI 5. Generate Xiaohongshu Copywriting (Multi-modal)
 app.post('/api/ai/generate-copy', async (req, res) => {
   try {
-    const { image } = req.body;
+    const { image, style = '探店' } = req.body;
     if (!image) {
       return res.status(400).json({ error: 'Image base64 data is required.' });
     }
@@ -729,7 +729,31 @@ app.post('/api/ai/generate-copy', async (req, res) => {
 
     const imageDataUri = ensureDataUri(image);
 
-    console.log('Generating Xiaohongshu copy using Volcano Vision model...');
+    let promptStyleGuidance = '';
+    if (style === '探店') {
+      promptStyleGuidance = `这三款文案均应围绕【探店】风格进行创作，但侧重点不同：
+- 选项一的 styleName 为 “强力种草”：语气兴奋、极具煽动性，突出视觉亮点与招牌必点。
+- 选项二的 styleName 为 “真实探店”：客观细致，介绍环境、氛围、服务及消费体验，带入消费者第一视角。
+- 选项三的 styleName 为 “避坑与打卡”：精简吸睛，告诉读者哪里拍照最出片，有哪些拍照姿势和探店避坑小建议。`;
+    } else if (style === '心情故事') {
+      promptStyleGuidance = `这三款文案均应围绕【心情故事】风格进行创作，但侧重点不同：
+- 选项一的 styleName 为 “温暖治愈”：慢节奏、有故事感和温馨气息，探讨生活细节与小确幸。
+- 选项二的 styleName 为 “生活碎碎念”：结合日常碎片，表达对日常点滴的真实体会与生活趣味。
+- 选项三的 styleName 为 “情感金句”：文笔简练高级，直击心灵，容易引起小红书读者互动、收藏和情感共鸣。`;
+    } else if (style === '攻略') {
+      promptStyleGuidance = `这三款文案均应围绕【攻略】风格进行创作，但侧重点不同：
+- 选项一的 styleName 为 “保姆级指南”：分步骤列出详细的游玩/消费/使用路线，包括价格、时间、步骤和路线安排。
+- 选项二的 styleName 为 “干货避坑”：以QA或分点列出核心痛点，重点突出如何避坑、如何省时省钱或实用技巧。
+- 选项三的 styleName 为 “精华盘点”：提炼最值得打卡、最值得买或最值得体验的Top级必玩项目/必点清单。`;
+    } else {
+      // Custom style defined by user
+      promptStyleGuidance = `这三款文案均应围绕用户设定的自定义风格【${style}】进行创作，但侧重点不同：
+- 选项一的 styleName 为 “热情分享”：语气亲切、带有情绪价值，重点介绍相关亮点的体验感。
+- 选项二的 styleName 为 “深度体验”：偏向详细测评或故事记叙，有深度和细节描写。
+- 选项三的 styleName 为 “吸睛亮点”：精练高级，突出痛点与反差感，适合快节奏阅读，包含醒目小标题。`;
+    }
+
+    console.log(`Generating Xiaohongshu copy for style [${style}] using Volcano Vision model...`);
     const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
       method: 'POST',
       headers: {
@@ -748,16 +772,15 @@ app.post('/api/ai/generate-copy', async (req, res) => {
 1. 【爆款标题】（包含吸睛的Emoji，字数在20字以内）
 2. 【笔记正文】（包含Emoji排版，空行，内容活泼，适合社交分享，字数在150字左右）
 3. 【推荐话题标签】（例如 #日常碎片 #我的日常）
-这三款的风格分别应为：
-- 风格一：文艺生活碎片（温暖治愈，故事感强）
-- 风格二：元气干货日记（活泼幽默，带有生活感悟或实用建议）
-- 风格三：极简高级态度（文笔简练，有个性）
+
+这三款文案的风格要求如下：
+${promptStyleGuidance}
 
 请直接输出规范的 JSON 格式数据，以便系统直接解析，结构如下：
 {
   "options": [
     {
-      "styleName": "文艺生活碎片",
+      "styleName": "选项一的 styleName，如：强力种草",
       "title": "标题...",
       "body": "正文内容...",
       "tags": "#标签1 #标签2"

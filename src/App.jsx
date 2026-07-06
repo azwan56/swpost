@@ -264,6 +264,8 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [aiOperationName, setAiOperationName] = useState(''); // "大模型分析", "AI 消除", "吉卜力动漫化"
   const [errorMsg, setErrorMsg] = useState('');
+  const [copyStyle, setCopyStyle] = useState('探店'); // '探店', '心情故事', '攻略', '自定义'
+  const [customCopyStyle, setCustomCopyStyle] = useState('');
   
   // Refs
   const fileInputRef = useRef(null);
@@ -1848,6 +1850,12 @@ function App() {
   const handleGenerateAICopy = async () => {
     if (uploadedImages.length === 0 || !activeImage) return;
 
+    const selectedStyle = copyStyle === '自定义' ? customCopyStyle.trim() : copyStyle;
+    if (copyStyle === '自定义' && !selectedStyle) {
+      setErrorMsg('请输入您自定义的文案风格，例如“数码测评”');
+      return;
+    }
+
     setIsGeneratingCopy(true);
     setErrorMsg('');
 
@@ -1858,7 +1866,8 @@ function App() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          image: activeImage.croppedSrc
+          image: activeImage.croppedSrc,
+          style: selectedStyle
         })
       });
 
@@ -2303,34 +2312,35 @@ function App() {
                           }}
                           onMouseDown={(e) => handleStickerMouseDown(e, s)}
                           onTouchStart={(e) => handleStickerTouchStart(e, s)}
+                          onClick={(e) => e.stopPropagation()}
                         >
                           {STICKER_TEMPLATES[s.type]}
                           
                           {s.type === 'speech' && (
                             <div style={{
-                              position: 'absolute',
-                              top: '25%',
-                              left: '12%',
-                              width: '76%',
-                              height: '40%',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              fontSize: '12px',
-                              fontWeight: '600',
-                              color: '#222',
-                              textAlign: 'center',
-                              overflow: 'hidden',
-                              wordBreak: 'break-all'
-                            }}>
-                              {s.text}
-                            </div>
+                                position: 'absolute',
+                                top: '25%',
+                                left: '12%',
+                                width: '76%',
+                                height: '40%',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '12px',
+                                fontWeight: '600',
+                                color: '#222',
+                                textAlign: 'center',
+                                overflow: 'hidden',
+                                wordBreak: 'break-all'
+                              }}>
+                                {s.text}
+                              </div>
                           )}
 
                           {selectedStickerId === s.id && activeTab === 'sticker' && (
                             <>
                               <div className="sticker-delete-btn" onClick={(e) => deleteSticker(s.id, e)}>✕</div>
-                              <div className="sticker-rotate-btn" onMouseDown={(e) => handleRotateScaleMouseDown(e, s)} onTouchStart={(e) => handleRotateScaleTouchStart(e, s)}>⟳</div>
+                              <div className="sticker-rotate-btn" onMouseDown={(e) => handleRotateScaleMouseDown(e, s)} onTouchStart={(e) => handleRotateScaleTouchStart(e, s)} onClick={(e) => e.stopPropagation()}>⟳</div>
                             </>
                           )}
                         </div>
@@ -2357,13 +2367,14 @@ function App() {
                           }}
                           onMouseDown={(e) => handleTextMouseDown(e, t)}
                           onTouchStart={(e) => handleTextTouchStart(e, t)}
+                          onClick={(e) => e.stopPropagation()}
                         >
                           {t.content}
 
                           {selectedTextId === t.id && activeTab === 'text' && (
                             <>
                               <div className="text-delete-btn" onClick={(e) => deleteText(t.id, e)}>✕</div>
-                              <div className="text-rotate-btn" onMouseDown={(e) => handleTextRotateScaleMouseDown(e, t)} onTouchStart={(e) => handleTextRotateScaleTouchStart(e, t)}>⟳</div>
+                              <div className="text-rotate-btn" onMouseDown={(e) => handleTextRotateScaleMouseDown(e, t)} onTouchStart={(e) => handleTextRotateScaleTouchStart(e, t)} onClick={(e) => e.stopPropagation()}>⟳</div>
                             </>
                           )}
                         </div>
@@ -2386,6 +2397,7 @@ function App() {
                           }}
                           onMouseDown={(e) => handleTagMouseDown(e, tag)}
                           onTouchStart={(e) => handleTagTouchStart(e, tag)}
+                          onClick={(e) => e.stopPropagation()}
                           title="拖动位置，双击切换指向"
                           onDoubleClick={(e) => toggleTagDirection(tag.id, e)}
                         >
@@ -2631,6 +2643,64 @@ function App() {
                   <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
                     通过 Doubao 视觉大模型识别当前选中的图片，一键生成 3 种爆款小红书文案风格：
                   </p>
+
+                  <div style={{ marginBottom: '1rem' }}>
+                    <label className="form-label" style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.5rem', color: 'var(--text-primary)', fontWeight: 600 }}>
+                      ✍️ 选择生成风格：
+                    </label>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                      {['探店', '心情故事', '攻略', '自定义'].map((style) => (
+                        <button
+                          key={style}
+                          className="btn"
+                          style={{
+                            padding: '0.35rem 0.75rem',
+                            fontSize: '0.75rem',
+                            borderRadius: '20px',
+                            border: copyStyle === style ? 'none' : '1px solid var(--border-color)',
+                            background: copyStyle === style ? 'linear-gradient(135deg, #ff2442, #ff4d66)' : 'var(--bg-card)',
+                            color: copyStyle === style ? '#fff' : 'var(--text-secondary)',
+                            fontWeight: copyStyle === style ? '600' : 'normal',
+                            cursor: 'pointer',
+                            boxShadow: copyStyle === style ? '0 2px 6px rgba(255, 36, 66, 0.2)' : 'none',
+                            transition: 'all 0.2s ease',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.25rem'
+                          }}
+                          onClick={() => setCopyStyle(style)}
+                        >
+                          {style === '探店' && '🛍️ 探店'}
+                          {style === '心情故事' && '📖 心情故事'}
+                          {style === '攻略' && '🗺️ 攻略'}
+                          {style === '自定义' && '⚙️ 自定义'}
+                        </button>
+                      ))}
+                    </div>
+
+                    {copyStyle === '自定义' && (
+                      <div style={{ animation: 'fadeIn 0.2s ease' }}>
+                        <input
+                          type="text"
+                          className="form-control"
+                          placeholder="例如：科技测评、好物推荐、搞笑幽默..."
+                          style={{
+                            width: '100%',
+                            padding: '0.5rem 0.75rem',
+                            fontSize: '0.8rem',
+                            borderRadius: 'var(--radius-sm)',
+                            border: '1px solid var(--border-color)',
+                            backgroundColor: 'var(--bg-card)',
+                            color: 'var(--text-primary)',
+                            outline: 'none',
+                            boxSizing: 'border-box'
+                          }}
+                          value={customCopyStyle}
+                          onChange={(e) => setCustomCopyStyle(e.target.value)}
+                        />
+                      </div>
+                    )}
+                  </div>
                   
                   <button
                     className="btn btn-primary"
@@ -2638,7 +2708,7 @@ function App() {
                     onClick={handleGenerateAICopy}
                     disabled={isGeneratingCopy}
                   >
-                    {isGeneratingCopy ? '🤖 正在分析图片并撰写文案...' : '🚀 一键智能生成文案 (3款)'}
+                    {isGeneratingCopy ? '🤖 正在分析图片并撰写文案...' : `🚀 生成【${copyStyle === '自定义' ? (customCopyStyle || '自定义') : copyStyle}】文案 (3款)`}
                   </button>
 
                   {generatedCopyOptions.length > 0 ? (
