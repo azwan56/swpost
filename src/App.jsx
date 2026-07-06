@@ -72,8 +72,26 @@ const cropImagePhysically = (src, cropBox) => {
       
       canvas.width = width;
       canvas.height = height;
+
+      // Fill background with solid white
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, width, height);
       
-      ctx.drawImage(img, origX, origY, origWidth, origHeight, 0, 0, width, height);
+      // Calculate intersection bounds
+      const sX = Math.max(0, origX);
+      const sY = Math.max(0, origY);
+      const sW = Math.min(img.naturalWidth, origX + origWidth) - sX;
+      const sH = Math.min(img.naturalHeight, origY + origHeight) - sY;
+
+      if (sW > 0 && sH > 0) {
+        const dX = (sX - origX) * (width / origWidth);
+        const dY = (sY - origY) * (height / origHeight);
+        const dW = sW * (width / origWidth);
+        const dH = sH * (height / origHeight);
+        
+        ctx.drawImage(img, sX, sY, sW, sH, dX, dY, dW, dH);
+      }
+      
       resolve(canvas.toDataURL('image/jpeg', 0.95));
     };
     img.onerror = (err) => reject(new Error('Failed to load image for physical cropping: ' + err));
@@ -373,10 +391,10 @@ function App() {
       const ymax = ymin + H_crop;
 
       const newCropBox = {
-        xmin: Math.max(0, Math.min(100, (xmin / W) * 100)),
-        ymin: Math.max(0, Math.min(100, (ymin / H) * 100)),
-        xmax: Math.max(0, Math.min(100, (xmax / W) * 100)),
-        ymax: Math.max(0, Math.min(100, (ymax / H) * 100))
+        xmin: (xmin / W) * 100,
+        ymin: (ymin / H) * 100,
+        xmax: (xmax / W) * 100,
+        ymax: (ymax / H) * 100
       };
 
       const newCroppedSrc = await cropImagePhysically(activeImage.src, newCropBox);
@@ -457,10 +475,10 @@ function App() {
       const ymax = ymin + H_crop;
 
       const newCropBox = {
-        xmin: Math.max(0, Math.min(100, (xmin / W) * 100)),
-        ymin: Math.max(0, Math.min(100, (ymin / H) * 100)),
-        xmax: Math.max(0, Math.min(100, (xmax / W) * 100)),
-        ymax: Math.max(0, Math.min(100, (ymax / H) * 100))
+        xmin: (xmin / W) * 100,
+        ymin: (ymin / H) * 100,
+        xmax: (xmax / W) * 100,
+        ymax: (ymax / H) * 100
       };
 
       // Perform physical crop
