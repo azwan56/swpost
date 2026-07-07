@@ -717,43 +717,40 @@ app.post('/api/ai/remove-objects', async (req, res) => {
 // AI 5. Generate Xiaohongshu Copywriting (Multi-modal)
 app.post('/api/ai/generate-copy', async (req, res) => {
   try {
-    const { image, style = '探店' } = req.body;
-    if (!image) {
-      return res.status(400).json({ error: 'Image base64 data is required.' });
-    }
+    const { style = '探店', keywords = '' } = req.body;
 
     const volcKey = process.env.VOLC_API_KEY;
     if (!volcKey) {
       return res.status(500).json({ error: 'Volcano Ark Key is not configured on the server.' });
     }
 
-    const imageDataUri = ensureDataUri(image);
-
     let promptStyleGuidance = '';
     if (style === '探店') {
       promptStyleGuidance = `这三款文案均应围绕【探店】风格进行创作，但侧重点不同：
-- 选项一的 styleName 为 “强力种草”：语气兴奋、极具煽动性，突出视觉亮点与招牌必点。
-- 选项二的 styleName 为 “真实探店”：客观细致，介绍环境、氛围、服务及消费体验，带入消费者第一视角。
+- 选项一的 styleName 为 “强力种草”：语气兴奋、极具煽动性，突出探店的特色亮点、招牌特色及消费体验。
+- 选项二的 styleName 为 “真实体验”：客观细致，从消费者的第一视角，介绍店内的环境、氛围、服务品质和性价比。
 - 选项三的 styleName 为 “避坑与打卡”：精简吸睛，告诉读者哪里拍照最出片，有哪些拍照姿势和探店避坑小建议。`;
-    } else if (style === '心情故事') {
-      promptStyleGuidance = `这三款文案均应围绕【心情故事】风格进行创作，但侧重点不同：
-- 选项一的 styleName 为 “温暖治愈”：慢节奏、有故事感和温馨气息，探讨生活细节与小确幸。
-- 选项二的 styleName 为 “生活碎碎念”：结合日常碎片，表达对日常点滴的真实体会与生活趣味。
-- 选项三的 styleName 为 “情感金句”：文笔简练高级，直击心灵，容易引起小红书读者互动、收藏和情感共鸣。`;
-    } else if (style === '攻略') {
-      promptStyleGuidance = `这三款文案均应围绕【攻略】风格进行创作，但侧重点不同：
-- 选项一的 styleName 为 “保姆级指南”：分步骤列出详细的游玩/消费/使用路线，包括价格、时间、步骤和路线安排。
-- 选项二的 styleName 为 “干货避坑”：以QA或分点列出核心痛点，重点突出如何避坑、如何省时省钱或实用技巧。
-- 选项三的 styleName 为 “精华盘点”：提炼最值得打卡、最值得买或最值得体验的Top级必玩项目/必点清单。`;
+    } else if (style === '旅行心情') {
+      promptStyleGuidance = `这三款文案均应围绕【旅行心情】风格进行创作，但侧重点不同：
+- 选项一的 styleName 为 “文艺治愈”：慢节奏、有故事感和温馨气息，探讨旅行中的偶遇、风景与内心的平静。
+- 选项二的 styleName 为 “碎碎念记录”：活泼轻快，记录旅途中的趣味瞬间、突发小状况或真实的旅行状态。
+- 选项三的 styleName 为 “金句共鸣”：文笔简练高级，探讨旅行的意义，产出容易引起小红书读者互动和收藏的金句。`;
     } else {
       // Custom style defined by user
       promptStyleGuidance = `这三款文案均应围绕用户设定的自定义风格【${style}】进行创作，但侧重点不同：
-- 选项一的 styleName 为 “热情分享”：语气亲切、带有情绪价值，重点介绍相关亮点的体验感。
-- 选项二的 styleName 为 “深度体验”：偏向详细测评或故事记叙，有深度和细节描写。
-- 选项三的 styleName 为 “吸睛亮点”：精练高级，突出痛点与反差感，适合快节奏阅读，包含醒目小标题。`;
+- 选项一的 styleName 为 “热情分享”：语气亲切、带有情绪价值，重点介绍相关亮点和核心体验。
+- 选项二的 styleName 为 “深度测评”：偏向详细测评、利弊分析或细节描述，有深度和实用性。
+- 选项三的 styleName 为 “吸睛亮点”：精练高级，突出重点与反差感，适合快节奏阅读，包含醒目小标题。`;
     }
 
-    console.log(`Generating Xiaohongshu copy for style [${style}] using Volcano Vision model...`);
+    let keywordsPrompt = '';
+    if (keywords && keywords.trim() !== '') {
+      keywordsPrompt = `用户提供的主题/关键词为：“${keywords.trim()}”。请紧密结合这些关键词和主题进行内容创作。`;
+    } else {
+      keywordsPrompt = `用户未提供具体的关键词，请基于该风格的特点创作一个通用的、具有代表性的小红书爆款模板内容。`;
+    }
+
+    console.log(`Generating Xiaohongshu copy for style [${style}] and keywords [${keywords}] using Volcano...`);
     const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
       method: 'POST',
       headers: {
@@ -768,13 +765,15 @@ app.post('/api/ai/generate-copy', async (req, res) => {
             content: [
               {
                 type: 'text',
-                text: `你是一个小红书运营大师与视觉策划博主。请分析这张图片，为用户生成3款不同情感路线的小红书爆款文案。每一款文案必须包含：
-1. 【爆款标题】（包含吸睛的Emoji，字数在20字以内）
+                text: `你是一个小红书运营大师与视觉策划博主。请根据用户选择的风格和给出的关键词，为用户生成3款不同情感路线的小红书爆款文案。每一款文案必须包含：
+1. 【爆款标题】（包含吸睛 of Emoji，字数在20字以内）
 2. 【笔记正文】（包含Emoji排版，空行，内容活泼，适合社交分享，字数在150字左右）
 3. 【推荐话题标签】（例如 #日常碎片 #我的日常）
 
 这三款文案的风格要求如下：
 ${promptStyleGuidance}
+
+${keywordsPrompt}
 
 请直接输出规范的 JSON 格式数据，以便系统直接解析，结构如下：
 {
@@ -789,12 +788,6 @@ ${promptStyleGuidance}
   ]
 }
 不要输出任何 Markdown 格式包裹（如 \`\`\`json 标记），不要输出任何解释性话语，直接返回纯 JSON 对象。`
-              },
-              {
-                type: 'image_url',
-                image_url: {
-                  url: imageDataUri
-                }
               }
             ]
           }
@@ -804,13 +797,13 @@ ${promptStyleGuidance}
 
     if (!response.ok) {
       const errText = await response.text();
-      throw new Error(`Volcano Vision API failed: ${response.status} - ${errText}`);
+      throw new Error(`Volcano API failed: ${response.status} - ${errText}`);
     }
 
     const data = await response.json();
     let text = data.choices?.[0]?.message?.content?.trim();
     if (!text) {
-      throw new Error('Empty response from Volcano Vision model.');
+      throw new Error('Empty response from Volcano model.');
     }
 
     // Clean Markdown code block wrapper if present

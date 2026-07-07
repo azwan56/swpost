@@ -267,6 +267,7 @@ function App() {
   const [copyStyle, setCopyStyle] = useState('探店'); // '探店', '心情故事', '攻略', '自定义'
   const [customCopyStyle, setCustomCopyStyle] = useState('');
   const [selectedExportIds, setSelectedExportIds] = useState([]);
+  const [copyKeywords, setCopyKeywords] = useState('');
   
   // Refs
   const fileInputRef = useRef(null);
@@ -1849,10 +1850,8 @@ function App() {
     }
   };
 
-  // AI Copywriting Generator (vision-based)
+  // AI Copywriting Generator (text-prompt based)
   const handleGenerateAICopy = async () => {
-    if (uploadedImages.length === 0 || !activeImage) return;
-
     const selectedStyle = copyStyle === '自定义' ? customCopyStyle.trim() : copyStyle;
     if (copyStyle === '自定义' && !selectedStyle) {
       setErrorMsg('请输入您自定义的文案风格，例如“数码测评”');
@@ -1869,8 +1868,8 @@ function App() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          image: activeImage.croppedSrc,
-          style: selectedStyle
+          style: selectedStyle,
+          keywords: copyKeywords
         })
       });
 
@@ -1892,7 +1891,7 @@ function App() {
       }
     } catch (err) {
       console.error('AICopy error:', err);
-      setErrorMsg(err.message || 'AI 文案生成失败，请检查火山引擎 Vision 接口可用性。');
+      setErrorMsg(err.message || 'AI 文案生成失败，请检查火山引擎接口可用性。');
     } finally {
       setIsGeneratingCopy(false);
     }
@@ -2083,19 +2082,42 @@ function App() {
     try {
       for (let i = 0; i < imagesToExport.length; i++) {
         const img = imagesToExport[i];
-        const targetElement = document.getElementById(`preview-cell-${img.id}`);
-        if (!targetElement) continue;
+        const originalElement = document.getElementById(`preview-cell-${img.id}`);
+        if (!originalElement) continue;
 
-        // Small delay between calls to let the UI update and avoid browser download blocking
-        await new Promise(resolve => setTimeout(resolve, 250));
+        // Get actual computed dimensions
+        const rect = originalElement.getBoundingClientRect();
+        const width = rect.width;
+        const height = rect.height;
 
-        const canvas = await html2canvas(targetElement, {
+        // Clone the element
+        const clone = originalElement.cloneNode(true);
+        
+        // Style the clone to have explicit size and be offscreen but visible in DOM
+        clone.style.position = 'fixed';
+        clone.style.top = '-9999px';
+        clone.style.left = '-9999px';
+        clone.style.width = `${width}px`;
+        clone.style.height = `${height}px`;
+        clone.style.display = 'flex';
+        clone.style.flexDirection = 'column';
+        
+        // Append clone to body
+        document.body.appendChild(clone);
+
+        // Small delay to allow styling to take effect and avoid browser download blocking
+        await new Promise(resolve => setTimeout(resolve, 200));
+
+        const canvas = await html2canvas(clone, {
           useCORS: true,
-          scale: 3.5,
+          scale: 5,
           allowTaint: true,
           backgroundColor: '#ffffff',
           logging: false
         });
+
+        // Clean up the clone
+        document.body.removeChild(clone);
 
         const imageURL = canvas.toDataURL('image/jpeg', 0.95);
         const link = document.createElement('a');
@@ -2148,24 +2170,10 @@ function App() {
             <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
               <button 
                 className="btn btn-primary" 
-                style={{ background: 'linear-gradient(135deg, #ff2442, #ff4d66)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }} 
-                onClick={exportCollageImageOnly}
-              >
-                💾 导出拼图照片 (不含文案)
-              </button>
-              <button 
-                className="btn btn-secondary" 
-                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
-                onClick={exportPosterJPG}
-              >
-                🖼️ 导出完整卡片
-              </button>
-              <button 
-                className="btn btn-secondary" 
-                style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)', color: 'white', border: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }} 
+                style={{ background: 'linear-gradient(135deg, #ff2442, #ff4d66)', color: 'white', border: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontWeight: '600' }} 
                 onClick={exportSelectedSingleImages}
               >
-                ⚡ 批量导出单图 ({selectedExportIds.length})
+                ⚡ 批量导出已选单图 ({selectedExportIds.length})
               </button>
             </div>
           )}
@@ -2821,19 +2829,18 @@ function App() {
                 </div>
               )}
 
-              {/* AI Copywriting Panel */}
               {activeTab === 'ai-copy' && (
                 <div>
                   <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-                    通过 Doubao 视觉大模型识别当前选中的图片，一键生成 3 种爆款小红书文案风格：
+                    🤖 AI 一键生成文案，轻松创作爆款标题与小红书文章：
                   </p>
 
                   <div style={{ marginBottom: '1rem' }}>
                     <label className="form-label" style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.5rem', color: 'var(--text-primary)', fontWeight: 600 }}>
-                      ✍️ 选择生成风格：
+                      ✍️ 选择文章风格：
                     </label>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                      {['探店', '心情故事', '攻略', '自定义'].map((style) => (
+                      {['探店', '旅行心情', '自定义'].map((style) => (
                         <button
                           key={style}
                           className="btn"
@@ -2855,15 +2862,14 @@ function App() {
                           onClick={() => setCopyStyle(style)}
                         >
                           {style === '探店' && '🛍️ 探店'}
-                          {style === '心情故事' && '📖 心情故事'}
-                          {style === '攻略' && '🗺️ 攻略'}
+                          {style === '旅行心情' && '✈️ 旅行心情'}
                           {style === '自定义' && '⚙️ 自定义'}
                         </button>
                       ))}
                     </div>
 
                     {copyStyle === '自定义' && (
-                      <div style={{ animation: 'fadeIn 0.2s ease' }}>
+                      <div style={{ animation: 'fadeIn 0.2s ease', marginBottom: '0.75rem' }}>
                         <input
                           type="text"
                           className="form-control"
@@ -2884,6 +2890,32 @@ function App() {
                         />
                       </div>
                     )}
+
+                    <div style={{ marginTop: '0.75rem' }}>
+                      <label className="form-label" style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.5rem', color: 'var(--text-primary)', fontWeight: 600 }}>
+                        📝 输入主题/亮点描述（选填）：
+                      </label>
+                      <textarea
+                        className="form-control"
+                        placeholder="例如：在杭州西湖骑行看日落，天气非常晴朗，橙红色的夕阳倒映在水面上，极其治愈温馨..."
+                        rows="3"
+                        style={{
+                          width: '100%',
+                          padding: '0.5rem 0.75rem',
+                          fontSize: '0.8rem',
+                          borderRadius: 'var(--radius-sm)',
+                          border: '1px solid var(--border-color)',
+                          backgroundColor: 'var(--bg-card)',
+                          color: 'var(--text-primary)',
+                          outline: 'none',
+                          boxSizing: 'border-box',
+                          resize: 'none',
+                          fontFamily: 'inherit'
+                        }}
+                        value={copyKeywords}
+                        onChange={(e) => setCopyKeywords(e.target.value)}
+                      />
+                    </div>
                   </div>
                   
                   <button
@@ -2892,7 +2924,7 @@ function App() {
                     onClick={handleGenerateAICopy}
                     disabled={isGeneratingCopy}
                   >
-                    {isGeneratingCopy ? '🤖 正在分析图片并撰写文案...' : `🚀 生成【${copyStyle === '自定义' ? (customCopyStyle || '自定义') : copyStyle}】文案 (3款)`}
+                    {isGeneratingCopy ? '🤖 正在撰写文案中...' : `🚀 生成【${copyStyle === '自定义' ? (customCopyStyle || '自定义') : copyStyle}】文案 (3款)`}
                   </button>
 
                   {generatedCopyOptions.length > 0 ? (
@@ -2939,6 +2971,33 @@ function App() {
                         </div>
                         <div style={{ fontSize: '0.8rem', color: '#4f46e5', fontWeight: 600, marginTop: '0.5rem' }}>
                           {generatedCopyOptions[activeCopyOptionIdx].tags}
+                        </div>
+                      </div>
+
+                      {/* Manual adjustment section */}
+                      <div style={{ marginTop: '0.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' }}>
+                        <label className="form-label" style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.5rem', color: 'var(--text-primary)', fontWeight: 600 }}>
+                          ✍️ 微调文案内容：
+                        </label>
+                        <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+                          <label className="form-label" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>编辑标题</label>
+                          <input 
+                            type="text" 
+                            className="form-control" 
+                            style={{ width: '100%', padding: '0.4rem 0.5rem', fontSize: '0.8rem', boxSizing: 'border-box' }}
+                            value={aiTitle} 
+                            onChange={(e) => setAiTitle(e.target.value)}
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>编辑正文与标签</label>
+                          <textarea 
+                            className="form-control" 
+                            rows="6"
+                            style={{ width: '100%', padding: '0.4rem 0.5rem', fontSize: '0.8rem', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }}
+                            value={aiBody} 
+                            onChange={(e) => setAiBody(e.target.value)}
+                          />
                         </div>
                       </div>
                     </div>
@@ -3180,47 +3239,7 @@ function App() {
             </div>
           )}
 
-          {/* 4. AI Post */}
-          {uploadedImages.length > 0 && (
-            <div className="card">
-              <h2 className="card-title">🤖 第三步：AI 排版与文章生成</h2>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-                百炼 AI 将重新分析这 {uploadedImages.length} 张图片，**自动进行防变形物理裁切**，并在空白处排版手写词和贴纸。
-              </p>
-              <button 
-                className="btn btn-primary" 
-                style={{ width: '100%' }}
-                onClick={handleAIGeneration}
-                disabled={isLoading}
-              >
-                ✨ AI 一键智能裁切与文章生成
-              </button>
 
-              {(aiTitle || aiBody) && (
-                <div style={{ marginTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                  <div className="form-group">
-                    <label className="form-label">海报标题</label>
-                    <input 
-                      type="text" 
-                      className="form-control" 
-                      value={aiTitle} 
-                      onChange={(e) => setAiTitle(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label">海报正文</label>
-                    <textarea 
-                      className="form-control" 
-                      rows="8" 
-                      value={aiBody} 
-                      onChange={(e) => setAiBody(e.target.value)}
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
 
         </section>
 
@@ -3233,23 +3252,9 @@ function App() {
                 <button 
                   className="btn btn-primary" 
                   style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #ff2442, #ff4d66)', border: 'none', color: '#fff', fontWeight: '600' }} 
-                  onClick={exportCollageImageOnly}
-                >
-                  💾 导出拼图 (推荐)
-                </button>
-                <button 
-                  className="btn btn-secondary" 
-                  style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} 
-                  onClick={exportPosterJPG}
-                >
-                  🖼️ 完整卡片
-                </button>
-                <button 
-                  className="btn btn-secondary" 
-                  style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #3b82f6, #2563eb)', color: 'white', border: 'none' }} 
                   onClick={exportSelectedSingleImages}
                 >
-                  ⚡ 批量导出单图 ({selectedExportIds.length})
+                  ⚡ 批量导出已选单图 ({selectedExportIds.length})
                 </button>
               </div>
             )}
