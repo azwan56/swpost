@@ -194,7 +194,7 @@ function App() {
   const [uploadedImages, setUploadedImages] = useState([]); // [{ id, file, src, croppedSrc, metadata: { time, location }, cropBox, stickers: [], texts: [], drawings: null }]
   const [activeIdx, setActiveIdx] = useState(0); 
   const [globalMetadata, setGlobalMetadata] = useState({ time: '', location: '' });
-  const [activeTab, setActiveTab] = useState('pan'); // 'pan', 'sticker', 'text', 'erase'
+  const [activeTab, setActiveTab] = useState('frame'); // 'frame', 'sticker', 'text', 'erase'
   
   // Camera Frame & EXIF parameters states
   const [selectedFrame, setSelectedFrame] = useState('none'); // 'none', 'leica-white', 'leica-black', 'hasselblad', 'polaroid'
@@ -2070,53 +2070,192 @@ function App() {
       return;
     }
 
-    // Temporary clear selections to avoid rendering selection borders
+    // Save current drawings before starting export
+    saveCurrentDrawings();
+
     setSelectedStickerId(null);
     setSelectedTextId(null);
-
-    const imagesToExport = uploadedImages.filter(img => selectedExportIds.includes(img.id));
 
     setIsLoading(true);
     setAiOperationName('正在批量导出图片');
 
     try {
-      for (let i = 0; i < imagesToExport.length; i++) {
-        const img = imagesToExport[i];
-        const originalElement = document.getElementById(`preview-cell-${img.id}`);
-        if (!originalElement) continue;
+      const originalActiveIdx = activeIdx;
 
-        // Get actual computed dimensions
-        const rect = originalElement.getBoundingClientRect();
-        const width = rect.width;
-        const height = rect.height;
+      for (let i = 0; i < uploadedImages.length; i++) {
+        const img = uploadedImages[i];
+        if (!selectedExportIds.includes(img.id)) continue;
+
+        // Switch active index to render this image in the workspace editor
+        setActiveIdx(i);
+        // Wait for React to update and render the DOM
+        await new Promise(resolve => setTimeout(resolve, 300));
+
+        // Get the workspace wrapper containing the active image and frame
+        const workspaceElement = document.querySelector('.editor-canvas-container .grid-cell-frame-wrapper');
+        if (!workspaceElement) continue;
+
+        const editorWidth = workspaceElement.offsetWidth || 400;
+        const targetWidth = 1600;
+        const scaleRatio = targetWidth / editorWidth;
 
         // Clone the element
-        const clone = originalElement.cloneNode(true);
+        const clone = workspaceElement.cloneNode(true);
         
-        // Style the clone to have explicit size and be offscreen but visible in DOM
+        // Style the clone to have explicit size and be offscreen
         clone.style.position = 'fixed';
         clone.style.top = '-9999px';
         clone.style.left = '-9999px';
-        clone.style.width = `${width}px`;
-        clone.style.height = `${height}px`;
+        clone.style.width = `${targetWidth}px`;
+        clone.style.height = 'auto';
         clone.style.display = 'flex';
         clone.style.flexDirection = 'column';
-        
+        clone.style.boxShadow = 'none';
+
+        // Scale EXIF frame paddings
+        if (selectedFrame === 'leica-white' || selectedFrame === 'leica-black') {
+          clone.style.setProperty('padding', `${10 * scaleRatio}px ${10 * scaleRatio}px ${38 * scaleRatio}px ${10 * scaleRatio}px`, 'important');
+        } else if (selectedFrame === 'hasselblad') {
+          clone.style.setProperty('padding', `${12 * scaleRatio}px ${12 * scaleRatio}px ${42 * scaleRatio}px ${12 * scaleRatio}px`, 'important');
+        } else if (selectedFrame === 'polaroid') {
+          clone.style.setProperty('padding', `${10 * scaleRatio}px ${10 * scaleRatio}px ${42 * scaleRatio}px ${10 * scaleRatio}px`, 'important');
+        } else if (selectedFrame === 'film-roll') {
+          clone.style.setProperty('padding', `${15 * scaleRatio}px ${38 * scaleRatio}px`, 'important');
+        }
+
+        // Adjust stickers inside the clone
+        const stickers = clone.querySelectorAll('.sticker-item');
+        stickers.forEach(s => {
+          s.classList.remove('selected');
+          const deleteBtn = s.querySelector('.sticker-delete-btn');
+          if (deleteBtn) deleteBtn.remove();
+          const rotateBtn = s.querySelector('.sticker-rotate-btn');
+          if (rotateBtn) rotateBtn.remove();
+          const editBtn = s.querySelector('.sticker-edit-btn');
+          if (editBtn) editBtn.remove();
+
+          const origWidth = parseFloat(s.style.width) || 70;
+          const origHeight = parseFloat(s.style.height) || 70;
+          s.style.width = `${origWidth * scaleRatio}px`;
+          s.style.height = `${origHeight * scaleRatio}px`;
+
+          const speechText = s.querySelector('div');
+          if (speechText) {
+            const origFontSize = parseFloat(speechText.style.fontSize) || 12;
+            speechText.style.setProperty('font-size', `${origFontSize * scaleRatio}px`, 'important');
+          }
+        });
+
+        // Adjust handwritten texts inside the clone
+        const texts = clone.querySelectorAll('.handwritten-text-item');
+        texts.forEach(t => {
+          t.classList.remove('selected');
+          const deleteBtn = t.querySelector('.text-delete-btn');
+          if (deleteBtn) deleteBtn.remove();
+          const rotateBtn = t.querySelector('.text-rotate-btn');
+          if (rotateBtn) rotateBtn.remove();
+
+          const origFontSize = parseFloat(t.style.fontSize) || 20;
+          t.style.fontSize = `${origFontSize * scaleRatio}px`;
+        });
+
+        // Adjust EXIF bar height and font size inside the clone
+        const exifBar = clone.querySelector('.exif-frame-bar');
+        if (exifBar) {
+          exifBar.style.setProperty('height', `${34 * scaleRatio}px`, 'important');
+          exifBar.style.setProperty('font-size', `${8 * scaleRatio}px`, 'important');
+          exifBar.style.setProperty('padding', `0 ${12 * scaleRatio}px`, 'important');
+          
+          const modelText = exifBar.querySelector('.exif-right-model div');
+          if (modelText) {
+            modelText.style.setProperty('font-size', `${8 * scaleRatio}px`, 'important');
+          }
+          const dateText = exifBar.querySelector('.exif-date-sub');
+          if (dateText) {
+            dateText.style.setProperty('font-size', `${6 * scaleRatio}px`, 'important');
+          }
+          const leftParams = exifBar.querySelector('.exif-left-params');
+          if (leftParams) {
+            leftParams.style.setProperty('gap', `${6 * scaleRatio}px`, 'important');
+          }
+          const redDot = exifBar.querySelector('.leica-red-dot');
+          if (redDot) {
+            redDot.style.setProperty('font-size', `${7 * scaleRatio}px`, 'important');
+            redDot.style.setProperty('padding', `${1 * scaleRatio}px ${3 * scaleRatio}px`, 'important');
+            redDot.style.setProperty('border-radius', `${2 * scaleRatio}px`, 'important');
+            redDot.style.setProperty('height', `${14 * scaleRatio}px`, 'important');
+            redDot.style.setProperty('line-height', `${12 * scaleRatio}px`, 'important');
+          }
+          const hassLogo = exifBar.querySelector('.hasselblad-logo-text');
+          if (hassLogo) {
+            hassLogo.style.setProperty('font-size', `${6 * scaleRatio}px`, 'important');
+            hassLogo.style.setProperty('letter-spacing', `${1 * scaleRatio}px`, 'important');
+          }
+        }
+
+        // Adjust Film Roll sprockets inside the clone
+        const filmRollStripTop = clone.querySelector('.film-sprocket-strip.top');
+        const filmRollStripBottom = clone.querySelector('.film-sprocket-strip.bottom');
+        if (filmRollStripTop) {
+          filmRollStripTop.style.setProperty('height', `${15 * scaleRatio}px`, 'important');
+          filmRollStripTop.style.setProperty('padding', `0 ${10 * scaleRatio}px`, 'important');
+          filmRollStripTop.querySelectorAll('.film-sprocket-hole').forEach(hole => {
+            hole.style.setProperty('width', `${7 * scaleRatio}px`, 'important');
+            hole.style.setProperty('height', `${10 * scaleRatio}px`, 'important');
+            hole.style.setProperty('border-radius', `${1.5 * scaleRatio}px`, 'important');
+          });
+        }
+        if (filmRollStripBottom) {
+          filmRollStripBottom.style.setProperty('height', `${15 * scaleRatio}px`, 'important');
+          filmRollStripBottom.style.setProperty('padding', `0 ${10 * scaleRatio}px`, 'important');
+          filmRollStripBottom.querySelectorAll('.film-sprocket-hole').forEach(hole => {
+            hole.style.setProperty('width', `${7 * scaleRatio}px`, 'important');
+            hole.style.setProperty('height', `${10 * scaleRatio}px`, 'important');
+            hole.style.setProperty('border-radius', `${1.5 * scaleRatio}px`, 'important');
+          });
+        }
+        const filmMarkTextTop = clone.querySelector('.film-marking-text.top');
+        if (filmMarkTextTop) {
+          filmMarkTextTop.style.setProperty('font-size', `${9 * scaleRatio}px`, 'important');
+          filmMarkTextTop.style.setProperty('height', `${15 * scaleRatio}px`, 'important');
+          filmMarkTextTop.style.setProperty('padding', `0 ${20 * scaleRatio}px`, 'important');
+        }
+        const filmMarkTextBottom = clone.querySelector('.film-marking-text.bottom');
+        if (filmMarkTextBottom) {
+          filmMarkTextBottom.style.setProperty('font-size', `${9 * scaleRatio}px`, 'important');
+          filmMarkTextBottom.style.setProperty('height', `${15 * scaleRatio}px`, 'important');
+          filmMarkTextBottom.style.setProperty('padding', `0 ${20 * scaleRatio}px`, 'important');
+          const barcode = filmMarkTextBottom.querySelector('.film-barcode-mark');
+          if (barcode) {
+            barcode.style.setProperty('font-size', `${10 * scaleRatio}px`, 'important');
+            barcode.style.setProperty('letter-spacing', `${0.5 * scaleRatio}px`, 'important');
+          }
+        }
+
+        // Adjust Location and Date Bar overlay inside the clone
+        const metaBar = clone.querySelector('.poster-meta-bar');
+        if (metaBar) {
+          metaBar.style.setProperty('padding', `${8 * scaleRatio}px ${12 * scaleRatio}px`, 'important');
+          metaBar.style.setProperty('font-size', `${9 * scaleRatio}px`, 'important');
+        }
+
         // Append clone to body
         document.body.appendChild(clone);
 
-        // Small delay to allow styling to take effect and avoid browser download blocking
-        await new Promise(resolve => setTimeout(resolve, 200));
+        // Small delay to allow layout to settle
+        await new Promise(resolve => setTimeout(resolve, 150));
+
+        const bg = selectedFrame === 'leica-white' ? '#fff' : selectedFrame === 'leica-black' ? '#0c0c0c' : selectedFrame === 'hasselblad' ? '#121212' : selectedFrame === 'polaroid' ? '#fcfbf9' : 'transparent';
 
         const canvas = await html2canvas(clone, {
           useCORS: true,
-          scale: 5,
+          scale: 1, // Sized to 1600px width natively
           allowTaint: true,
-          backgroundColor: '#ffffff',
+          backgroundColor: bg === 'transparent' ? '#ffffff' : bg,
           logging: false
         });
 
-        // Clean up the clone
+        // Clean up
         document.body.removeChild(clone);
 
         const imageURL = canvas.toDataURL('image/jpeg', 0.95);
@@ -2125,6 +2264,10 @@ function App() {
         link.href = imageURL;
         link.click();
       }
+
+      // Restore original active photo index in editor
+      setActiveIdx(originalActiveIdx);
+
     } catch (err) {
       console.error('Failed to batch export images:', err);
       setErrorMsg('部分图片导出失败，请重试。');
@@ -2378,12 +2521,6 @@ function App() {
             <div className="card">
               <div className="canvas-tabs">
                 <button 
-                  className={`canvas-tab-btn ${activeTab === 'pan' ? 'active' : ''}`}
-                  onClick={handleEnterPanTab}
-                >
-                  🔍 位置调整
-                </button>
-                <button 
                   className={`canvas-tab-btn ${activeTab === 'frame' ? 'active' : ''}`}
                   onClick={() => setActiveTab('frame')}
                 >
@@ -2414,294 +2551,6 @@ function App() {
                   🤖 AI文案
                 </button>
               </div>
-
-              {/* Editor Workspace Canvas */}
-              <div 
-                className="editor-canvas-container" 
-                style={{ overflow: 'visible', margin: '0.5rem 0' }}
-              >
-                <div 
-                  className="annotation-wrapper" 
-                  style={{ position: 'relative', width: '100%' }}
-                  onClick={() => { setSelectedStickerId(null); setSelectedTextId(null); setSelectedTagId(null); }}
-                >
-                  
-                  <div 
-                    ref={editorImageContainerRef}
-                    className="grid-image-container" 
-                    style={{ 
-                      aspectRatio: getActiveCellAspectRatio(), 
-                      width: '100%', 
-                      borderRadius: 'var(--radius-md)', 
-                      overflow: 'hidden' 
-                    }}
-                  >
-                    {/* Render original image in 'pan' mode, otherwise render croppedSrc */}
-                    {activeTab === 'pan' ? (
-                      <img 
-                        src={activeImage.src} 
-                        className="pan-image" 
-                        alt="Adjust Position"
-                        onMouseDown={startPanning}
-                        onMouseMove={pan}
-                        onMouseUp={stopPanning}
-                        onMouseLeave={stopPanning}
-                        onTouchStart={handleTouchStartPanning}
-                        onTouchMove={handleTouchMovePanning}
-                        onTouchEnd={handleTouchEndPanning}
-                        style={{ 
-                          position: 'absolute', 
-                          width: '100%', 
-                          height: '100%', 
-                          objectFit: 'cover',
-                          cursor: isPanning ? 'grabbing' : 'grab',
-                          transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${panZoom})`,
-                          transformOrigin: 'center center',
-                          userSelect: 'none',
-                          WebkitUserDrag: 'none'
-                        }}
-                      />
-                    ) : (
-                      <img 
-                        src={activeImage.croppedSrc} 
-                        className="base-image" 
-                        alt="Active Editor"
-                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                      />
-                    )}
-
-                    {/* Erase (Inpainting Mask) brush canvas layer */}
-                    <canvas
-                      ref={eraseCanvasRef}
-                      className="drawing-canvas"
-                      style={{ pointerEvents: activeTab === 'erase' ? 'auto' : 'none', zIndex: 12, opacity: 0.8 }}
-                      onMouseDown={startErasing}
-                      onMouseMove={drawEraseMark}
-                      onMouseUp={stopErasing}
-                      onMouseLeave={stopErasing}
-                      onTouchStart={handleTouchStartErasing}
-                      onTouchMove={handleTouchMoveErasing}
-                      onTouchEnd={handleTouchEndErasing}
-                    />
-
-                    {/* Stickers Overlay */}
-                    <div 
-                      className="stickers-container"
-                      style={{ pointerEvents: 'none', zIndex: 15 }}
-                    >
-                      {activeImage.stickers.map((s) => (
-                        <div
-                          key={s.id}
-                          id={`sticker-${s.id}`}
-                          className={`sticker-item ${selectedStickerId === s.id ? 'selected' : ''}`}
-                          style={{
-                            left: `${s.x}%`,
-                            top: `${s.y}%`,
-                            transform: `translate(-50%, -50%) rotate(${s.rotation}deg) scale(${s.scale})`,
-                            width: `${s.width}px`,
-                            height: `${s.height}px`,
-                            pointerEvents: activeTab === 'sticker' ? 'auto' : 'none'
-                          }}
-                          onMouseDown={(e) => handleStickerMouseDown(e, s)}
-                          onTouchStart={(e) => handleStickerTouchStart(e, s)}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {STICKER_TEMPLATES[s.type]}
-                          
-                          {s.type === 'speech' && (
-                            <div style={{
-                                position: 'absolute',
-                                top: '25%',
-                                left: '12%',
-                                width: '76%',
-                                height: '40%',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontSize: '12px',
-                                fontWeight: '600',
-                                color: '#222',
-                                textAlign: 'center',
-                                overflow: 'hidden',
-                                wordBreak: 'break-all'
-                              }}>
-                                {s.text}
-                              </div>
-                          )}
-
-                          {selectedStickerId === s.id && activeTab === 'sticker' && (
-                            <>
-                              <div className="sticker-delete-btn" onClick={(e) => deleteSticker(s.id, e)}>✕</div>
-                              <div className="sticker-rotate-btn" onMouseDown={(e) => handleRotateScaleMouseDown(e, s)} onTouchStart={(e) => handleRotateScaleTouchStart(e, s)} onClick={(e) => e.stopPropagation()}>⟳</div>
-                            </>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Handwritten Texts Overlay */}
-                    <div
-                      className="stickers-container"
-                      style={{ pointerEvents: 'none', zIndex: 18 }}
-                    >
-                      {(activeImage.texts || []).map((t) => (
-                        <div
-                          key={t.id}
-                          id={`text-${t.id}`}
-                          className={`handwritten-text-item ${selectedTextId === t.id ? 'selected' : ''}`}
-                          style={{
-                            left: `${t.x}%`,
-                            top: `${t.y}%`,
-                            transform: `translate(-50%, -50%) rotate(${t.rotation}deg) scale(${t.scale})`,
-                            color: t.color,
-                            fontSize: '20px',
-                            pointerEvents: activeTab === 'text' ? 'auto' : 'none'
-                          }}
-                          onMouseDown={(e) => handleTextMouseDown(e, t)}
-                          onTouchStart={(e) => handleTextTouchStart(e, t)}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {t.content}
-
-                          {selectedTextId === t.id && activeTab === 'text' && (
-                            <>
-                              <div className="text-delete-btn" onClick={(e) => deleteText(t.id, e)}>✕</div>
-                              <div className="text-rotate-btn" onMouseDown={(e) => handleTextRotateScaleMouseDown(e, t)} onTouchStart={(e) => handleTextRotateScaleTouchStart(e, t)} onClick={(e) => e.stopPropagation()}>⟳</div>
-                            </>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Smart Dot Tags Overlay */}
-                    <div
-                      className="stickers-container"
-                      style={{ pointerEvents: 'none', zIndex: 19 }}
-                    >
-                      {(activeImage.tags || []).map((tag) => (
-                        <div
-                          key={tag.id}
-                          className={`xhs-tag-container tag-direction-${tag.direction} ${selectedTagId === tag.id ? 'selected' : ''}`}
-                          style={{
-                            left: `${tag.x}%`,
-                            top: `${tag.y}%`,
-                            pointerEvents: activeTab === 'sticker' ? 'auto' : 'none'
-                          }}
-                          onMouseDown={(e) => handleTagMouseDown(e, tag)}
-                          onTouchStart={(e) => handleTagTouchStart(e, tag)}
-                          onClick={(e) => e.stopPropagation()}
-                          title="拖动位置，双击切换指向"
-                          onDoubleClick={(e) => toggleTagDirection(tag.id, e)}
-                        >
-                          {tag.direction === 'left' ? (
-                            <>
-                              <div className="xhs-tag-label">{tag.text}</div>
-                              <div className="xhs-tag-dot"><div className="xhs-tag-dot-pulse"></div></div>
-                            </>
-                          ) : (
-                            <>
-                              <div className="xhs-tag-dot"><div className="xhs-tag-dot-pulse"></div></div>
-                              <div className="xhs-tag-label">{tag.text}</div>
-                            </>
-                          )}
-
-                          {selectedTagId === tag.id && activeTab === 'sticker' && (
-                            <div 
-                              className="sticker-delete-btn" 
-                              style={{ top: '-15px', right: '-15px' }}
-                              onClick={(e) => deleteDotTag(tag.id, e)}
-                            >
-                              ✕
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-
-                  </div>
-
-                </div>
-              </div>
- 
-              {/* Pan Tab (Adjust framing) */}
-              {activeTab === 'pan' && (
-                <div>
-                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-                    在上方照片区域中**直接按住并拖拽**以平移调整裁剪画面，使用下方滑块进行缩放：
-                  </p>
-                  
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', background: 'var(--bg-main)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', marginBottom: '0.75rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                      <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>🔍 画面缩放:</span>
-                      <input 
-                        type="range" 
-                        min="1" 
-                        max="3" 
-                        step="0.05"
-                        value={panZoom} 
-                        onChange={(e) => {
-                          const newZoom = parseFloat(e.target.value);
-                          setPanZoom(newZoom);
-                          
-                          // Dynamically clamp the panOffset when zooming out
-                          if (editorImageContainerRef.current) {
-                            const rect = editorImageContainerRef.current.getBoundingClientRect();
-                            const W_c = rect.width;
-                            const H_c = rect.height;
-                            const img = new Image();
-                            img.src = activeImage.src;
-                            img.onload = () => {
-                              const W = img.naturalWidth;
-                              const H = img.naturalHeight;
-                              let W_r = W_c, H_r = H_c;
-                              if (W / H > W_c / H_c) {
-                                H_r = H_c;
-                                W_r = H_c * (W / H);
-                              } else {
-                                W_r = W_c;
-                                H_r = W_c * (H / W);
-                              }
-                              const maxDx = (W_r * newZoom - W_c) / 2;
-                              const maxDy = (H_r * newZoom - H_c) / 2;
-                              setPanOffset(prev => ({
-                                x: Math.max(-maxDx, Math.min(maxDx, prev.x)),
-                                y: Math.max(-maxDy, Math.min(maxDy, prev.y))
-                              }));
-                            };
-                          }
-                        }}
-                        onMouseUp={() => autoSavePanCrop()}
-                        onTouchEnd={() => autoSavePanCrop()}
-                        style={{ flex: 1, accentColor: 'var(--xhs-red)' }}
-                      />
-                      <span style={{ fontSize: '0.85rem', fontWeight: 600, minWidth: '2.5rem', textAlign: 'right' }}>
-                        {panZoom.toFixed(2)}x
-                      </span>
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <button 
-                      className="btn btn-secondary"
-                      style={{ flex: 1 }}
-                      onClick={() => { 
-                        setPanOffset({ x: 0, y: 0 }); 
-                        setPanZoom(1); 
-                        autoSavePanCrop(1, { x: 0, y: 0 });
-                      }}
-                    >
-                      重置位置
-                    </button>
-                    <button 
-                      className="btn btn-primary"
-                      style={{ flex: 2, background: 'linear-gradient(135deg, #10b981, #059669)' }}
-                      onClick={handleSavePanCrop}
-                    >
-                      ✅ 完成并保存位置
-                    </button>
-                  </div>
-                </div>
-              )}
 
               {/* Frame Tab (Camera Borders) */}
               {activeTab === 'frame' && (
@@ -3243,10 +3092,10 @@ function App() {
 
         </section>
 
-        {/* Right Preview Side */}
-        <section className="preview-panel">
-          <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
-            <h2 className="card-title" style={{ margin: 0 }}>📊 小红书排版卡片预览</h2>
+        {/* Right Canvas Workspace Column */}
+        <section className="preview-panel" style={{ flex: '1.4' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center', marginBottom: '0.5rem' }}>
+            <h2 className="card-title" style={{ margin: 0 }}>🎨 高清画布编辑与预览</h2>
             {uploadedImages.length > 0 && (
               <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                 <button 
@@ -3260,233 +3109,286 @@ function App() {
             )}
           </div>
 
-          <div className="poster-container-wrapper">
-            <div id="xiaohongshu-card" className="poster-card" ref={posterRef}>
-              
-              {/* Collage grid (no warp, cover fit on physically cropped images) */}
-              <div className="poster-image-area">
-                {uploadedImages.length > 0 ? (
-                  <div className={`poster-image-grid poster-image-grid-${uploadedImages.length}`}>
-                    {uploadedImages.map((img, idx) => (
-                      <div 
-                        key={img.id}
-                        id={`preview-cell-${img.id}`}
-                        className={`grid-cell-frame-wrapper grid-item-${idx} ${selectedFrame !== 'none' ? `frame-${selectedFrame}` : ''}`}
-                      >
-                        <div className="grid-image-container">
-                          {/* Cropped Base Image - rendered as background cover to fix html2canvas object-fit cover rendering bug */}
-                          {activeTab === 'pan' && idx === activeIdx ? (
-                            <div style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
-                              <img 
-                                src={img.src} 
-                                alt="Live Position Adjustment"
-                                style={{
-                                  position: 'absolute',
-                                  width: '100%',
-                                  height: '100%',
-                                  objectFit: 'cover',
-                                  transform: `translate(${(editorImageContainerRef.current?.getBoundingClientRect()?.width ? (panOffset.x / editorImageContainerRef.current.getBoundingClientRect().width) * 100 : 0)}%, ${(editorImageContainerRef.current?.getBoundingClientRect()?.height ? (panOffset.y / editorImageContainerRef.current.getBoundingClientRect().height) * 100 : 0)}%) scale(${panZoom})`,
-                                  transformOrigin: 'center center',
-                                  pointerEvents: 'none'
-                                }}
-                              />
-                            </div>
-                          ) : (
-                            <div 
-                              style={{ 
-                                width: '100%', 
-                                height: '100%', 
-                                backgroundImage: `url(${img.croppedSrc})`,
-                                backgroundSize: 'cover',
-                                backgroundPosition: 'center',
-                                backgroundRepeat: 'no-repeat',
-                                display: 'block' 
-                              }}
-                            />
+          {uploadedImages.length > 0 && activeImage ? (
+            <div className="card" style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '1.5rem', boxSizing: 'border-box' }}>
+              <div 
+                className="editor-canvas-container" 
+                style={{ overflow: 'visible', margin: '0', width: '100%', maxWidth: '600px' }}
+              >
+                <div 
+                  className={`grid-cell-frame-wrapper ${selectedFrame !== 'none' ? `frame-${selectedFrame}` : ''}`}
+                  style={{ 
+                    position: 'relative', 
+                    width: '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    boxSizing: 'border-box',
+                    backgroundColor: selectedFrame === 'leica-white' ? '#fff' : selectedFrame === 'leica-black' ? '#0c0c0c' : selectedFrame === 'hasselblad' ? '#121212' : selectedFrame === 'polaroid' ? '#fcfbf9' : 'transparent'
+                  }}
+                >
+                  <div 
+                    className="annotation-wrapper" 
+                    style={{ position: 'relative', width: '100%' }}
+                    onClick={() => { setSelectedStickerId(null); setSelectedTextId(null); setSelectedTagId(null); }}
+                  >
+                    <div 
+                      ref={editorImageContainerRef}
+                      className="grid-image-container" 
+                      style={{ 
+                        width: '100%', 
+                        borderRadius: selectedFrame !== 'none' ? '0' : 'var(--radius-md)', 
+                        overflow: 'hidden',
+                        position: 'relative'
+                      }}
+                    >
+                      {/* Image - rendered full size, no cropping */}
+                      <img 
+                        src={activeImage.croppedSrc} 
+                        className="base-image" 
+                        alt="Active Editor"
+                        style={{ width: '100%', display: 'block', height: 'auto' }}
+                      />
+
+                      {/* Brush drawing canvas layer */}
+                      <canvas
+                        ref={drawingCanvasRef}
+                        className="drawing-canvas"
+                        style={{ pointerEvents: activeTab === 'draw' ? 'auto' : 'none', zIndex: 14 }}
+                        onMouseDown={startDrawing}
+                        onMouseMove={draw}
+                        onMouseUp={stopDrawing}
+                        onMouseLeave={stopDrawing}
+                        onTouchStart={handleTouchStartDrawing}
+                        onTouchMove={handleTouchMoveDrawing}
+                        onTouchEnd={handleTouchEndDrawing}
+                      />
+
+                      {/* Erase (Inpainting Mask) brush canvas layer */}
+                      <canvas
+                        ref={eraseCanvasRef}
+                        className="drawing-canvas"
+                        style={{ pointerEvents: activeTab === 'erase' ? 'auto' : 'none', zIndex: 12, opacity: 0.8 }}
+                        onMouseDown={startErasing}
+                        onMouseMove={drawEraseMark}
+                        onMouseUp={stopErasing}
+                        onMouseLeave={stopErasing}
+                        onTouchStart={handleTouchStartErasing}
+                        onTouchMove={handleTouchMoveErasing}
+                        onTouchEnd={handleTouchEndErasing}
+                      />
+                    </div>
+
+                    {/* Stickers Overlay */}
+                    <div
+                      className="stickers-container"
+                      style={{ pointerEvents: 'none', zIndex: 15 }}
+                    >
+                      {activeImage.stickers.map((s) => (
+                        <div
+                          key={s.id}
+                          id={`sticker-${s.id}`}
+                          className={`sticker-item ${selectedStickerId === s.id ? 'selected' : ''}`}
+                          style={{
+                            left: `${s.x}%`,
+                            top: `${s.y}%`,
+                            transform: `translate(-50%, -50%) rotate(${s.rotation}deg) scale(${s.scale})`,
+                            width: `${s.width}px`,
+                            height: `${s.height}px`,
+                            pointerEvents: activeTab === 'sticker' ? 'auto' : 'none'
+                          }}
+                          onMouseDown={(e) => handleStickerMouseDown(e, s)}
+                          onTouchStart={(e) => handleStickerTouchStart(e, s)}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {STICKER_TEMPLATES[s.type]}
+                          
+                          {s.type === 'speech' && (
+                            <div style={{
+                                position: 'absolute',
+                                top: '25%',
+                                left: '12%',
+                                width: '76%',
+                                height: '40%',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '12px',
+                                fontWeight: '600',
+                                color: '#222',
+                                textAlign: 'center',
+                                overflow: 'hidden',
+                                wordBreak: 'break-all'
+                              }}>
+                                {s.text}
+                              </div>
                           )}
 
-                          {/* Hand drawings overlay */}
-                          {img.drawings && (
-                            <img 
-                              src={img.drawings} 
-                              className="grid-drawing-canvas" 
-                              alt={`Drawings ${idx}`}
-                            />
+                          {selectedStickerId === s.id && activeTab === 'sticker' && (
+                            <>
+                              <div className="sticker-delete-btn" onClick={(e) => deleteSticker(s.id, e)}>✕</div>
+                              <div className="sticker-rotate-btn" onMouseDown={(e) => handleRotateScaleMouseDown(e, s)} onTouchStart={(e) => handleRotateScaleTouchStart(e, s)} onClick={(e) => e.stopPropagation()}>⟳</div>
+                              {s.type === 'speech' && (
+                                <div 
+                                  className="sticker-edit-btn" 
+                                  style={{ position: 'absolute', bottom: '-20px', left: '50%', transform: 'translateX(-50%)', backgroundColor: '#4f46e5', color: 'white', borderRadius: '3px', padding: '1px 4px', fontSize: '9px', cursor: 'pointer', zIndex: 100, pointerEvents: 'auto', whiteSpace: 'nowrap' }}
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const txt = prompt('输入气泡文字:', s.text || '');
+                                    if (txt !== null) updateStickerText(s.id, txt);
+                                  }}
+                                >
+                                  ✍️ 文字
+                                </div>
+                              )}
+                            </>
                           )}
-
-                          {/* Stickers Overlay */}
-                          <div className="grid-stickers-layer">
-                            {img.stickers.map((s) => (
-                              <div
-                                key={s.id}
-                                style={{
-                                  position: 'absolute',
-                                  left: `${s.x}%`,
-                                  top: `${s.y}%`,
-                                  transform: `translate(-50%, -50%) rotate(${s.rotation}deg) scale(${s.scale})`,
-                                  width: `${s.width}px`,
-                                  height: `${s.height}px`,
-                                  transformOrigin: 'center center'
-                                }}
-                              >
-                                {STICKER_TEMPLATES[s.type]}
-                                
-                                {s.type === 'speech' && (
-                                  <div style={{
-                                    position: 'absolute',
-                                    top: '25%',
-                                    left: '12%',
-                                    width: '76%',
-                                    height: '40%',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    fontSize: '12px',
-                                    fontWeight: '600',
-                                    color: '#222',
-                                    textAlign: 'center',
-                                    overflow: 'hidden',
-                                    wordBreak: 'break-all'
-                                  }}>
-                                    {s.text}
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-
-                          {/* Handwritten Texts Overlay */}
-                          <div className="grid-stickers-layer" style={{ zIndex: 18 }}>
-                            {(img.texts || []).map((t) => (
-                              <div
-                                key={t.id}
-                                style={{
-                                  position: 'absolute',
-                                  left: `${t.x}%`,
-                                  top: `${t.y}%`,
-                                  transform: `translate(-50%, -50%) rotate(${t.rotation}deg) scale(${t.scale})`,
-                                  color: t.color,
-                                  fontFamily: "'Long Cang', 'Zhi Mang Xing', 'Caveat', cursive, sans-serif",
-                                  fontSize: '20px',
-                                  transformOrigin: 'center center',
-                                  whiteSpace: 'nowrap',
-                                  fontWeight: '500',
-                                  textShadow: `
-                                    1.5px 1.5px 0px rgba(0,0,0,0.8),
-                                    -1.5px -1.5px 0px rgba(0,0,0,0.8),
-                                    1.5px -1.5px 0px rgba(0,0,0,0.8),
-                                    -1.5px 1.5px 0px rgba(0,0,0,0.8),
-                                    0px 1.5px 0px rgba(0,0,0,0.8),
-                                    0px -1.5px 0px rgba(0,0,0,0.8),
-                                    1.5px 0px 0px rgba(0,0,0,0.8),
-                                    -1.5px 0px 0px rgba(0,0,0,0.8)
-                                  `
-                                }}
-                              >
-                                {t.content}
-                              </div>
-                            ))}
-                          </div>
-
-                          {/* Smart Dot Tags Overlay */}
-                          <div className="grid-stickers-layer" style={{ zIndex: 19 }}>
-                            {(img.tags || []).map((tag) => (
-                              <div
-                                key={tag.id}
-                                className={`xhs-tag-container tag-direction-${tag.direction}`}
-                                style={{
-                                  position: 'absolute',
-                                  left: `${tag.x}%`,
-                                  top: `${tag.y}%`,
-                                  transform: 'translate(-50%, -50%)',
-                                  transformOrigin: 'center center'
-                                }}
-                              >
-                                {tag.direction === 'left' ? (
-                                  <>
-                                    <div className="xhs-tag-label">{tag.text}</div>
-                                    <div className="xhs-tag-dot"><div className="xhs-tag-dot-pulse"></div></div>
-                                  </>
-                                ) : (
-                                  <>
-                                    <div className="xhs-tag-dot"><div className="xhs-tag-dot-pulse"></div></div>
-                                    <div className="xhs-tag-label">{tag.text}</div>
-                                  </>
-                                )}
-                              </div>
-                            ))}
-                          </div>
                         </div>
+                      ))}
+                    </div>
 
-                        {/* EXIF Camera Info Watermark Overlay (applied inside cell) */}
-                        {selectedFrame !== 'none' && selectedFrame !== 'film-roll' && (
-                          <div className="exif-frame-bar">
-                            {selectedFrame === 'polaroid' ? (
-                              <div style={{ width: '100%', textAlign: 'center', letterSpacing: '1px' }}>
-                                {img.exif?.date || exifParams.date} · {img.exif?.model || exifParams.model || 'Moment'}
-                              </div>
-                            ) : (
-                              <>
-                                <div className="exif-left-params">
-                                  <span>{img.exif?.focal || exifParams.focal}</span>
-                                  <span>{img.exif?.fNumber || exifParams.fNumber}</span>
-                                  <span>{img.exif?.shutter || exifParams.shutter}</span>
-                                  <span>{img.exif?.iso || exifParams.iso}</span>
-                                </div>
-                                
-                                {selectedFrame.startsWith('leica') ? (
-                                  <div className="leica-red-dot">LEICA</div>
-                                ) : selectedFrame === 'hasselblad' ? (
-                                  <div className="hasselblad-logo-text">HASSELBLAD</div>
-                                ) : null}
+                    {/* Handwritten Texts Overlay */}
+                    <div
+                      className="stickers-container"
+                      style={{ pointerEvents: 'none', zIndex: 18 }}
+                    >
+                      {(activeImage.texts || []).map((t) => (
+                        <div
+                          key={t.id}
+                          id={`text-${t.id}`}
+                          className={`handwritten-text-item ${selectedTextId === t.id ? 'selected' : ''}`}
+                          style={{
+                            left: `${t.x}%`,
+                            top: `${t.y}%`,
+                            transform: `translate(-50%, -50%) rotate(${t.rotation}deg) scale(${t.scale})`,
+                            color: t.color,
+                            fontSize: '20px',
+                            pointerEvents: activeTab === 'text' ? 'auto' : 'none'
+                          }}
+                          onMouseDown={(e) => handleTextMouseDown(e, t)}
+                          onTouchStart={(e) => handleTextTouchStart(e, t)}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {t.content}
 
-                                <div className="exif-right-model">
-                                  <div>{img.exif?.make || exifParams.make} {img.exif?.model || exifParams.model}</div>
-                                  <span className="exif-date-sub">{img.exif?.date || exifParams.date}</span>
-                                </div>
-                              </>
-                            )}
+                          {selectedTextId === t.id && activeTab === 'text' && (
+                            <>
+                              <div className="text-delete-btn" onClick={(e) => deleteText(t.id, e)}>✕</div>
+                              <div className="text-rotate-btn" onMouseDown={(e) => handleTextRotateScaleMouseDown(e, t)} onTouchStart={(e) => handleTextRotateScaleTouchStart(e, t)} onClick={(e) => e.stopPropagation()}>⟳</div>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Smart Dot Tags Overlay */}
+                    <div
+                      className="stickers-container"
+                      style={{ pointerEvents: 'none', zIndex: 19 }}
+                    >
+                      {(activeImage.tags || []).map((tag) => (
+                        <div
+                          key={tag.id}
+                          className={`xhs-tag-container tag-direction-${tag.direction} ${selectedTagId === tag.id ? 'selected' : ''}`}
+                          style={{
+                            left: `${tag.x}%`,
+                            top: `${tag.y}%`,
+                            pointerEvents: activeTab === 'sticker' ? 'auto' : 'none'
+                          }}
+                          onMouseDown={(e) => handleTagMouseDown(e, tag)}
+                          onTouchStart={(e) => handleTagTouchStart(e, tag)}
+                          onClick={(e) => e.stopPropagation()}
+                          title="拖动位置，双击切换指向"
+                          onDoubleClick={(e) => toggleTagDirection(tag.id, e)}
+                        >
+                          {tag.direction === 'left' ? (
+                            <>
+                              <div className="xhs-tag-label">{tag.text}</div>
+                              <div className="xhs-tag-dot"><div className="xhs-tag-dot-pulse"></div></div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="xhs-tag-dot"><div className="xhs-tag-dot-pulse"></div></div>
+                              <div className="xhs-tag-label">{tag.text}</div>
+                            </>
+                          )}
+
+                          {selectedTagId === tag.id && activeTab === 'sticker' && (
+                            <div 
+                              className="sticker-delete-btn" 
+                              style={{ top: '-15px', right: '-15px' }}
+                              onClick={(e) => deleteDotTag(tag.id, e)}
+                            >
+                              ✕
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* EXIF Camera Info Watermark Overlay (applied inside cell) */}
+                  {selectedFrame !== 'none' && selectedFrame !== 'film-roll' && (
+                    <div className="exif-frame-bar">
+                      {selectedFrame === 'polaroid' ? (
+                        <div style={{ width: '100%', textAlign: 'center', letterSpacing: '1px' }}>
+                          {activeImage.exif?.date || exifParams.date} · {activeImage.exif?.model || exifParams.model || 'Moment'}
+                        </div>
+                      ) : (
+                        <>
+                          <div className="exif-left-params">
+                            <span>{activeImage.exif?.focal || exifParams.focal}</span>
+                            <span>{activeImage.exif?.fNumber || exifParams.fNumber}</span>
+                            <span>{activeImage.exif?.shutter || exifParams.shutter}</span>
+                            <span>{activeImage.exif?.iso || exifParams.iso}</span>
                           </div>
-                        )}
+                          
+                          {selectedFrame.startsWith('leica') ? (
+                            <div className="leica-red-dot">LEICA</div>
+                          ) : selectedFrame === 'hasselblad' ? (
+                            <div className="hasselblad-logo-text">HASSELBLAD</div>
+                          ) : null}
 
-                        {/* Film Roll Sprockets & Markings (applied inside cell) */}
-                        {selectedFrame === 'film-roll' && (
-                          <>
-                            <div className="film-sprocket-strip top">
-                              {Array.from({ length: 9 }).map((_, i) => (
-                                <div key={i} className="film-sprocket-hole" />
-                              ))}
-                            </div>
-                            <div className="film-marking-text top">
-                              <span>▲ {24 + idx * 2}</span>
-                              <span>FUJI FILM RDPIII</span>
-                              <span>{24 + idx * 2}A</span>
-                            </div>
-                            
-                            <div className="film-sprocket-strip bottom">
-                              {Array.from({ length: 9 }).map((_, i) => (
-                                <div key={i} className="film-sprocket-hole" />
-                              ))}
-                            </div>
-                            <div className="film-marking-text bottom">
-                              <span className="film-barcode-mark">||| | || || |||</span>
-                              <span>ISO 100</span>
-                              <span>{25 + idx * 2}</span>
-                            </div>
-                          </>
-                        )}
+                          <div className="exif-right-model">
+                            <div>{activeImage.exif?.make || exifParams.make} {activeImage.exif?.model || exifParams.model}</div>
+                            <span className="exif-date-sub">{activeImage.exif?.date || exifParams.date}</span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Film Roll Sprockets & Markings (applied inside cell) */}
+                  {selectedFrame === 'film-roll' && (
+                    <>
+                      <div className="film-sprocket-strip top">
+                        {Array.from({ length: 9 }).map((_, i) => (
+                          <div key={i} className="film-sprocket-hole" />
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ height: '300px', backgroundColor: '#e9ecef', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6c757d', flexDirection: 'column', gap: '0.5rem' }}>
-                    <span>🌅 多图拼图区域</span>
-                  </div>
-                )}
-
+                      <div className="film-marking-text top">
+                        <span>▲ {24 + activeIdx * 2}</span>
+                        <span>FUJI FILM RDPIII</span>
+                        <span>{24 + activeIdx * 2}A</span>
+                      </div>
+                      
+                      <div className="film-sprocket-strip bottom">
+                        {Array.from({ length: 9 }).map((_, i) => (
+                          <div key={i} className="film-sprocket-hole" />
+                        ))}
+                      </div>
+                      <div className="film-marking-text bottom">
+                        <span className="film-barcode-mark">||| | || || |||</span>
+                        <span>ISO 100</span>
+                        <span>{25 + activeIdx * 2}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+                
                 {/* Location and Date Bar overlay */}
                 {selectedFrame === 'none' && (globalMetadata.location || globalMetadata.time) && (
-                  <div className="poster-meta-bar">
+                  <div className="poster-meta-bar" style={{ position: 'absolute', bottom: 0, left: 0, width: '100%' }}>
                     <div className="poster-meta-item">
                       {globalMetadata.location && `📍 ${globalMetadata.location}`}
                     </div>
@@ -3496,107 +3398,12 @@ function App() {
                   </div>
                 )}
               </div>
-
-              {/* Text Area */}
-              <div className="poster-content-area">
-                {/* Copy Buttons Toolbar */}
-                <div 
-                  className="poster-text-actions" 
-                  data-html2canvas-ignore="true"
-                  style={{
-                    display: 'flex',
-                    gap: '0.4rem',
-                    marginBottom: '0.75rem',
-                    justifyContent: 'flex-end',
-                    flexWrap: 'wrap'
-                  }}
-                >
-                  <button
-                    className="btn"
-                    style={{
-                      padding: '0.25rem 0.5rem',
-                      fontSize: '0.7rem',
-                      borderRadius: '4px',
-                      border: '1px solid var(--border-color)',
-                      background: 'var(--bg-main)',
-                      color: 'var(--text-secondary)',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.15rem'
-                    }}
-                    onClick={() => {
-                      navigator.clipboard.writeText(aiTitle || '日常碎碎念 ✨');
-                      alert('📋 标题已复制！');
-                    }}
-                  >
-                    🏷️ 复制标题
-                  </button>
-                  <button
-                    className="btn"
-                    style={{
-                      padding: '0.25rem 0.5rem',
-                      fontSize: '0.7rem',
-                      borderRadius: '4px',
-                      border: '1px solid var(--border-color)',
-                      background: 'var(--bg-main)',
-                      color: 'var(--text-secondary)',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.15rem'
-                    }}
-                    onClick={() => {
-                      navigator.clipboard.writeText(aiBody || '');
-                      alert('📝 正文与标签已复制！');
-                    }}
-                  >
-                    ✍️ 复制正文
-                  </button>
-                  <button
-                    className="btn btn-primary"
-                    style={{
-                      padding: '0.25rem 0.5rem',
-                      fontSize: '0.7rem',
-                      borderRadius: '4px',
-                      background: 'linear-gradient(135deg, #ff2442, #ff4d66)',
-                      color: '#fff',
-                      cursor: 'pointer',
-                      border: 'none',
-                      fontWeight: '600',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.15rem'
-                    }}
-                    onClick={() => {
-                      const fullText = `【${aiTitle || '日常碎碎念 ✨'}】\n\n${aiBody || ''}`;
-                      navigator.clipboard.writeText(fullText);
-                      alert('✨ 全部文案已复制！');
-                    }}
-                  >
-                    📋 复制全部
-                  </button>
-                </div>
-
-                <h3 className="poster-title">
-                  {aiTitle || '日常碎碎念 ✨'}
-                </h3>
-                <div className="poster-body">
-                  {aiBody || '上传图片并一键生成，AI将自动为您进行智能排版...✍️'}
-                </div>
-                
-                {/* Poster Footer */}
-                <div className="poster-footer">
-                  <div className="poster-author">
-                    <div className="poster-avatar">R</div>
-                    <div className="poster-author-name">RedNote-Life</div>
-                  </div>
-                  <div className="poster-brand-watermark">REDNOTE</div>
-                </div>
-              </div>
-
             </div>
-          </div>
+          ) : (
+            <div className="card" style={{ width: '100%', height: '350px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6c757d' }}>
+              <span>🌅 请先在左侧上传并选择照片进行编辑</span>
+            </div>
+          )}
         </section>
       </main>
     </div>
