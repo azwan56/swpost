@@ -1837,6 +1837,15 @@ function App() {
 
       const result = await res.json();
       
+      // Log which model was used
+      const modelUsed = result.model || 'unknown';
+      console.log(`[StyleTransfer] 使用引擎: ${modelUsed}`);
+      
+      // If DashScope fallback was used, show a subtle notice
+      if (modelUsed === 'dashscope-wanx') {
+        setErrorMsg('⚠️ 当前使用备用引擎（万相），画质可能不如 Seedream。请检查火山引擎配置。');
+      }
+      
       // Update base src and croppedSrc with the style-transferred version and reset crop parameters
       setUploadedImages(prev => prev.map((img, idx) => {
         if (idx === activeIdx) {

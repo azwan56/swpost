@@ -398,61 +398,74 @@ app.post('/api/ai/style-transfer', async (req, res) => {
     const dashscopeApiKey = process.env.DASHSCOPE_API_KEY;
 
     if (!volcApiKey && !dashscopeApiKey) {
-      return res.status(500).json({ error: 'Neither VOLC_API_KEY nor DASHSCOPE_API_KEY is configured.' });
+      return res.status(500).json({ error: '服务器未配置 VOLC_API_KEY 或 DASHSCOPE_API_KEY，请联系管理员。' });
     }
 
-    // ===== Option A: Try Volcano Ark Doubao-Seedream first if key is present =====
+    // ===== Primary: Volcano Ark Doubao-Seedream (highest quality) =====
     if (volcApiKey) {
-      try {
-        console.log(`Attempting style transfer (${style}) using Volcano Ark (Doubao Seedream)...`);
-        
-        let prompt = '将参考图转换成极其精美的吉卜力动画风格，宫崎骏工作室手绘画风，温暖治愈的水彩线条，梦幻柔和的动漫光影，明亮清新的色彩，高清原画品质';
-        if (style === 'clay') {
-          prompt = '将参考图重新渲染成软萌可爱的3D泥塑黏土人偶玩具风格，黏土橡皮泥材质，温润反光表面，明亮清新的色彩，纯色背景，高分辨率，3d clay illustration';
-        } else if (style === 'japanese-film') {
-          prompt = '将参考图重新渲染成精美的复古日式胶片风格照片，温暖怀旧的色彩，富士胶片质感，柔和微细颗粒感，自然采光，analog camera photography, Fuji film look, retro warm vintage tones, high quality';
-        }
+      console.log(`[StyleTransfer] 使用 Volcano Ark (Doubao Seedream 5.0), style=${style}`);
+      
+      let prompt = '将参考图转换成极其精美的吉卜力动画风格，宫崎骏工作室手绘画风，温暖治愈的水彩线条，梦幻柔和的动漫光影，明亮清新的色彩，高清原画品质';
+      if (style === 'clay') {
+        prompt = '将参考图重新渲染成软萌可爱的3D泥塑黏土人偶玩具风格，黏土橡皮泥材质，温润反光表面，明亮清新的色彩，纯色背景，高分辨率，3d clay illustration';
+      } else if (style === 'japanese-film') {
+        prompt = '将参考图重新渲染成精美的复古日式胶片风格照片，温暖怀旧的色彩，富士胶片质感，柔和微细颗粒感，自然采光，analog camera photography, Fuji film look, retro warm vintage tones, high quality';
+      }
 
-        const volcResponse = await fetch('https://ark.cn-beijing.volces.com/api/v3/images/generations', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${volcApiKey}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            model: 'doubao-seedream-5-0-260128',
-            prompt: prompt,
-            image: [imageDataUri],
-            size: '2048x2048',
-            n: 1
-          })
-        });
+      // Use "2K" to let Seedream auto-adapt aspect ratio instead of forcing square 2048x2048
+      const volcPayload = {
+        model: 'doubao-seedream-5-0-260128',
+        prompt: prompt,
+        image: [imageDataUri],
+        size: '2K',
+        n: 1
+      };
 
-        if (volcResponse.ok) {
-          const volcData = await volcResponse.json();
-          console.log('Volcano Ark response data:', JSON.stringify(volcData));
-          const resultUrl = volcData.data?.[0]?.url;
-          if (resultUrl) {
-            console.log('Volcano Ark generation succeeded! Converting URL to base64...');
-            const resultBase64 = await convertUrlToBase64(resultUrl);
-            return res.json({ image: resultBase64 });
-          }
+      console.log(`[StyleTransfer] Sending to Seedream: model=${volcPayload.model}, size=${volcPayload.size}, prompt length=${prompt.length}`);
+
+      const volcResponse = await fetch('https://ark.cn-beijing.volces.com/api/v3/images/generations', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${volcApiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(volcPayload)
+      });
+
+      if (volcResponse.ok) {
+        const volcData = await volcResponse.json();
+        console.log('[StyleTransfer] Seedream response received:', JSON.stringify(volcData).substring(0, 500));
+        const resultUrl = volcData.data?.[0]?.url;
+        if (resultUrl) {
+          console.log('[StyleTransfer] ✅ Seedream 生成成功，正在转换为 base64...');
+          const resultBase64 = await convertUrlToBase64(resultUrl);
+          return res.json({ image: resultBase64, model: 'doubao-seedream-5-0' });
         } else {
-          const errText = await volcResponse.text();
-          console.warn(`Volcano Ark API call failed (status ${volcResponse.status}): ${errText}`);
+          // Seedream returned 200 but no image URL — unusual
+          console.error('[StyleTransfer] ⚠️ Seedream returned OK but no image URL:', JSON.stringify(volcData));
+          throw new Error('Seedream 返回成功但未包含图片，请重试。');
         }
-      } catch (volcErr) {
-        console.error('Error during Volcano Ark style transfer, falling back to DashScope:', volcErr);
+      } else {
+        // Seedream failed — DO NOT silently fallback, report the error clearly
+        const errText = await volcResponse.text();
+        console.error(`[StyleTransfer] ❌ Seedream API 调用失败 (HTTP ${volcResponse.status}): ${errText}`);
+        
+        // If DashScope is also not configured, throw immediately
+        if (!dashscopeApiKey) {
+          throw new Error(`Seedream 风格化失败 (HTTP ${volcResponse.status})，请检查火山引擎账户余额或 API Key 是否有效。`);
+        }
+        
+        // DashScope is available as backup — log clearly and continue
+        console.warn('[StyleTransfer] ⚠️ Seedream 失败，降级使用 DashScope 万相模型（画质可能降低）');
       }
     }
 
-    // ===== Option B: Fallback to DashScope (Wanx) Models =====
+    // ===== Fallback: DashScope (Wanx) — only if Volcano is not configured or explicitly failed =====
     if (!dashscopeApiKey) {
-      throw new Error('Volcano Ark failed and DashScope is not configured.');
+      throw new Error('所有图像生成服务均不可用，请联系管理员配置 API Key。');
     }
 
-    console.log(`Running fallback style transfer (${style}) using Aliyun DashScope (Wanx)...`);
-    // Submit Style Transfer task
+    console.log(`[StyleTransfer] 使用备用引擎 DashScope (Wanx), style=${style}`);
     const imageeditUrl = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/image2image/image-synthesis';
     const reprintUrl = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation';
     
@@ -476,7 +489,7 @@ app.post('/api/ai/style-transfer', async (req, res) => {
       }
     };
 
-    console.log(`Submitting task to wanx2.1-imageedit (stylization_all, style: ${style})...`);
+    console.log(`[StyleTransfer] 尝试 wanx2.1-imageedit (stylization_all)...`);
     let taskResponse = await fetch(imageeditUrl, {
       method: 'POST',
       headers: {
@@ -490,7 +503,7 @@ app.post('/api/ai/style-transfer', async (req, res) => {
     // ===== Fallback 1: wanx-style-repaint-v1 with style_index 1 (3D童话, closest to Ghibli) =====
     if (!taskResponse.ok) {
       const errText = await taskResponse.text();
-      console.warn(`wanx2.1-imageedit stylization_all failed: ${errText}. Trying wanx-style-repaint-v1 (3D童话)...`);
+      console.warn(`[StyleTransfer] wanx2.1-imageedit failed: ${errText}. Trying wanx-style-repaint-v1 (3D童话)...`);
       
       payload = {
         model: 'wanx-style-repaint-v1',
@@ -514,7 +527,7 @@ app.post('/api/ai/style-transfer', async (req, res) => {
     // ===== Fallback 2: wanx-style-repaint-v1 with style_index 7 (炫彩卡通) =====
     if (!taskResponse.ok) {
       const errText = await taskResponse.text();
-      console.warn(`wanx-style-repaint-v1 3D童话 failed: ${errText}. Trying style_index 7 (炫彩卡通)...`);
+      console.warn(`[StyleTransfer] wanx-style-repaint-v1 3D童话 failed: ${errText}. Trying style_index 7 (炫彩卡通)...`);
       payload = {
         model: 'wanx-style-repaint-v1',
         input: {
@@ -536,11 +549,11 @@ app.post('/api/ai/style-transfer', async (req, res) => {
 
     if (!taskResponse.ok) {
       const errText = await taskResponse.text();
-      throw new Error(`Failed to submit style transfer (tried repaint, imageedit, cosplay): ${taskResponse.status} - ${errText}`);
+      throw new Error(`所有风格化引擎均失败: ${taskResponse.status} - ${errText}`);
     }
 
     const taskData = await taskResponse.json();
-    console.log('Style transfer task response:', JSON.stringify(taskData));
+    console.log('[StyleTransfer] DashScope task response:', JSON.stringify(taskData));
     const taskId = taskData.output?.task_id || taskData.task_id || taskData.id;
     if (!taskId) throw new Error(`No task ID returned. Response: ${JSON.stringify(taskData)}`);
 
@@ -550,11 +563,11 @@ app.post('/api/ai/style-transfer', async (req, res) => {
     // 4. Convert output image back to base64
     const resultBase64 = await convertUrlToBase64(resultUrl);
 
-    res.json({ image: resultBase64 });
+    res.json({ image: resultBase64, model: 'dashscope-wanx' });
   } catch (error) {
-    console.error('Style transfer error:', error);
+    console.error('[StyleTransfer] ❌ Error:', error);
     res.status(500).json({ 
-      error: `动漫风格化失败: ${error.message}。若遇到模型权限或余额不足，请在阿里云百炼控制台确认万相服务状态。` 
+      error: `风格化失败: ${error.message}` 
     });
   }
 });
@@ -992,10 +1005,15 @@ app.post('/api/ai/recommend-tags', async (req, res) => {
 
 // Health check
 app.get('/api/health', (req, res) => {
+  const volcKey = process.env.VOLC_API_KEY || '';
+  const dashKey = process.env.DASHSCOPE_API_KEY || '';
   res.json({ 
     status: 'ok', 
-    dashscopeConfigured: !!process.env.DASHSCOPE_API_KEY,
-    volcConfigured: !!process.env.VOLC_API_KEY
+    dashscopeConfigured: !!dashKey,
+    dashscopeKeyPrefix: dashKey ? dashKey.substring(0, 6) + '***' : null,
+    volcConfigured: !!volcKey,
+    volcKeyPrefix: volcKey ? volcKey.substring(0, 6) + '***' : null,
+    primaryStyleEngine: volcKey ? 'doubao-seedream-5-0' : dashKey ? 'dashscope-wanx' : 'none'
   });
 });
 
