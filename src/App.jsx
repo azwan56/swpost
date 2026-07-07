@@ -269,6 +269,7 @@ function App() {
   const [selectedExportIds, setSelectedExportIds] = useState([]);
   const [copyKeywords, setCopyKeywords] = useState('');
   const [contextMenu, setContextMenu] = useState(null); // { x, y, visible }
+  const [mobilePreviewImages, setMobilePreviewImages] = useState([]); // Array of data URLs
   const longPressTimerRef = useRef(null);
 
   useEffect(() => {
@@ -2094,6 +2095,8 @@ function App() {
 
     try {
       const originalActiveIdx = activeIdx;
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      const newExportedUrls = [];
 
       for (let i = 0; i < uploadedImages.length; i++) {
         const img = uploadedImages[i];
@@ -2269,15 +2272,22 @@ function App() {
         document.body.removeChild(clone);
 
         const imageURL = canvas.toDataURL('image/jpeg', 0.95);
-        const link = document.createElement('a');
-        link.download = `xiaohongshu-photo-${i + 1}-${Date.now()}.jpg`;
-        link.href = imageURL;
-        link.click();
+        if (isMobile) {
+          newExportedUrls.push(imageURL);
+        } else {
+          const link = document.createElement('a');
+          link.download = `xiaohongshu-photo-${i + 1}-${Date.now()}.jpg`;
+          link.href = imageURL;
+          link.click();
+        }
       }
 
       // Restore original active photo index in editor
       setActiveIdx(originalActiveIdx);
 
+      if (isMobile && newExportedUrls.length > 0) {
+        setMobilePreviewImages(newExportedUrls);
+      }
     } catch (err) {
       console.error('Failed to batch export images:', err);
       setErrorMsg('部分图片导出失败，请重试。');
@@ -2492,10 +2502,15 @@ function App() {
       document.body.removeChild(clone);
 
       const imageURL = canvas.toDataURL('image/jpeg', 0.95);
-      const link = document.createElement('a');
-      link.download = `xiaohongshu-photo-${activeIdx + 1}-${Date.now()}.jpg`;
-      link.href = imageURL;
-      link.click();
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      if (isMobile) {
+        setMobilePreviewImages([imageURL]);
+      } else {
+        const link = document.createElement('a');
+        link.download = `xiaohongshu-photo-${activeIdx + 1}-${Date.now()}.jpg`;
+        link.href = imageURL;
+        link.click();
+      }
     } catch (err) {
       console.error('Failed to export active image:', err);
       setErrorMsg('导出高清图片失败，请重试。');
@@ -3638,6 +3653,118 @@ function App() {
         </section>
 
       </main>
+
+      {/* Mobile Image Save Preview Modal */}
+      {mobilePreviewImages.length > 0 && (
+        <div 
+          className="mobile-preview-overlay"
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            backgroundColor: 'rgba(10, 10, 10, 0.92)',
+            backdropFilter: 'blur(10px)',
+            WebkitBackdropFilter: 'blur(10px)',
+            zIndex: 99999,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '1.5rem 1rem',
+            boxSizing: 'border-box',
+            overflowY: 'auto'
+          }}
+          onClick={() => setMobilePreviewImages([])}
+        >
+          {/* Header instructions */}
+          <div style={{ textAlign: 'center', color: '#fff', width: '100%', marginBottom: '1rem' }}>
+            <h3 style={{ fontSize: '1.1rem', margin: '0 0 0.5rem 0', fontWeight: '700', color: '#ff2442' }}>💡 长按下方图片保存到相册</h3>
+            <p style={{ fontSize: '0.8rem', color: '#ccc', margin: 0, padding: '0 0.5rem', lineHeight: '1.4' }}>
+              由于手机系统安全限制，网页无法直接保存图片到相册。请长按图片呼出菜单并选择“保存图片”或“添加到照片”。
+            </p>
+          </div>
+
+          {/* Image(s) display container */}
+          <div 
+            style={{ 
+              flex: 1, 
+              display: 'flex', 
+              flexDirection: 'column', 
+              gap: '1.5rem', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              width: '100%',
+              margin: '1rem 0'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {mobilePreviewImages.map((url, idx) => (
+              <div 
+                key={idx} 
+                style={{ 
+                  position: 'relative', 
+                  width: '100%', 
+                  maxWidth: '360px', 
+                  borderRadius: 'var(--radius-md)', 
+                  boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+                  backgroundColor: '#222',
+                  padding: '4px',
+                  boxSizing: 'border-box'
+                }}
+              >
+                <img 
+                  src={url} 
+                  alt={`Preview ${idx + 1}`} 
+                  style={{ 
+                    width: '100%', 
+                    height: 'auto', 
+                    display: 'block', 
+                    borderRadius: 'var(--radius-sm)'
+                  }} 
+                />
+                {mobilePreviewImages.length > 1 && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '10px',
+                    right: '10px',
+                    backgroundColor: 'rgba(0,0,0,0.7)',
+                    color: '#fff',
+                    padding: '2px 8px',
+                    borderRadius: '10px',
+                    fontSize: '0.75rem',
+                    fontWeight: 'bold'
+                  }}>
+                    第 {idx + 1} 张 / 共 {mobilePreviewImages.length} 张
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Close button */}
+          <button 
+            style={{
+              width: '100%',
+              maxWidth: '280px',
+              padding: '0.8rem 1.5rem',
+              backgroundColor: '#ff2442',
+              color: 'white',
+              border: 'none',
+              borderRadius: '30px',
+              fontSize: '0.95rem',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              boxShadow: '0 4px 15px rgba(255, 36, 66, 0.4)',
+              marginTop: '1rem'
+            }}
+            onClick={() => setMobilePreviewImages([])}
+          >
+            ✕ 关闭预览
+          </button>
+        </div>
+      )}
 
       {/* Custom Context Menu overlay */}
       {contextMenu && contextMenu.visible && (
