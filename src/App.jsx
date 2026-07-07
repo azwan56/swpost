@@ -2166,10 +2166,7 @@ function App() {
           exifBar.style.setProperty('font-size', `${8 * scaleRatio}px`, 'important');
           exifBar.style.setProperty('padding', `0 ${12 * scaleRatio}px`, 'important');
           
-          const modelText = exifBar.querySelector('.exif-right-model div');
-          if (modelText) {
-            modelText.style.setProperty('font-size', `${8 * scaleRatio}px`, 'important');
-          }
+
           const dateText = exifBar.querySelector('.exif-date-sub');
           if (dateText) {
             dateText.style.setProperty('font-size', `${6 * scaleRatio}px`, 'important');
@@ -3332,7 +3329,7 @@ function App() {
                     <div className="exif-frame-bar">
                       {selectedFrame === 'polaroid' ? (
                         <div style={{ width: '100%', textAlign: 'center', letterSpacing: '1px' }}>
-                          {activeImage.exif?.date || exifParams.date} · {activeImage.exif?.model || exifParams.model || 'Moment'}
+                          {activeImage.exif?.date || exifParams.date}
                         </div>
                       ) : (
                         <>
@@ -3350,7 +3347,6 @@ function App() {
                           ) : null}
 
                           <div className="exif-right-model">
-                            <div>{activeImage.exif?.make || exifParams.make} {activeImage.exif?.model || exifParams.model}</div>
                             <span className="exif-date-sub">{activeImage.exif?.date || exifParams.date}</span>
                           </div>
                         </>
