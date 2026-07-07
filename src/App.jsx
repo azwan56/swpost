@@ -195,19 +195,6 @@ function App() {
   const [activeIdx, setActiveIdx] = useState(0); 
   const [globalMetadata, setGlobalMetadata] = useState({ time: '', location: '' });
   const [activeTab, setActiveTab] = useState('frame'); // 'frame', 'sticker', 'text', 'erase'
-  const [contextMenu, setContextMenu] = useState(null); // { x, y, visible }
-  const longPressTimerRef = useRef(null);
-
-  useEffect(() => {
-    const handleGlobalClick = () => {
-      if (contextMenu && contextMenu.visible) {
-        setContextMenu(null);
-      }
-    };
-    window.addEventListener('click', handleGlobalClick);
-    return () => window.removeEventListener('click', handleGlobalClick);
-  }, [contextMenu]);
-
   
   // Camera Frame & EXIF parameters states
   const [selectedFrame, setSelectedFrame] = useState('none'); // 'none', 'leica-white', 'leica-black', 'hasselblad', 'polaroid'
@@ -281,6 +268,19 @@ function App() {
   const [customCopyStyle, setCustomCopyStyle] = useState('');
   const [selectedExportIds, setSelectedExportIds] = useState([]);
   const [copyKeywords, setCopyKeywords] = useState('');
+  const [contextMenu, setContextMenu] = useState(null); // { x, y, visible }
+  const longPressTimerRef = useRef(null);
+
+  useEffect(() => {
+    const handleGlobalClick = () => {
+      if (contextMenu && contextMenu.visible) {
+        setContextMenu(null);
+      }
+    };
+    window.addEventListener('click', handleGlobalClick);
+    return () => window.removeEventListener('click', handleGlobalClick);
+  }, [contextMenu]);
+
   
   // Refs
   const fileInputRef = useRef(null);
@@ -307,227 +307,7 @@ function App() {
   // Initialize panning state when switching to 'pan' tab
   const handleEnterPanTab = () => {
     setActiveTab('pan');
-    
-  const handleContextMenu = (e) => {
-    // If activeTab is draw/erase/pan, we might want to allow default or ignore to not disrupt interaction
-    if (activeTab === 'draw' || activeTab === 'erase') return;
-    e.preventDefault();
-    setContextMenu({
-      x: e.clientX,
-      y: e.clientY,
-      visible: true
-    });
-  };
-
-  const handleTouchStartLongPress = (e) => {
-    if (activeTab === 'draw' || activeTab === 'erase') return;
-    
-    // Clear existing timer if any
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-    }
-    
-    const touch = e.touches[0];
-    const startX = touch.clientX;
-    const startY = touch.clientY;
-
-    longPressTimerRef.current = setTimeout(() => {
-      setContextMenu({
-        x: startX,
-        y: startY,
-        visible: true
-      });
-    }, 600); // 600ms long press
-  };
-
-  const handleTouchMoveLongPress = () => {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
-  };
-
-  const handleTouchEndLongPress = () => {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
-  };
-
-  const downloadActiveImageHD = async () => {
-    if (uploadedImages.length === 0 || !activeImage) return;
-
-    saveCurrentDrawings();
-    setSelectedStickerId(null);
-    setSelectedTextId(null);
-
-    setIsLoading(true);
-    setAiOperationName('正在导出当前高清图片');
-
-    try {
-      const workspaceElement = document.querySelector('.editor-canvas-container .grid-cell-frame-wrapper');
-      if (!workspaceElement) return;
-
-      const editorWidth = workspaceElement.offsetWidth || 400;
-      const targetWidth = 1600;
-      const scaleRatio = targetWidth / editorWidth;
-
-      const clone = workspaceElement.cloneNode(true);
-      
-      clone.style.position = 'fixed';
-      clone.style.top = '-9999px';
-      clone.style.left = '-9999px';
-      clone.style.width = `${targetWidth}px`;
-      clone.style.height = 'auto';
-      clone.style.display = 'flex';
-      clone.style.flexDirection = 'column';
-      clone.style.boxShadow = 'none';
-
-      if (selectedFrame === 'leica-white' || selectedFrame === 'leica-black') {
-        clone.style.setProperty('padding', `${10 * scaleRatio}px ${10 * scaleRatio}px ${38 * scaleRatio}px ${10 * scaleRatio}px`, 'important');
-      } else if (selectedFrame === 'hasselblad') {
-        clone.style.setProperty('padding', `${12 * scaleRatio}px ${12 * scaleRatio}px ${42 * scaleRatio}px ${12 * scaleRatio}px`, 'important');
-      } else if (selectedFrame === 'polaroid') {
-        clone.style.setProperty('padding', `${10 * scaleRatio}px ${10 * scaleRatio}px ${42 * scaleRatio}px ${10 * scaleRatio}px`, 'important');
-      } else if (selectedFrame === 'film-roll') {
-        clone.style.setProperty('padding', `${15 * scaleRatio}px ${38 * scaleRatio}px`, 'important');
-      }
-
-      const stickers = clone.querySelectorAll('.sticker-item');
-      stickers.forEach(s => {
-        s.classList.remove('selected');
-        const deleteBtn = s.querySelector('.sticker-delete-btn');
-        if (deleteBtn) deleteBtn.remove();
-        const rotateBtn = s.querySelector('.sticker-rotate-btn');
-        if (rotateBtn) rotateBtn.remove();
-        const editBtn = s.querySelector('.sticker-edit-btn');
-        if (editBtn) editBtn.remove();
-
-        const origWidth = parseFloat(s.style.width) || 70;
-        const origHeight = parseFloat(s.style.height) || 70;
-        s.style.width = `${origWidth * scaleRatio}px`;
-        s.style.height = `${origHeight * scaleRatio}px`;
-
-        const speechText = s.querySelector('div');
-        if (speechText) {
-          const origFontSize = parseFloat(speechText.style.fontSize) || 12;
-          speechText.style.setProperty('font-size', `${origFontSize * scaleRatio}px`, 'important');
-        }
-      });
-
-      const texts = clone.querySelectorAll('.handwritten-text-item');
-      texts.forEach(t => {
-        t.classList.remove('selected');
-        const deleteBtn = t.querySelector('.text-delete-btn');
-        if (deleteBtn) deleteBtn.remove();
-        const rotateBtn = t.querySelector('.text-rotate-btn');
-        if (rotateBtn) rotateBtn.remove();
-
-        const origFontSize = parseFloat(t.style.fontSize) || 20;
-        t.style.fontSize = `${origFontSize * scaleRatio}px`;
-      });
-
-      const exifBar = clone.querySelector('.exif-frame-bar');
-      if (exifBar) {
-        exifBar.style.setProperty('height', `${34 * scaleRatio}px`, 'important');
-        exifBar.style.setProperty('font-size', `${8 * scaleRatio}px`, 'important');
-        exifBar.style.setProperty('padding', `0 ${12 * scaleRatio}px`, 'important');
-        
-        const dateText = exifBar.querySelector('.exif-date-sub');
-        if (dateText) {
-          dateText.style.setProperty('font-size', `${6 * scaleRatio}px`, 'important');
-        }
-        const leftParams = exifBar.querySelector('.exif-left-params');
-        if (leftParams) {
-          leftParams.style.setProperty('gap', `${6 * scaleRatio}px`, 'important');
-        }
-        const redDot = exifBar.querySelector('.leica-red-dot');
-        if (redDot) {
-          redDot.style.setProperty('font-size', `${7 * scaleRatio}px`, 'important');
-          redDot.style.setProperty('padding', `${1 * scaleRatio}px ${3 * scaleRatio}px`, 'important');
-          redDot.style.setProperty('border-radius', `${2 * scaleRatio}px`, 'important');
-          redDot.style.setProperty('height', `${14 * scaleRatio}px`, 'important');
-          redDot.style.setProperty('line-height', `${12 * scaleRatio}px`, 'important');
-        }
-        const hassLogo = exifBar.querySelector('.hasselblad-logo-text');
-        if (hassLogo) {
-          hassLogo.style.setProperty('font-size', `${6 * scaleRatio}px`, 'important');
-          hassLogo.style.setProperty('letter-spacing', `${1 * scaleRatio}px`, 'important');
-        }
-      }
-
-      const filmRollStripTop = clone.querySelector('.film-sprocket-strip.top');
-      const filmRollStripBottom = clone.querySelector('.film-sprocket-strip.bottom');
-      if (filmRollStripTop) {
-        filmRollStripTop.style.setProperty('height', `${15 * scaleRatio}px`, 'important');
-        filmRollStripTop.style.setProperty('padding', `0 ${10 * scaleRatio}px`, 'important');
-        filmRollStripTop.querySelectorAll('.film-sprocket-hole').forEach(hole => {
-          hole.style.setProperty('width', `${7 * scaleRatio}px`, 'important');
-          hole.style.setProperty('height', `${10 * scaleRatio}px`, 'important');
-          hole.style.setProperty('border-radius', `${1.5 * scaleRatio}px`, 'important');
-        });
-      }
-      if (filmRollStripBottom) {
-        filmRollStripBottom.style.setProperty('height', `${15 * scaleRatio}px`, 'important');
-        filmRollStripBottom.style.setProperty('padding', `0 ${10 * scaleRatio}px`, 'important');
-        filmRollStripBottom.querySelectorAll('.film-sprocket-hole').forEach(hole => {
-          hole.style.setProperty('width', `${7 * scaleRatio}px`, 'important');
-          hole.style.setProperty('height', `${10 * scaleRatio}px`, 'important');
-          hole.style.setProperty('border-radius', `${1.5 * scaleRatio}px`, 'important');
-        });
-      }
-      const filmMarkTextTop = clone.querySelector('.film-marking-text.top');
-      if (filmMarkTextTop) {
-        filmMarkTextTop.style.setProperty('font-size', `${9 * scaleRatio}px`, 'important');
-        filmMarkTextTop.style.setProperty('height', `${15 * scaleRatio}px`, 'important');
-        filmMarkTextTop.style.setProperty('padding', `0 ${20 * scaleRatio}px`, 'important');
-      }
-      const filmMarkTextBottom = clone.querySelector('.film-marking-text.bottom');
-      if (filmMarkTextBottom) {
-        filmMarkTextBottom.style.setProperty('font-size', `${9 * scaleRatio}px`, 'important');
-        filmMarkTextBottom.style.setProperty('height', `${15 * scaleRatio}px`, 'important');
-        filmMarkTextBottom.style.setProperty('padding', `0 ${20 * scaleRatio}px`, 'important');
-        const barcode = filmMarkTextBottom.querySelector('.film-barcode-mark');
-        if (barcode) {
-          barcode.style.setProperty('font-size', `${10 * scaleRatio}px`, 'important');
-          barcode.style.setProperty('letter-spacing', `${0.5 * scaleRatio}px`, 'important');
-        }
-      }
-
-      const metaBar = clone.querySelector('.poster-meta-bar');
-      if (metaBar) {
-        metaBar.style.setProperty('padding', `${8 * scaleRatio}px ${12 * scaleRatio}px`, 'important');
-        metaBar.style.setProperty('font-size', `${9 * scaleRatio}px`, 'important');
-      }
-
-      document.body.appendChild(clone);
-      await new Promise(resolve => setTimeout(resolve, 150));
-
-      const bg = selectedFrame === 'leica-white' ? '#fff' : selectedFrame === 'leica-black' ? '#0c0c0c' : selectedFrame === 'hasselblad' ? '#121212' : selectedFrame === 'polaroid' ? '#fcfbf9' : 'transparent';
-
-      const canvas = await html2canvas(clone, {
-        useCORS: true,
-        scale: 1,
-        allowTaint: true,
-        backgroundColor: bg === 'transparent' ? '#ffffff' : bg,
-        logging: false
-      });
-
-      document.body.removeChild(clone);
-
-      const imageURL = canvas.toDataURL('image/jpeg', 0.95);
-      const link = document.createElement('a');
-      link.download = `xiaohongshu-photo-${activeIdx + 1}-${Date.now()}.jpg`;
-      link.href = imageURL;
-      link.click();
-    } catch (err) {
-      console.error('Failed to export active image:', err);
-      setErrorMsg('导出高清图片失败，请重试。');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-const activeImage = uploadedImages[activeIdx];
+    const activeImage = uploadedImages[activeIdx];
     if (!activeImage || !editorImageContainerRef.current) return;
     
     // Get container size
@@ -2501,6 +2281,224 @@ const activeImage = uploadedImages[activeIdx];
     } catch (err) {
       console.error('Failed to batch export images:', err);
       setErrorMsg('部分图片导出失败，请重试。');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleContextMenu = (e) => {
+    if (activeTab === 'draw' || activeTab === 'erase') return;
+    e.preventDefault();
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      visible: true
+    });
+  };
+
+  const handleTouchStartLongPress = (e) => {
+    if (activeTab === 'draw' || activeTab === 'erase') return;
+    
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+    }
+    
+    const touch = e.touches[0];
+    const startX = touch.clientX;
+    const startY = touch.clientY;
+
+    longPressTimerRef.current = setTimeout(() => {
+      setContextMenu({
+        x: startX,
+        y: startY,
+        visible: true
+      });
+    }, 600); // 600ms long press
+  };
+
+  const handleTouchMoveLongPress = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const handleTouchEndLongPress = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const downloadActiveImageHD = async () => {
+    if (uploadedImages.length === 0 || !activeImage) return;
+
+    saveCurrentDrawings();
+    setSelectedStickerId(null);
+    setSelectedTextId(null);
+
+    setIsLoading(true);
+    setAiOperationName('正在导出当前高清图片');
+
+    try {
+      const workspaceElement = document.querySelector('.editor-canvas-container .grid-cell-frame-wrapper');
+      if (!workspaceElement) return;
+
+      const editorWidth = workspaceElement.offsetWidth || 400;
+      const targetWidth = 1600;
+      const scaleRatio = targetWidth / editorWidth;
+
+      const clone = workspaceElement.cloneNode(true);
+      
+      clone.style.position = 'fixed';
+      clone.style.top = '-9999px';
+      clone.style.left = '-9999px';
+      clone.style.width = `${targetWidth}px`;
+      clone.style.height = 'auto';
+      clone.style.display = 'flex';
+      clone.style.flexDirection = 'column';
+      clone.style.boxShadow = 'none';
+
+      if (selectedFrame === 'leica-white' || selectedFrame === 'leica-black') {
+        clone.style.setProperty('padding', `${10 * scaleRatio}px ${10 * scaleRatio}px ${38 * scaleRatio}px ${10 * scaleRatio}px`, 'important');
+      } else if (selectedFrame === 'hasselblad') {
+        clone.style.setProperty('padding', `${12 * scaleRatio}px ${12 * scaleRatio}px ${42 * scaleRatio}px ${12 * scaleRatio}px`, 'important');
+      } else if (selectedFrame === 'polaroid') {
+        clone.style.setProperty('padding', `${10 * scaleRatio}px ${10 * scaleRatio}px ${42 * scaleRatio}px ${10 * scaleRatio}px`, 'important');
+      } else if (selectedFrame === 'film-roll') {
+        clone.style.setProperty('padding', `${15 * scaleRatio}px ${38 * scaleRatio}px`, 'important');
+      }
+
+      const stickers = clone.querySelectorAll('.sticker-item');
+      stickers.forEach(s => {
+        s.classList.remove('selected');
+        const deleteBtn = s.querySelector('.sticker-delete-btn');
+        if (deleteBtn) deleteBtn.remove();
+        const rotateBtn = s.querySelector('.sticker-rotate-btn');
+        if (rotateBtn) rotateBtn.remove();
+        const editBtn = s.querySelector('.sticker-edit-btn');
+        if (editBtn) editBtn.remove();
+
+        const origWidth = parseFloat(s.style.width) || 70;
+        const origHeight = parseFloat(s.style.height) || 70;
+        s.style.width = `${origWidth * scaleRatio}px`;
+        s.style.height = `${origHeight * scaleRatio}px`;
+
+        const speechText = s.querySelector('div');
+        if (speechText) {
+          const origFontSize = parseFloat(speechText.style.fontSize) || 12;
+          speechText.style.setProperty('font-size', `${origFontSize * scaleRatio}px`, 'important');
+        }
+      });
+
+      const texts = clone.querySelectorAll('.handwritten-text-item');
+      texts.forEach(t => {
+        t.classList.remove('selected');
+        const deleteBtn = t.querySelector('.text-delete-btn');
+        if (deleteBtn) deleteBtn.remove();
+        const rotateBtn = t.querySelector('.text-rotate-btn');
+        if (rotateBtn) rotateBtn.remove();
+
+        const origFontSize = parseFloat(t.style.fontSize) || 20;
+        t.style.fontSize = `${origFontSize * scaleRatio}px`;
+      });
+
+      const exifBar = clone.querySelector('.exif-frame-bar');
+      if (exifBar) {
+        exifBar.style.setProperty('height', `${34 * scaleRatio}px`, 'important');
+        exifBar.style.setProperty('font-size', `${8 * scaleRatio}px`, 'important');
+        exifBar.style.setProperty('padding', `0 ${12 * scaleRatio}px`, 'important');
+        
+        const dateText = exifBar.querySelector('.exif-date-sub');
+        if (dateText) {
+          dateText.style.setProperty('font-size', `${6 * scaleRatio}px`, 'important');
+        }
+        const leftParams = exifBar.querySelector('.exif-left-params');
+        if (leftParams) {
+          leftParams.style.setProperty('gap', `${6 * scaleRatio}px`, 'important');
+        }
+        const redDot = exifBar.querySelector('.leica-red-dot');
+        if (redDot) {
+          redDot.style.setProperty('font-size', `${7 * scaleRatio}px`, 'important');
+          redDot.style.setProperty('padding', `${1 * scaleRatio}px ${3 * scaleRatio}px`, 'important');
+          redDot.style.setProperty('border-radius', `${2 * scaleRatio}px`, 'important');
+          redDot.style.setProperty('height', `${14 * scaleRatio}px`, 'important');
+          redDot.style.setProperty('line-height', `${12 * scaleRatio}px`, 'important');
+        }
+        const hassLogo = exifBar.querySelector('.hasselblad-logo-text');
+        if (hassLogo) {
+          hassLogo.style.setProperty('font-size', `${6 * scaleRatio}px`, 'important');
+          hassLogo.style.setProperty('letter-spacing', `${1 * scaleRatio}px`, 'important');
+        }
+      }
+
+      const filmRollStripTop = clone.querySelector('.film-sprocket-strip.top');
+      const filmRollStripBottom = clone.querySelector('.film-sprocket-strip.bottom');
+      if (filmRollStripTop) {
+        filmRollStripTop.style.setProperty('height', `${15 * scaleRatio}px`, 'important');
+        filmRollStripTop.style.setProperty('padding', `0 ${10 * scaleRatio}px`, 'important');
+        filmRollStripTop.querySelectorAll('.film-sprocket-hole').forEach(hole => {
+          hole.style.setProperty('width', `${7 * scaleRatio}px`, 'important');
+          hole.style.setProperty('height', `${10 * scaleRatio}px`, 'important');
+          hole.style.setProperty('border-radius', `${1.5 * scaleRatio}px`, 'important');
+        });
+      }
+      if (filmRollStripBottom) {
+        filmRollStripBottom.style.setProperty('height', `${15 * scaleRatio}px`, 'important');
+        filmRollStripBottom.style.setProperty('padding', `0 ${10 * scaleRatio}px`, 'important');
+        filmRollStripBottom.querySelectorAll('.film-sprocket-hole').forEach(hole => {
+          hole.style.setProperty('width', `${7 * scaleRatio}px`, 'important');
+          hole.style.setProperty('height', `${10 * scaleRatio}px`, 'important');
+          hole.style.setProperty('border-radius', `${1.5 * scaleRatio}px`, 'important');
+        });
+      }
+      const filmMarkTextTop = clone.querySelector('.film-marking-text.top');
+      if (filmMarkTextTop) {
+        filmMarkTextTop.style.setProperty('font-size', `${9 * scaleRatio}px`, 'important');
+        filmMarkTextTop.style.setProperty('height', `${15 * scaleRatio}px`, 'important');
+        filmMarkTextTop.style.setProperty('padding', `0 ${20 * scaleRatio}px`, 'important');
+      }
+      const filmMarkTextBottom = clone.querySelector('.film-marking-text.bottom');
+      if (filmMarkTextBottom) {
+        filmMarkTextBottom.style.setProperty('font-size', `${9 * scaleRatio}px`, 'important');
+        filmMarkTextBottom.style.setProperty('height', `${15 * scaleRatio}px`, 'important');
+        filmMarkTextBottom.style.setProperty('padding', `0 ${20 * scaleRatio}px`, 'important');
+        const barcode = filmMarkTextBottom.querySelector('.film-barcode-mark');
+        if (barcode) {
+          barcode.style.setProperty('font-size', `${10 * scaleRatio}px`, 'important');
+          barcode.style.setProperty('letter-spacing', `${0.5 * scaleRatio}px`, 'important');
+        }
+      }
+
+      const metaBar = clone.querySelector('.poster-meta-bar');
+      if (metaBar) {
+        metaBar.style.setProperty('padding', `${8 * scaleRatio}px ${12 * scaleRatio}px`, 'important');
+        metaBar.style.setProperty('font-size', `${9 * scaleRatio}px`, 'important');
+      }
+
+      document.body.appendChild(clone);
+      await new Promise(resolve => setTimeout(resolve, 150));
+
+      const bg = selectedFrame === 'leica-white' ? '#fff' : selectedFrame === 'leica-black' ? '#0c0c0c' : selectedFrame === 'hasselblad' ? '#121212' : selectedFrame === 'polaroid' ? '#fcfbf9' : 'transparent';
+
+      const canvas = await html2canvas(clone, {
+        useCORS: true,
+        scale: 1,
+        allowTaint: true,
+        backgroundColor: bg === 'transparent' ? '#ffffff' : bg,
+        logging: false
+      });
+
+      document.body.removeChild(clone);
+
+      const imageURL = canvas.toDataURL('image/jpeg', 0.95);
+      const link = document.createElement('a');
+      link.download = `xiaohongshu-photo-${activeIdx + 1}-${Date.now()}.jpg`;
+      link.href = imageURL;
+      link.click();
+    } catch (err) {
+      console.error('Failed to export active image:', err);
+      setErrorMsg('导出高清图片失败，请重试。');
     } finally {
       setIsLoading(false);
     }
