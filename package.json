@@ -11,10 +11,7 @@
   },
   "dependencies": {
     "react": "^19.2.7",
-    "react-dom": "^19.2.7",
-    "exifreader": "^4.23.3",
-    "html2canvas": "^1.4.1",
-    "cropperjs": "^1.6.2"
+    "react-dom": "^19.2.7"
   },
   "devDependencies": {
     "@types/react": "^19.2.17",

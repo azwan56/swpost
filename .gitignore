@@ -27,3 +27,8 @@ dist-ssr
 server/.env
 **/.env
 **/.env.local
+
+# Untracked sub-projects and backups
+mp-app/
+*.bak
+
