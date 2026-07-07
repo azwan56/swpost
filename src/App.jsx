@@ -266,6 +266,7 @@ function App() {
   const [errorMsg, setErrorMsg] = useState('');
   const [copyStyle, setCopyStyle] = useState('探店'); // '探店', '心情故事', '攻略', '自定义'
   const [customCopyStyle, setCustomCopyStyle] = useState('');
+  const [selectedExportIds, setSelectedExportIds] = useState([]);
   
   // Refs
   const fileInputRef = useRef(null);
@@ -697,6 +698,7 @@ function App() {
 
     const updatedImages = [...uploadedImages, ...newImages];
     setUploadedImages(updatedImages);
+    setSelectedExportIds(prev => [...prev, ...newImages.map(img => img.id)]);
     setActiveIdx(uploadedImages.length);
     
     let detectedTime = globalMetadata.time;
@@ -734,6 +736,7 @@ function App() {
     e.stopPropagation();
     const filtered = uploadedImages.filter(img => img.id !== id);
     setUploadedImages(filtered);
+    setSelectedExportIds(prev => prev.filter(item => item !== id));
     
     if (activeIdx >= filtered.length) {
       setActiveIdx(Math.max(0, filtered.length - 1));
@@ -2053,6 +2056,61 @@ function App() {
     }, 150);
   };
 
+  // 9.6 Toggle individual image selection for export
+  const toggleExportSelection = (id, e) => {
+    e.stopPropagation();
+    setSelectedExportIds(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  // 9.7 Export selected individual images sequentially
+  const exportSelectedSingleImages = async () => {
+    if (selectedExportIds.length === 0) {
+      alert('请先勾选需要导出的单张图片！');
+      return;
+    }
+
+    // Temporary clear selections to avoid rendering selection borders
+    setSelectedStickerId(null);
+    setSelectedTextId(null);
+
+    const imagesToExport = uploadedImages.filter(img => selectedExportIds.includes(img.id));
+
+    setIsLoading(true);
+    setAiOperationName('正在批量导出图片');
+
+    try {
+      for (let i = 0; i < imagesToExport.length; i++) {
+        const img = imagesToExport[i];
+        const targetElement = document.getElementById(`preview-cell-${img.id}`);
+        if (!targetElement) continue;
+
+        // Small delay between calls to let the UI update and avoid browser download blocking
+        await new Promise(resolve => setTimeout(resolve, 250));
+
+        const canvas = await html2canvas(targetElement, {
+          useCORS: true,
+          scale: 3.5,
+          allowTaint: true,
+          backgroundColor: '#ffffff',
+          logging: false
+        });
+
+        const imageURL = canvas.toDataURL('image/jpeg', 0.95);
+        const link = document.createElement('a');
+        link.download = `xiaohongshu-photo-${i + 1}-${Date.now()}.jpg`;
+        link.href = imageURL;
+        link.click();
+      }
+    } catch (err) {
+      console.error('Failed to batch export images:', err);
+      setErrorMsg('部分图片导出失败，请重试。');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const activeImage = uploadedImages[activeIdx];
 
   return (
@@ -2087,7 +2145,7 @@ function App() {
             🏠 返回主页
           </a>
           {uploadedImages.length > 0 && (
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
               <button 
                 className="btn btn-primary" 
                 style={{ background: 'linear-gradient(135deg, #ff2442, #ff4d66)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }} 
@@ -2101,6 +2159,13 @@ function App() {
                 onClick={exportPosterJPG}
               >
                 🖼️ 导出完整卡片
+              </button>
+              <button 
+                className="btn btn-secondary" 
+                style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)', color: 'white', border: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }} 
+                onClick={exportSelectedSingleImages}
+              >
+                ⚡ 批量导出单图 ({selectedExportIds.length})
               </button>
             </div>
           )}
@@ -2154,7 +2219,7 @@ function App() {
               {/* Uploaded Thumbnails Manager */}
               {uploadedImages.length > 0 && (
                 <div>
-                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>点击选中某张照片，进行 AI 去除杂物/吉卜力动漫化/手绘文字：</p>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>点击选中某张照片，进行 AI 去除杂物/吉卜力动漫化/手绘文字；勾选左上角选择导出该单图：</p>
                   <div className="uploaded-images-list">
                     {uploadedImages.map((img, idx) => (
                       <div 
@@ -2165,6 +2230,34 @@ function App() {
                           setActiveIdx(idx);
                         }}
                       >
+                        {/* Checkbox for single image export selection */}
+                        <div 
+                          className={`uploaded-image-checkbox ${selectedExportIds.includes(img.id) ? 'checked' : ''}`}
+                          onClick={(e) => toggleExportSelection(img.id, e)}
+                          style={{
+                            position: 'absolute',
+                            top: '4px',
+                            left: '4px',
+                            width: '16px',
+                            height: '16px',
+                            borderRadius: '4px',
+                            backgroundColor: selectedExportIds.includes(img.id) ? '#ff2442' : 'rgba(0,0,0,0.5)',
+                            border: '1.5px solid white',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: 'white',
+                            fontSize: '10px',
+                            fontWeight: 'bold',
+                            zIndex: 10,
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease',
+                            userSelect: 'none'
+                          }}
+                        >
+                          {selectedExportIds.includes(img.id) ? '✓' : ''}
+                        </div>
+
                         <img src={img.croppedSrc} alt={`Uploaded ${idx}`} />
                         <button 
                           className="uploaded-image-remove"
@@ -2174,6 +2267,52 @@ function App() {
                         </button>
                       </div>
                     ))}
+                  </div>
+                  
+                  {/* Select Actions */}
+                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+                    <button
+                      className="btn"
+                      style={{
+                        flex: 1,
+                        padding: '0.4rem 0.5rem',
+                        fontSize: '0.75rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.25rem',
+                        border: '1px solid var(--border-color)',
+                        backgroundColor: 'var(--bg-main)',
+                        color: 'var(--text-secondary)',
+                        cursor: 'pointer',
+                        borderRadius: 'var(--radius-sm)'
+                      }}
+                      onClick={() => setSelectedExportIds(uploadedImages.map(img => img.id))}
+                      disabled={selectedExportIds.length === uploadedImages.length}
+                    >
+                      ☑️ 全选图片
+                    </button>
+                    <button
+                      className="btn"
+                      style={{
+                        flex: 1,
+                        padding: '0.4rem 0.5rem',
+                        fontSize: '0.75rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.25rem',
+                        border: '1px solid var(--border-color)',
+                        backgroundColor: 'var(--bg-main)',
+                        color: 'var(--text-secondary)',
+                        cursor: 'pointer',
+                        borderRadius: 'var(--radius-sm)'
+                      }}
+                      onClick={() => setSelectedExportIds([])}
+                      disabled={selectedExportIds.length === 0}
+                    >
+                      ☐ 全清选择
+                    </button>
                   </div>
                 </div>
               )}
@@ -3090,7 +3229,7 @@ function App() {
           <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
             <h2 className="card-title" style={{ margin: 0 }}>📊 小红书排版卡片预览</h2>
             {uploadedImages.length > 0 && (
-              <div style={{ display: 'flex', gap: '0.4rem' }}>
+              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                 <button 
                   className="btn btn-primary" 
                   style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #ff2442, #ff4d66)', border: 'none', color: '#fff', fontWeight: '600' }} 
@@ -3104,6 +3243,13 @@ function App() {
                   onClick={exportPosterJPG}
                 >
                   🖼️ 完整卡片
+                </button>
+                <button 
+                  className="btn btn-secondary" 
+                  style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #3b82f6, #2563eb)', color: 'white', border: 'none' }} 
+                  onClick={exportSelectedSingleImages}
+                >
+                  ⚡ 批量导出单图 ({selectedExportIds.length})
                 </button>
               </div>
             )}
@@ -3119,6 +3265,7 @@ function App() {
                     {uploadedImages.map((img, idx) => (
                       <div 
                         key={img.id}
+                        id={`preview-cell-${img.id}`}
                         className={`grid-cell-frame-wrapper grid-item-${idx} ${selectedFrame !== 'none' ? `frame-${selectedFrame}` : ''}`}
                       >
                         <div className="grid-image-container">
