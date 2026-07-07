@@ -942,7 +942,7 @@ body {
   }
 
   .logo-text h1 {
-    font-size: 0.95rem !important;
+    font-size: 0.875rem !important; /* Uniform Title Size: 14px */
     text-align: left !important;
     line-height: 1.1 !important;
   }
@@ -962,7 +962,7 @@ body {
   .app-actions button {
     width: auto !important;
     padding: 0.4rem 0.6rem !important;
-    font-size: 0.75rem !important;
+    font-size: 0.75rem !important; /* Uniform Body Size: 12px */
     height: 32px !important;
     box-sizing: border-box !important;
     display: inline-flex !important;
@@ -977,13 +977,13 @@ body {
   }
 
   .card-title {
-    font-size: 0.85rem !important;
+    font-size: 0.875rem !important; /* Uniform Title Size: 14px */
     margin-bottom: 0.5rem !important;
   }
 
   .btn {
     padding: 0.4rem 0.8rem !important;
-    font-size: 0.75rem !important;
+    font-size: 0.75rem !important; /* Uniform Body Size: 12px */
   }
 
   /* Canvas Tabs Scrollable - Premium Swiping Experience */
@@ -1005,7 +1005,7 @@ body {
 
   .canvas-tab-btn {
     padding: 0.4rem 0.6rem !important;
-    font-size: 0.75rem !important;
+    font-size: 0.75rem !important; /* Uniform Body Size: 12px */
     flex: 0 0 auto !important; /* Horizontally scrollable, no wrap */
     text-align: center !important;
     white-space: nowrap !important;
@@ -1022,7 +1022,7 @@ body {
   }
   
   .upload-zone p {
-    font-size: 0.75rem !important;
+    font-size: 0.75rem !important; /* Uniform Body Size: 12px */
   }
 
   /* Photo Grid and Thumbnail sizes */
@@ -1037,17 +1037,17 @@ body {
 
   /* Compact form elements */
   textarea.form-control {
-    font-size: 0.8rem !important;
+    font-size: 0.75rem !important; /* Uniform Body Size: 12px */
     padding: 0.4rem !important;
   }
 
   .form-control {
     padding: 0.5rem 0.75rem !important;
-    font-size: 0.85rem !important;
+    font-size: 0.75rem !important; /* Uniform Body Size: 12px */
   }
 
   .form-label {
-    font-size: 0.75rem !important;
+    font-size: 0.75rem !important; /* Uniform Body Size: 12px */
     margin-bottom: 0.25rem !important;
   }
 
@@ -1060,7 +1060,7 @@ body {
   .editor-actions-row button {
     width: 100% !important;
     padding: 0.5rem 0.25rem !important;
-    font-size: 0.8rem !important;
+    font-size: 0.75rem !important; /* Uniform Body Size: 12px */
   }
 }
 
