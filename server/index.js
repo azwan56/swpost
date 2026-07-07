@@ -758,15 +758,12 @@ app.post('/api/ai/generate-copy', async (req, res) => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'doubao-seed-1-6-vision-250815',
+        model: 'deepseek-v4-flash-260425',
         messages: [
           {
             role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: `你是一个小红书运营大师与视觉策划博主。请根据用户选择的风格和给出的关键词，为用户生成3款不同情感路线的小红书爆款文案。每一款文案必须包含：
-1. 【爆款标题】（包含吸睛 of Emoji，字数在20字以内）
+            content: `你是一个小红书运营大师与视觉策划博主。请根据用户选择的风格和给出的关键词，为用户生成3款不同情感路线的小红书爆款文案。每一款文案必须包含：
+1. 【爆款标题】（包含吸睛的Emoji，字数在20字以内）
 2. 【笔记正文】（包含Emoji排版，空行，内容活泼，适合社交分享，字数在150字左右）
 3. 【推荐话题标签】（例如 #日常碎片 #我的日常）
 
@@ -788,8 +785,6 @@ ${keywordsPrompt}
   ]
 }
 不要输出任何 Markdown 格式包裹（如 \`\`\`json 标记），不要输出任何解释性话语，直接返回纯 JSON 对象。`
-              }
-            ]
           }
         ]
       })
