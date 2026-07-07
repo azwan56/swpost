@@ -2011,11 +2011,43 @@ function App() {
 
         const imageURL = canvas.toDataURL('image/jpeg', 0.95);
         const link = document.createElement('a');
-        link.download = `xiaohongshu-collage-${Date.now()}.jpg`;
+        link.download = `xiaohongshu-poster-${Date.now()}.jpg`;
         link.href = imageURL;
         link.click();
       } catch (err) {
         console.error('Failed to export poster image:', err);
+        setErrorMsg('图片生成失败，请稍后重试。');
+      }
+    }, 150);
+  };
+
+  // 9.5 Export only the collage image (no text)
+  const exportCollageImageOnly = async () => {
+    if (!posterRef.current || uploadedImages.length === 0) return;
+    
+    const targetElement = posterRef.current.querySelector('.poster-image-area');
+    if (!targetElement) return;
+
+    setSelectedStickerId(null);
+    setSelectedTextId(null);
+
+    setTimeout(async () => {
+      try {
+        const canvas = await html2canvas(targetElement, {
+          useCORS: true,
+          scale: 3.5,
+          allowTaint: true,
+          backgroundColor: '#ffffff',
+          logging: false
+        });
+
+        const imageURL = canvas.toDataURL('image/jpeg', 0.95);
+        const link = document.createElement('a');
+        link.download = `xiaohongshu-collage-${Date.now()}.jpg`;
+        link.href = imageURL;
+        link.click();
+      } catch (err) {
+        console.error('Failed to export collage image:', err);
         setErrorMsg('图片生成失败，请稍后重试。');
       }
     }, 150);
@@ -2055,9 +2087,22 @@ function App() {
             🏠 返回主页
           </a>
           {uploadedImages.length > 0 && (
-            <button className="btn btn-primary" onClick={exportPosterJPG}>
-              📤 导出发布卡片 (JPG)
-            </button>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button 
+                className="btn btn-primary" 
+                style={{ background: 'linear-gradient(135deg, #ff2442, #ff4d66)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }} 
+                onClick={exportCollageImageOnly}
+              >
+                💾 导出拼图照片 (不含文案)
+              </button>
+              <button 
+                className="btn btn-secondary" 
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
+                onClick={exportPosterJPG}
+              >
+                🖼️ 导出完整卡片
+              </button>
+            </div>
           )}
         </div>
       </header>
@@ -3045,9 +3090,22 @@ function App() {
           <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
             <h2 className="card-title" style={{ margin: 0 }}>📊 小红书排版卡片预览</h2>
             {uploadedImages.length > 0 && (
-              <button className="btn btn-secondary" style={{ padding: '0.4rem 1rem', fontSize: '0.85rem' }} onClick={exportPosterJPG}>
-                💾 导出图片
-              </button>
+              <div style={{ display: 'flex', gap: '0.4rem' }}>
+                <button 
+                  className="btn btn-primary" 
+                  style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #ff2442, #ff4d66)', border: 'none', color: '#fff', fontWeight: '600' }} 
+                  onClick={exportCollageImageOnly}
+                >
+                  💾 导出拼图 (推荐)
+                </button>
+                <button 
+                  className="btn btn-secondary" 
+                  style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} 
+                  onClick={exportPosterJPG}
+                >
+                  🖼️ 完整卡片
+                </button>
+              </div>
             )}
           </div>
 
@@ -3289,6 +3347,85 @@ function App() {
 
               {/* Text Area */}
               <div className="poster-content-area">
+                {/* Copy Buttons Toolbar */}
+                <div 
+                  className="poster-text-actions" 
+                  data-html2canvas-ignore="true"
+                  style={{
+                    display: 'flex',
+                    gap: '0.4rem',
+                    marginBottom: '0.75rem',
+                    justifyContent: 'flex-end',
+                    flexWrap: 'wrap'
+                  }}
+                >
+                  <button
+                    className="btn"
+                    style={{
+                      padding: '0.25rem 0.5rem',
+                      fontSize: '0.7rem',
+                      borderRadius: '4px',
+                      border: '1px solid var(--border-color)',
+                      background: 'var(--bg-main)',
+                      color: 'var(--text-secondary)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.15rem'
+                    }}
+                    onClick={() => {
+                      navigator.clipboard.writeText(aiTitle || '日常碎碎念 ✨');
+                      alert('📋 标题已复制！');
+                    }}
+                  >
+                    🏷️ 复制标题
+                  </button>
+                  <button
+                    className="btn"
+                    style={{
+                      padding: '0.25rem 0.5rem',
+                      fontSize: '0.7rem',
+                      borderRadius: '4px',
+                      border: '1px solid var(--border-color)',
+                      background: 'var(--bg-main)',
+                      color: 'var(--text-secondary)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.15rem'
+                    }}
+                    onClick={() => {
+                      navigator.clipboard.writeText(aiBody || '');
+                      alert('📝 正文与标签已复制！');
+                    }}
+                  >
+                    ✍️ 复制正文
+                  </button>
+                  <button
+                    className="btn btn-primary"
+                    style={{
+                      padding: '0.25rem 0.5rem',
+                      fontSize: '0.7rem',
+                      borderRadius: '4px',
+                      background: 'linear-gradient(135deg, #ff2442, #ff4d66)',
+                      color: '#fff',
+                      cursor: 'pointer',
+                      border: 'none',
+                      fontWeight: '600',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.15rem'
+                    }}
+                    onClick={() => {
+                      const fullText = `【${aiTitle || '日常碎碎念 ✨'}】\n\n${aiBody || ''}`;
+                      navigator.clipboard.writeText(fullText);
+                      alert('✨ 全部文案已复制！');
+                    }}
+                  >
+                    📋 复制全部
+                  </button>
+                </div>
+
                 <h3 className="poster-title">
                   {aiTitle || '日常碎碎念 ✨'}
                 </h3>
