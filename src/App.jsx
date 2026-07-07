@@ -2584,7 +2584,7 @@ function App() {
       )}
 
       {/* Main Workspace */}
-      <main className="workspace">
+      <main className={`workspace ${uploadedImages.length > 0 ? 'has-images' : ''}`}>
         
         {/* Left editor side */}
         <section className="editor-panel">
@@ -2722,56 +2722,16 @@ function App() {
             </div>
           </div>
 
-          {/* AI Magic Tools Card */}
-          {uploadedImages.length > 0 && activeImage && (
-            <div className="card" style={{ border: '1px solid #c7d2fe', background: 'linear-gradient(to bottom, #ffffff, #fcfdff)' }}>
-              <h2 className="card-title" style={{ color: '#4f46e5', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                🪄 AI 智能修图魔法
-              </h2>
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.5rem', marginBottom: '1rem' }}>
-                对选中的图 {activeIdx + 1} 进行 AI 艺术化风格重绘或消除杂物：
-              </p>
-              
-              {/* Style options */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                <button 
-                  className="btn btn-primary" 
-                  style={{ padding: '0.6rem 0.25rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #4f46e5, #6366f1)', border: 'none' }}
-                  onClick={() => handleAIStyleTransfer('cartoon')}
-                >
-                  🎨 治愈吉卜力
-                </button>
-                <button 
-                  className="btn btn-primary" 
-                  style={{ padding: '0.6rem 0.25rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #ec4899, #d946ef)', border: 'none' }}
-                  onClick={() => handleAIStyleTransfer('clay')}
-                >
-                  🧸 软萌泥塑风
-                </button>
-                <button 
-                  className="btn btn-primary" 
-                  style={{ padding: '0.6rem 0.25rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #d97706, #92400e)', border: 'none' }}
-                  onClick={() => handleAIStyleTransfer('japanese-film')}
-                >
-                  🎞️ 日式胶片风
-                </button>
-              </div>
-
-              {/* Erase button */}
-              <button 
-                className={`btn ${activeTab === 'erase' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ width: '100%', padding: '0.6rem 0.5rem', fontSize: '0.85rem', borderColor: '#4f46e5', color: activeTab === 'erase' ? 'white' : '#4f46e5', fontWeight: 600 }}
-                onClick={() => setActiveTab('erase')}
-              >
-                🪄 开启涂抹消除路人/杂物模式
-              </button>
-            </div>
-          )}
-
           {/* 2. Photo Fine-Tuning & Drawings/Stickers */}
           {uploadedImages.length > 0 && activeImage && (
             <div className="card">
               <div className="canvas-tabs">
+                <button 
+                  className={`canvas-tab-btn ${activeTab === 'style' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('style')}
+                >
+                  🎨 AI 画风
+                </button>
                 <button 
                   className={`canvas-tab-btn ${activeTab === 'frame' ? 'active' : ''}`}
                   onClick={() => setActiveTab('frame')}
@@ -2782,27 +2742,59 @@ function App() {
                   className={`canvas-tab-btn ${activeTab === 'erase' ? 'active' : ''}`}
                   onClick={() => setActiveTab('erase')}
                 >
-                  🪄 AI 消除杂物
+                  🪄 AI 消除
                 </button>
                 <button 
                   className={`canvas-tab-btn ${activeTab === 'sticker' ? 'active' : ''}`}
                   onClick={() => setActiveTab('sticker')}
                 >
-                  ✨ 贴纸装饰
+                  ✨ 贴纸标签
                 </button>
                 <button 
                   className={`canvas-tab-btn ${activeTab === 'text' ? 'active' : ''}`}
                   onClick={() => setActiveTab('text')}
                 >
-                  ✍️ 手写文案
+                  ✍️ 手写字
                 </button>
                 <button 
                   className={`canvas-tab-btn ${activeTab === 'ai-copy' ? 'active' : ''}`}
                   onClick={() => setActiveTab('ai-copy')}
                 >
-                  🤖 AI文案
+                  📝 AI文案
                 </button>
               </div>
+
+              {/* AI Filter / Style Transfer Tab */}
+              {activeTab === 'style' && (
+                <div>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+                    🎨 对选中的图 {activeIdx + 1} 进行 AI 艺术化风格重绘（高清 Seedream 5.0 引擎）：
+                  </p>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                    <button 
+                      className="btn btn-primary" 
+                      style={{ padding: '0.6rem 0.25rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #4f46e5, #6366f1)', border: 'none' }}
+                      onClick={() => handleAIStyleTransfer('cartoon')}
+                    >
+                      🎨 治愈吉卜力
+                    </button>
+                    <button 
+                      className="btn btn-primary" 
+                      style={{ padding: '0.6rem 0.25rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #ec4899, #d946ef)', border: 'none' }}
+                      onClick={() => handleAIStyleTransfer('clay')}
+                    >
+                      🧸 软萌泥塑风
+                    </button>
+                    <button 
+                      className="btn btn-primary" 
+                      style={{ padding: '0.6rem 0.25rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #d97706, #92400e)', border: 'none' }}
+                      onClick={() => handleAIStyleTransfer('japanese-film')}
+                    >
+                      🎞️ 日式胶片风
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Frame Tab (Camera Borders) */}
               {activeTab === 'frame' && (

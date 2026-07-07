@@ -144,9 +144,13 @@ body {
 
 @media (max-width: 1100px) {
   .workspace {
-    grid-template-columns: 1fr;
+    display: flex;
+    flex-direction: column;
     padding: 1rem;
     gap: 1.5rem;
+  }
+  .workspace.has-images {
+    flex-direction: column-reverse;
   }
 }
 
@@ -915,30 +919,32 @@ body {
    Mobile Responsive Optimizations (max-width: 768px)
    ========================================================================== */
 @media (max-width: 768px) {
-  /* Header Layout */
+  /* Header Layout - Row based to save space */
   .app-header {
-    flex-direction: column !important;
-    align-items: stretch !important;
-    gap: 0.75rem !important;
-    padding: 0.75rem 1rem !important;
-  }
-
-  .logo-section {
-    justify-content: center !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    padding: 0.5rem 0.75rem !important;
     gap: 0.5rem !important;
   }
 
+  .logo-section {
+    justify-content: flex-start !important;
+    gap: 0.4rem !important;
+  }
+
   .logo-badge {
-    width: 32px !important;
-    height: 32px !important;
-    font-size: 1.1rem !important;
-    border-radius: 8px !important;
+    width: 28px !important;
+    height: 28px !important;
+    font-size: 1rem !important;
+    border-radius: 6px !important;
+    box-shadow: none !important;
   }
 
   .logo-text h1 {
-    font-size: 1.05rem !important;
-    text-align: center !important;
-    line-height: 1.2 !important;
+    font-size: 0.95rem !important;
+    text-align: left !important;
+    line-height: 1.1 !important;
   }
 
   .logo-text p {
@@ -946,18 +952,18 @@ body {
   }
 
   .app-actions {
-    width: 100% !important;
-    display: grid !important;
-    grid-template-columns: 1fr 1fr !important;
-    gap: 0.5rem !important;
+    width: auto !important;
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 0.4rem !important;
   }
 
   .app-actions a, 
   .app-actions button {
-    width: 100% !important;
-    padding: 0.5rem 0.25rem !important;
+    width: auto !important;
+    padding: 0.4rem 0.6rem !important;
     font-size: 0.75rem !important;
-    height: 36px !important;
+    height: 32px !important;
     box-sizing: border-box !important;
     display: inline-flex !important;
     justify-content: center !important;
@@ -966,33 +972,48 @@ body {
 
   /* Cards Padding */
   .card {
-    padding: 0.85rem !important;
+    padding: 0.75rem !important;
     border-radius: var(--radius-sm) !important;
   }
 
   .card-title {
-    font-size: 0.9rem !important;
-    margin-bottom: 0.6rem !important;
+    font-size: 0.85rem !important;
+    margin-bottom: 0.5rem !important;
   }
 
   .btn {
-    padding: 0.5rem 1rem !important;
-    font-size: 0.8rem !important;
+    padding: 0.4rem 0.8rem !important;
+    font-size: 0.75rem !important;
   }
 
-  /* Canvas Tabs */
+  /* Canvas Tabs Scrollable - Premium Swiping Experience */
   .canvas-tabs {
     display: flex !important;
-    flex-wrap: wrap !important;
-    gap: 4px !important;
+    overflow-x: auto !important;
+    white-space: nowrap !important;
+    flex-wrap: nowrap !important;
+    gap: 0.4rem !important;
+    border-bottom: 1.5px solid var(--border-color) !important;
+    padding-bottom: 0.4rem !important;
+    margin-bottom: 0.75rem !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  .canvas-tabs::-webkit-scrollbar {
+    display: none !important;
   }
 
   .canvas-tab-btn {
-    padding: 0.4rem 0.5rem !important;
+    padding: 0.4rem 0.6rem !important;
     font-size: 0.75rem !important;
-    flex: 1 1 30% !important; /* Row wrapping */
+    flex: 0 0 auto !important; /* Horizontally scrollable, no wrap */
     text-align: center !important;
     white-space: nowrap !important;
+    border-bottom: 2px solid transparent !important;
+  }
+  
+  .canvas-tab-btn.active {
+    border-bottom-color: var(--xhs-red) !important;
   }
 
   /* Upload Area */
@@ -1020,8 +1041,14 @@ body {
     padding: 0.4rem !important;
   }
 
+  .form-control {
+    padding: 0.5rem 0.75rem !important;
+    font-size: 0.85rem !important;
+  }
+
   .form-label {
     font-size: 0.75rem !important;
+    margin-bottom: 0.25rem !important;
   }
 
   /* AI Buttons wrap */
