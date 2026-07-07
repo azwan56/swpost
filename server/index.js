@@ -360,7 +360,26 @@ ${keywordsPrompt}
   }
 });
 
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    dashscopeConfigured: !!process.env.DASHSCOPE_API_KEY,
+    volcConfigured: !!process.env.VOLC_API_KEY
+  });
+});
+
+// Serve static files from React build folder in production
+const distPath = path.join(__dirname, '../dist');
+app.use(express.static(distPath));
+
+// For all other requests, return index.html (client-side routing)
+app.get('*', (req, res) => {
+  res.sendFile(path.join(distPath, 'index.html'));
+});
+
 // Start Server
 app.listen(port, () => {
   console.log(`Xiaohongshu Generator backend listening at http://localhost:${port}`);
+  console.log(`API Health Check: http://localhost:${port}/api/health`);
 });
