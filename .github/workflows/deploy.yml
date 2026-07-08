@@ -27,13 +27,41 @@ jobs:
           npm ci
           VITE_BASE_PATH=/swpost/ npm run build
 
-      # 4. 安装后端依赖（仅 production）
+      # 4. 编译微信小程序并自动上传到微信后台
+      - name: Build and Upload WeChat Mini Program
+        env:
+          APPID: ${{ secrets.MINIPROGRAM_APPID }}
+          PRIVATE_KEY: ${{ secrets.WECHAT_UPLOAD_PRIVATE_KEY }}
+        run: |
+          cd mp-app
+          npm install --no-audit
+          npm run build:weapp
+          
+          # 获取 package.json 中的版本号，以及当前 commit 作为描述
+          VERSION=$(node -p "require('./package.json').version")
+          DESC="Commit ${GITHUB_SHA::7}"
+          
+          # 写入私钥文件
+          echo "$PRIVATE_KEY" > ./private.key
+          
+          # 上传小程序到微信公众平台
+          npx miniprogram-ci upload \
+            --pp ./ \
+            --pk ./private.key \
+            --appid "$APPID" \
+            --uv "$VERSION" \
+            --ud "$DESC"
+            
+          # 清除私钥
+          rm -f ./private.key
+
+      # 5. 安装后端依赖（仅 production）
       - name: Install server dependencies
         run: |
           cd server
           npm ci --omit=dev
 
-      # 5. 部署到 ECS：同步前端 dist/ + 后端 server/ 
+      # 6. 部署到 ECS：同步前端 dist/ + 后端 server/ 
       - name: Deploy to ECS via SSH
         uses: easingthemes/ssh-deploy@main
         with:
@@ -45,7 +73,7 @@ jobs:
           TARGET: /var/www/swpost
           EXCLUDE: ".git, node_modules, .env, .gitignore, .github"
 
-      # 6. 重启 PM2 进程
+      # 7. 重启 PM2 进程
       - name: Restart PM2
         uses: appleboy/ssh-action@v1
         with:
