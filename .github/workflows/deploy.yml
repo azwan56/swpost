@@ -46,11 +46,11 @@ jobs:
           
           # 上传小程序到微信公众平台
           npx miniprogram-ci upload \
-            --pp ./ \
-            --pk ./private.key \
+            --project-path ./ \
+            --private-key-path ./private.key \
             --appid "$APPID" \
-            --uv "$VERSION" \
-            --ud "$DESC"
+            --upload-version "$VERSION" \
+            --upload-description "$DESC"
             
           # 清除私钥
           rm -f ./private.key
