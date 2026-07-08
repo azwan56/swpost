@@ -32,6 +32,7 @@ jobs:
         env:
           APPID: ${{ secrets.MINIPROGRAM_APPID }}
           PRIVATE_KEY: ${{ secrets.WECHAT_UPLOAD_PRIVATE_KEY }}
+          NODE_OPTIONS: --openssl-legacy-provider
         run: |
           cd mp-app
           npm install --no-audit
