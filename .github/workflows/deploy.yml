@@ -43,7 +43,9 @@ jobs:
           DESC="Commit ${GITHUB_SHA::7}"
           
           # 写入私钥文件
-          echo "$PRIVATE_KEY" > ./private.key
+          cat << 'EOF' > ./private.key
+          ${{ secrets.WECHAT_UPLOAD_PRIVATE_KEY }}
+          EOF
           
           # 上传小程序到微信公众平台
           npx miniprogram-ci upload \
