@@ -29,6 +29,11 @@ server/.env
 **/.env.local
 
 # Untracked sub-projects and backups
-mp-app/
 *.bak
+
+# mp-app local environment & cache
+mp-app/.npm-cache/
+mp-app/*.log
+mp-app/pnpm-lock.yaml
+
 
