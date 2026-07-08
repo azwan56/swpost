@@ -76,19 +76,6 @@ jobs:
             
             key = key + '\n';
             fs.writeFileSync('./private.key', key);
-            
-            console.log('=== Private Key Diagnostics ===');
-            console.log('Total characters:', key.length);
-            console.log('Total lines:', key.split('\n').length);
-            console.log('Starts with BEGIN?:', key.startsWith('-----BEGIN'));
-            console.log('Ends with END?:', key.trim().endsWith('KEY-----'));
-            console.log('First 20 chars:', key.substring(0, 20));
-            console.log('===============================');
-            
-            if (!key.startsWith('-----BEGIN')) {
-              console.error('CRITICAL ERROR: Private key does not start with -----BEGIN. It seems the secret is incorrect or incomplete.');
-              process.exit(1);
-            }
           "
           
           # 上传小程序
