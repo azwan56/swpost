@@ -32,7 +32,6 @@ jobs:
         env:
           APPID: ${{ secrets.MINIPROGRAM_APPID }}
           PRIVATE_KEY: ${{ secrets.WECHAT_UPLOAD_PRIVATE_KEY }}
-          NODE_OPTIONS: --openssl-legacy-provider
         run: |
           cd mp-app
           npm install --no-audit
@@ -42,13 +41,11 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           DESC="Commit ${GITHUB_SHA::7}"
           
-          # 写入私钥文件
-          cat << 'EOF' > ./private.key
-          ${{ secrets.WECHAT_UPLOAD_PRIVATE_KEY }}
-          EOF
+          # 使用 Node.js 写入私钥文件（绕过所有 Shell 转义和换行符丢失的问题）
+          node -e "require('fs').writeFileSync('./private.key', process.env.PRIVATE_KEY)"
           
-          # 上传小程序到微信公众平台
-          npx miniprogram-ci upload \
+          # 上传小程序到微信公众平台（仅在上传时启用 legacy OpenSSL 以兼容签名算法）
+          NODE_OPTIONS=--openssl-legacy-provider npx miniprogram-ci upload \
             --project-path ./ \
             --private-key-path ./private.key \
             --appid "$APPID" \
