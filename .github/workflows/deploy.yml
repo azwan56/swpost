@@ -35,11 +35,15 @@ jobs:
           npm run build:weapp
 
       # 5. 上传微信小程序到微信后台
+      - name: Setup Node for WeChat Upload (Use Node 16 to bypass OpenSSL 3.0 legacy crypto errors)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '16'
+
       - name: Upload WeChat Mini Program
         env:
           APPID: ${{ secrets.MINIPROGRAM_APPID }}
           PRIVATE_KEY: ${{ secrets.WECHAT_UPLOAD_PRIVATE_KEY }}
-          NODE_OPTIONS: --openssl-legacy-provider
         run: |
           cd mp-app
           
@@ -47,18 +51,28 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           DESC="Commit ${GITHUB_SHA::7}"
           
-          # 使用 Node.js 写入私钥文件（绕过 Shell 转义问题）
-          node -e "require('fs').writeFileSync('./private.key', process.env.PRIVATE_KEY)"
+          # 修复并写入私钥文件：处理可能由于 GitHub Secrets 粘贴丢失换行符的问题
+          node -e "
+            const fs = require('fs');
+            let key = process.env.PRIVATE_KEY.trim();
+            if (!key.includes('\n')) {
+              console.log('Detected single-line private key, attempting to format...');
+              const match = key.match(/(-----BEGIN .*? KEY-----)(.*?)(-----END .*? KEY-----)/);
+              if (match) {
+                const header = match[1];
+                const body = match[2].replace(/\s+/g, '');
+                const bodyLines = body.match(/.{1,64}/g).join('\n');
+                const footer = match[3];
+                key = header + '\n' + bodyLines + '\n' + footer + '\n';
+              }
+            } else {
+              key = key + '\n';
+            }
+            fs.writeFileSync('./private.key', key);
+            console.log('Private key written. Length:', key.length, 'Lines:', key.split('\n').length);
+          "
           
-          # 诊断：检查密钥文件格式是否正确
-          echo "=== Private Key Diagnostics ==="
-          echo "First line: $(head -1 ./private.key)"
-          echo "Last line: $(tail -1 ./private.key)"
-          echo "Total lines: $(wc -l < ./private.key)"
-          echo "File size: $(wc -c < ./private.key) bytes"
-          echo "==============================="
-          
-          # 上传小程序
+          # 上传小程序 (Node 16 自带 OpenSSL 1.1，不会报错，因此不需要 NODE_OPTIONS)
           npx miniprogram-ci upload \
             --project-path ./ \
             --private-key-path ./private.key \
