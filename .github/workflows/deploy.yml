@@ -51,28 +51,47 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           DESC="Commit ${GITHUB_SHA::7}"
           
-          # 修复并写入私钥文件：处理可能由于 GitHub Secrets 粘贴丢失换行符的问题
+          # 修复并写入私钥文件
           node -e "
             const fs = require('fs');
-            let key = process.env.PRIVATE_KEY.trim();
+            let key = process.env.PRIVATE_KEY || '';
+            key = key.trim();
+            
+            // 修复1：如果用户粘贴了字面上的 '\\n' 字符串，将其替换为真正的换行符
+            if (key.includes('\\\\n')) {
+              key = key.replace(/\\\\n/g, '\n');
+            }
+            
+            // 修复2：如果是一整行没有换行符的文本，尝试提取并重新排版
             if (!key.includes('\n')) {
-              console.log('Detected single-line private key, attempting to format...');
               const match = key.match(/(-----BEGIN .*? KEY-----)(.*?)(-----END .*? KEY-----)/);
               if (match) {
                 const header = match[1];
                 const body = match[2].replace(/\s+/g, '');
                 const bodyLines = body.match(/.{1,64}/g).join('\n');
                 const footer = match[3];
-                key = header + '\n' + bodyLines + '\n' + footer + '\n';
+                key = header + '\n' + bodyLines + '\n' + footer;
               }
-            } else {
-              key = key + '\n';
             }
+            
+            key = key + '\n';
             fs.writeFileSync('./private.key', key);
-            console.log('Private key written. Length:', key.length, 'Lines:', key.split('\n').length);
+            
+            console.log('=== Private Key Diagnostics ===');
+            console.log('Total characters:', key.length);
+            console.log('Total lines:', key.split('\n').length);
+            console.log('Starts with BEGIN?:', key.startsWith('-----BEGIN'));
+            console.log('Ends with END?:', key.trim().endsWith('KEY-----'));
+            console.log('First 20 chars:', key.substring(0, 20));
+            console.log('===============================');
+            
+            if (!key.startsWith('-----BEGIN')) {
+              console.error('CRITICAL ERROR: Private key does not start with -----BEGIN. It seems the secret is incorrect or incomplete.');
+              process.exit(1);
+            }
           "
           
-          # 上传小程序 (Node 16 自带 OpenSSL 1.1，不会报错，因此不需要 NODE_OPTIONS)
+          # 上传小程序
           npx miniprogram-ci upload \
             --project-path ./ \
             --private-key-path ./private.key \
