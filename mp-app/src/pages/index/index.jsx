@@ -253,7 +253,7 @@ export default function Index() {
     if (!activeImage) return;
     
     setIsLoading(true);
-    const styleLabel = styleName === 'clay' ? '泥塑黏土化' : styleName === 'japanese-film' ? '日式胶片风' : '吉卜力卡通化';
+    const styleLabel = styleName === 'clay' ? '泥塑黏土化' : styleName === 'polaroid' ? '经典宝利来' : '吉卜力卡通化';
     setAiOperationName(`豆包模型 ${styleLabel}`);
     setErrorMsg('');
 
@@ -398,7 +398,17 @@ export default function Index() {
       {isLoading && (
         <View className="loading-overlay">
           <View className="spinner"></View>
-          <Text className="loading-text">{aiOperationName}... 请稍候...</Text>
+          <View className="loading-text-wave">
+            {(aiOperationName + '... 请稍候...').split('').map((char, index) => (
+              <Text 
+                key={index} 
+                className="wave-char" 
+                style={{ animationDelay: `${index * 0.08}s` }}
+              >
+                {char === ' ' ? '\u00A0' : char}
+              </Text>
+            ))}
+          </View>
         </View>
       )}
 
@@ -517,12 +527,12 @@ export default function Index() {
                 </View>
                 
                 <View 
-                  className={`style-picker-card ${activeImage.activeStyle === 'japanese-film' ? 'active' : ''}`}
-                  onClick={() => handleAIStyleTransfer('japanese-film')}
+                  className={`style-picker-card ${activeImage.activeStyle === 'polaroid' ? 'active' : ''}`}
+                  onClick={() => handleAIStyleTransfer('polaroid')}
                 >
-                  <Text className="style-picker-emoji">🎞️</Text>
-                  <Text className="style-picker-name">日式胶片</Text>
-                  <Text className="style-picker-desc">复古怀旧质感</Text>
+                  <Text className="style-picker-emoji">📸</Text>
+                  <Text className="style-picker-name">宝利来</Text>
+                  <Text className="style-picker-desc">经典拍立得</Text>
                 </View>
               </View>
             </View>

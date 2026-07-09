@@ -95,18 +95,19 @@ app.post('/api/ai/style-transfer', async (req, res) => {
       console.log(`[StyleTransfer] 使用 Volcano Ark (Doubao Seedream 5.0), style=${style}`);
       
       let prompt = '将参考图转换成极其精美的吉卜力动画风格，宫崎骏工作室手绘画画风，温暖治愈的水彩线条，梦幻柔和的动漫光影，明亮清新的色彩，高清原画品质';
+      let size = '2K';
       if (style === 'clay') {
         prompt = '将参考图重新渲染成软萌可爱的3D泥塑黏土人偶玩具风格，黏土橡皮泥材质，温润反光表面，明亮清新的色彩，纯色背景，高分辨率，3d clay illustration';
-      } else if (style === 'japanese-film') {
-        prompt = '将参考图重新渲染成精美的复古日式胶片风格照片，温暖怀旧的色彩，富士胶片质感，柔和微细颗粒感，自然采光，analog camera photography, Fuji film look, retro warm vintage tones, high quality';
+      } else if (style === 'japanese-film' || style === 'polaroid') {
+        prompt = '将参考图重新渲染成经典的宝利来拍立得相机照片风格，1:1正方形构图，复古怀旧色调，画面四周带有拍立得经典的标志性宽大白色实体卡纸相框边框（底部相框较宽），富士胶片质感，温暖复古，Classic Polaroid photo with a signature white border frame, 1:1 square crop, vintage analog film look';
+        size = '1024*1024';
       }
 
-      // Use "2K" to let Seedream auto-adapt aspect ratio instead of forcing square 2048x2048
       const volcPayload = {
         model: 'doubao-seedream-5-0-260128',
         prompt: prompt,
         image: [imageDataUri],
-        size: '2K',
+        size: size,
         n: 1
       };
 
@@ -155,8 +156,8 @@ app.post('/api/ai/style-transfer', async (req, res) => {
     let dashscopePrompt = '转换成吉卜力动画风格，宫崎骏工作室风格，柔和水彩质感，温暖明亮的色调，细腻的手绘线条，梦幻唯美的动漫画风';
     if (style === 'clay') {
       dashscopePrompt = '重新渲染成软萌可爱的3D泥塑黏土人偶玩具风格，黏土橡皮泥材质，温润反光表面，明亮清新的色彩，纯色背景，3d clay illustration';
-    } else if (style === 'japanese-film') {
-      dashscopePrompt = '重新渲染成精美的复古日式胶片风格照片，温暖怀旧的色彩，富士胶片质感，柔和微细颗粒感，自然采光，Fuji film look, retro warm vintage tones';
+    } else if (style === 'japanese-film' || style === 'polaroid') {
+      dashscopePrompt = '重新渲染成经典的宝利来拍立得相机照片风格，1:1正方形构图，复古怀旧色调，画面四周带有拍立得经典的标志性宽大白色实体卡纸相框边框（底部相框较宽），富士胶片质感，温暖复古，Classic Polaroid photo with a signature white border frame, 1:1 square crop, vintage analog film look';
     }
 
     let payload = {
