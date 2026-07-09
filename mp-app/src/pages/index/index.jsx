@@ -176,6 +176,7 @@ export default function Index() {
   const [isLoading, setIsLoading] = useState(false);
   const [aiOperationName, setAiOperationName] = useState(''); 
   const [errorMsg, setErrorMsg] = useState('');
+  const [isEditorExpanded, setIsEditorExpanded] = useState(false);
 
   useLoad(() => {
     console.log('Taro Page loaded. API Base set to:', API_BASE);
@@ -398,302 +399,278 @@ export default function Index() {
         <View className="logo-section">
           <View className="logo-badge">书</View>
           <View className="logo-text">
-            <Text className="h1-text" style={{ fontSize: '1.2rem', fontWeight: 'bold', display: 'block' }}>小红书画风与文案生成器</Text>
-            <Text className="sub-text" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>豆包大模型一键风格化 & AI爆款文案</Text>
+            <Text className="h1-text">小红书画风与文案生成器</Text>
+            <Text className="sub-text">豆包大模型一键风格化 & AI爆款文案</Text>
           </View>
         </View>
         
         {uploadedImages.length > 0 && (
           <Button 
-            className="btn btn-secondary btn-clear"
-            style={{ fontWeight: 600, fontSize: '0.75rem', padding: '0.3rem 0.6rem', minHeight: 'auto', width: 'auto', display: 'inline-block' }}
+            className="btn-clear"
             onClick={clearAllImages}
           >
-            🧹 清空全部
+            🧹 清空
           </Button>
         )}
       </View>
 
       {/* Loading Overlay */}
       {isLoading && (
-        <View className="loading-overlay" style={{ position: 'fixed', width: '100vw', height: '100vh', top: 0, left: 0, zIndex: 1000, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)' }}>
+        <View className="loading-overlay">
           <View className="spinner"></View>
-          <Text className="loading-text" style={{ fontSize: '1rem', fontWeight: 600, color: '#ffffff', marginTop: '1rem' }}>{aiOperationName}... 请稍候...</Text>
+          <Text className="loading-text">{aiOperationName}... 请稍候...</Text>
         </View>
       )}
 
       {/* Main Workspace Scroll Wrapper */}
-      <ScrollView scrollY className="workspace-scroll" style={{ height: 'calc(100vh - 70px)' }}>
-        <View className={`workspace ${uploadedImages.length > 0 ? 'has-images' : ''}`}>
+      <ScrollView scrollY className="workspace-scroll">
+        <View className="workspace">
           
-          {/* Left Control Panel */}
-          <View className="editor-panel">
-            {errorMsg && (
-              <View className="error-banner">
-                <Text>⚠️ {errorMsg}</Text>
-                <Text className="error-close" onClick={() => setErrorMsg('')}>×</Text>
-              </View>
-            )}
-
-            {/* 1. Upload Section */}
-            <View className="card">
-              <Text className="card-title" style={{ fontSize: '0.95rem', fontWeight: 'bold', marginBottom: '0.75rem', display: 'block' }}>📸 上传照片 (最多4张)</Text>
-              <View style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                {uploadedImages.length < 4 && (
-                  <View 
-                    className="upload-zone"
-                    onClick={handlePhotosUpload}
-                    style={{ padding: '1.5rem 1rem', border: '2px dashed var(--border-color)', borderRadius: 'var(--radius-md)', display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer' }}
-                  >
-                    <Text className="upload-icon" style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📤</Text>
-                    <Text style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>点击添加 1-4 张图片</Text>
-                  </View>
-                )}
-
-                {/* Uploaded Thumbnails Manager */}
-                {uploadedImages.length > 0 && (
-                  <View>
-                    <Text style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.5rem', display: 'block' }}>点击选中某张照片进行画风转换：</Text>
-                    <View className="uploaded-images-list" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      {uploadedImages.map((img, idx) => (
-                        <View 
-                          key={img.id}
-                          className={`uploaded-image-thumbnail ${activeIdx === idx ? 'active' : ''}`}
-                          onClick={() => setActiveIdx(idx)}
-                          style={{ position: 'relative', width: '60px', height: '60px', borderRadius: 'var(--radius-sm)', border: activeIdx === idx ? '2px solid var(--xhs-red)' : '1px solid var(--border-color)', overflow: 'hidden' }}
-                        >
-                          <Image src={img.styledSrc || img.src} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                          <View 
-                            className="uploaded-image-remove"
-                            onClick={(e) => removeUploadedImage(img.id, e)}
-                            style={{ position: 'absolute', top: 0, right: 0, width: '18px', height: '18px', backgroundColor: 'rgba(0,0,0,0.6)', color: '#fff', fontSize: '10px', display: 'flex', justifyContent: 'center', alignItems: 'center', borderRadius: '0 0 0 4px', cursor: 'pointer' }}
-                          >
-                            ✕
-                          </View>
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-                )}
-              </View>
+          {/* Stepper Progress */}
+          <View className="stepper">
+            <View className={`step-item ${uploadedImages.length === 0 ? 'active' : ''}`}>
+              <View className="step-num">1</View>
+              <Text>添加图片</Text>
             </View>
-
-            {/* 2. Image Style Control */}
-            {uploadedImages.length > 0 && activeImage && (
-              <View className="card">
-                <Text className="card-title" style={{ fontSize: '0.95rem', fontWeight: 'bold', marginBottom: '0.5rem', display: 'block' }}>🎨 豆包 AI 画风重绘</Text>
-                <Text style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.75rem', display: 'block' }}>
-                  调用豆包 Seedream 模型重绘选中的第 {activeIdx + 1} 张图片：
-                </Text>
-                
-                <View style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                  <Button 
-                    className="btn btn-primary" 
-                    style={{ padding: '0.4rem 0.25rem', fontSize: '0.75rem', background: 'linear-gradient(135deg, #4f46e5, #6366f1)', border: 'none', color: '#fff', minHeight: 'auto', height: 'auto', width: '100%' }}
-                    onClick={() => handleAIStyleTransfer('cartoon')}
-                  >
-                    吉卜力
-                  </Button>
-                  <Button 
-                    className="btn btn-primary" 
-                    style={{ padding: '0.4rem 0.25rem', fontSize: '0.75rem', background: 'linear-gradient(135deg, #ec4899, #d946ef)', border: 'none', color: '#fff', minHeight: 'auto', height: 'auto', width: '100%' }}
-                    onClick={() => handleAIStyleTransfer('clay')}
-                  >
-                    泥塑风
-                  </Button>
-                  <Button 
-                    className="btn btn-primary" 
-                    style={{ padding: '0.4rem 0.25rem', fontSize: '0.75rem', background: 'linear-gradient(135deg, #d97706, #92400e)', border: 'none', color: '#fff', minHeight: 'auto', height: 'auto', width: '100%' }}
-                    onClick={() => handleAIStyleTransfer('japanese-film')}
-                  >
-                    胶片风
-                  </Button>
-                </View>
-
-                {activeImage.styledSrc && (
-                  <Button
-                    className="btn btn-secondary"
-                    style={{ width: '100%', fontSize: '0.75rem', padding: '0.4rem', minHeight: 'auto', height: 'auto' }}
-                    onClick={restoreToOriginal}
-                  >
-                    ↩️ 恢复原图
-                  </Button>
-                )}
-              </View>
-            )}
-
-            {/* 3. AI Copy Generator */}
-            {uploadedImages.length > 0 && (
-              <View className="card">
-                <Text className="card-title" style={{ fontSize: '0.95rem', fontWeight: 'bold', marginBottom: '0.5rem', display: 'block' }}>✍️ 小红书爆款文案生成</Text>
-                <Text style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.75rem', display: 'block' }}>
-                  让 AI 智能识别内容风格，撰写文案与热门标签：
-                </Text>
-
-                <View style={{ marginBottom: '0.75rem' }}>
-                  <Text className="form-label" style={{ fontSize: '0.75rem', display: 'block', marginBottom: '0.25rem', fontWeight: 'bold' }}>文案风格：</Text>
-                  <View style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
-                    {['探店', '旅行心情', '自定义'].map((style) => (
-                      <Button
-                        key={style}
-                        className="btn"
-                        style={{
-                          padding: '0.3rem 0.6rem',
-                          fontSize: '0.7rem',
-                          borderRadius: '20px',
-                          border: copyStyle === style ? 'none' : '1px solid var(--border-color)',
-                          background: copyStyle === style ? 'linear-gradient(135deg, #ff2442, #ff4d66)' : 'var(--bg-card)',
-                          color: copyStyle === style ? '#fff' : 'var(--text-secondary)',
-                          fontWeight: copyStyle === style ? '600' : 'normal',
-                          minHeight: 'auto',
-                          width: 'auto',
-                          height: 'auto',
-                          lineHeight: 1.5,
-                          margin: 0
-                        }}
-                        onClick={() => setCopyStyle(style)}
-                      >
-                        {style === '探店' && '🛍️ 探店'}
-                        {style === '旅行心情' && '✈️ 旅行心情'}
-                        {style === '自定义' && '⚙️ 自定义'}
-                      </Button>
-                    ))}
-                  </View>
-
-                  {copyStyle === '自定义' && (
-                    <Input
-                      type="text"
-                      className="form-control"
-                      placeholder="如：科技测评、日常随笔..."
-                      style={{ width: '100%', marginBottom: '0.5rem', padding: '0.4rem 0.5rem', fontSize: '0.75rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', boxSizing: 'border-box' }}
-                      value={customCopyStyle}
-                      onInput={(e) => setCustomCopyStyle(e.detail.value)}
-                    />
-                  )}
-                </View>
-
-                <View style={{ marginBottom: '0.75rem' }}>
-                  <Text className="form-label" style={{ fontSize: '0.75rem', display: 'block', marginBottom: '0.25rem', fontWeight: 'bold' }}>亮点描述（选填）：</Text>
-                  <Textarea
-                    className="form-control"
-                    placeholder="可简述图片拍摄的主题、天气或想表达的亮点描述..."
-                    style={{ width: '100%', padding: '0.4rem 0.5rem', fontSize: '0.75rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', boxSizing: 'border-box', height: '60px' }}
-                    value={copyKeywords}
-                    onInput={(e) => setCopyKeywords(e.detail.value)}
-                  />
-                </View>
-
-                <Button
-                  className="btn btn-primary"
-                  style={{ width: '100%', background: 'linear-gradient(135deg, #6366f1, #4f46e5)', color: '#fff', fontSize: '0.8rem', fontWeight: 'bold' }}
-                  onClick={handleGenerateAICopy}
-                  disabled={isGeneratingCopy}
-                >
-                  {isGeneratingCopy ? '🤖 智能撰写中...' : '🚀 一键生成小红书文案'}
-                </Button>
-              </View>
-            )}
+            <View className="step-line"></View>
+            <View className={`step-item ${uploadedImages.length > 0 && !activeImage?.styledSrc ? 'active' : ''}`}>
+              <View className="step-num">2</View>
+              <Text>重绘风格</Text>
+            </View>
+            <View className="step-line"></View>
+            <View className={`step-item ${generatedCopyOptions.length > 0 ? 'active' : ''}`}>
+              <View className="step-num">3</View>
+              <Text>生成文案</Text>
+            </View>
           </View>
 
-          {/* Right Preview & Result Column */}
-          <View className="preview-panel">
-            {uploadedImages.length > 0 && activeImage ? (
-              <View style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%' }}>
-                
-                {/* Image Preview Card */}
-                <View className="card" style={{ padding: '1rem' }}>
-                  <View style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                    <Text style={{ fontSize: '0.85rem', fontWeight: 'bold' }}>🖼️ 风格化效果预览</Text>
-                    <Button 
-                      className="btn btn-primary" 
-                      style={{ padding: '0.3rem 0.6rem', fontSize: '0.7rem', background: 'linear-gradient(135deg, #ff2442, #ff4d66)', border: 'none', color: '#fff', fontWeight: '600', minHeight: 'auto', width: 'auto', height: 'auto' }} 
-                      onClick={() => saveOrDownloadImage(activeImage.styledSrc || activeImage.src, activeIdx)}
-                    >
-                      📥 导出图片
-                    </Button>
-                  </View>
-                  
-                  <View style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#f3f4f6', borderRadius: 'var(--radius-md)', overflow: 'hidden', padding: '1rem', minHeight: '200px' }}>
-                    <Image 
-                      src={activeImage.styledSrc || activeImage.src} 
-                      mode="aspectFit"
-                      style={{ width: '100%', height: '300px', borderRadius: 'var(--radius-sm)', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-                    />
-                  </View>
-                </View>
+          {errorMsg && (
+            <View className="error-banner">
+              <Text>⚠️ {errorMsg}</Text>
+              <Text className="error-close" onClick={() => setErrorMsg('')}>×</Text>
+            </View>
+          )}
 
-                {/* Copywriting Result Card */}
-                {generatedCopyOptions.length > 0 && (
-                  <View className="card" style={{ padding: '1rem' }}>
-                    <Text style={{ fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '0.5rem', display: 'block' }}>✍️ AI 生成文案</Text>
-                    
-                    <View style={{ display: 'flex', gap: '0.25rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem', marginBottom: '0.75rem' }}>
-                      {generatedCopyOptions.map((opt, idx) => (
-                        <Button
-                          key={idx}
-                          className={`btn ${activeCopyOptionIdx === idx ? 'btn-primary' : 'btn-secondary'}`}
-                          style={{ flex: 1, padding: '0.3rem 0.25rem', fontSize: '0.7rem', minHeight: 'auto', height: 'auto', lineHeight: 1.5 }}
-                          onClick={() => applyCopyOption(idx)}
-                        >
-                          方案 {idx + 1}
-                        </Button>
-                      ))}
-                    </View>
-
-                    <View style={{ background: 'var(--bg-main)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', position: 'relative', marginBottom: '0.75rem' }}>
-                      <View style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                        <Text style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--text-secondary)' }}>
-                          ✨ 效果预览：
-                        </Text>
-                        <Button
-                          className="btn btn-secondary"
-                          style={{ padding: '0.2rem 0.4rem', fontSize: '0.65rem', minHeight: 'auto', width: 'auto', height: 'auto', margin: 0 }}
-                          onClick={handleCopyClipboard}
-                        >
-                          📋 复制文案
-                        </Button>
-                      </View>
-
-                      <View style={{ fontSize: '0.8rem', fontWeight: 'bold', color: 'var(--text-primary)', marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px dotted var(--border-color)' }}>
-                        标题：{aiTitle}
-                      </View>
-                      <Text style={{ fontSize: '0.75rem', color: 'var(--text-primary)', whiteSpace: 'pre-wrap', lineHeight: '1.5', display: 'block' }}>
-                        {aiBody}
-                      </Text>
-                    </View>
-
-                    {/* Copy Editor */}
-                    <View style={{ borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' }}>
-                      <Text style={{ fontSize: '0.75rem', fontWeight: 'bold', marginBottom: '0.5rem', display: 'block' }}>✍️ 微调编辑：</Text>
-                      <View style={{ marginBottom: '0.5rem' }}>
-                        <Text style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>修改标题</Text>
-                        <Input 
-                          type="text" 
-                          className="form-control" 
-                          style={{ width: '100%', padding: '0.4rem 0.5rem', fontSize: '0.75rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', boxSizing: 'border-box' }}
-                          value={aiTitle} 
-                          onInput={(e) => setAiTitle(e.detail.value)}
-                        />
-                      </View>
-                      <View>
-                        <Text style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>修改正文与标签</Text>
-                        <Textarea 
-                          className="form-control" 
-                          style={{ width: '100%', padding: '0.4rem 0.5rem', fontSize: '0.75rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', boxSizing: 'border-box', height: '100px' }}
-                          value={aiBody} 
-                          onInput={(e) => setAiBody(e.detail.value)}
-                        />
-                      </View>
-                    </View>
-                  </View>
-                )}
+          {/* Step 1: Upload & Thumbnail Manager */}
+          <View className="card">
+            <Text className="card-title">📸 第一步：管理您的图片</Text>
+            
+            {uploadedImages.length === 0 ? (
+              <View className="upload-zone" onClick={handlePhotosUpload}>
+                <Text className="upload-icon">📤</Text>
+                <Text style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>点击添加 1-4 张待转换图片</Text>
               </View>
             ) : (
-              <View className="card" style={{ width: '100%', height: '250px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6c757d' }}>
-                <Text style={{ fontSize: '0.8rem' }}>🌅 请先在左侧上传并选择照片进行风格重绘</Text>
+              <View className="thumbnails-container">
+                <View className="thumbnails-header">
+                  <Text style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>已上传 {uploadedImages.length} 张图片（点击切换）：</Text>
+                </View>
+                <View className="thumbnails-list">
+                  {uploadedImages.map((img, idx) => (
+                    <View 
+                      key={img.id}
+                      className={`thumbnail-wrapper ${activeIdx === idx ? 'active' : ''}`}
+                      onClick={() => setActiveIdx(idx)}
+                    >
+                      <Image className="thumbnail-img" src={img.styledSrc || img.src} mode="aspectFill" />
+                      <View 
+                        className="thumbnail-remove"
+                        onClick={(e) => removeUploadedImage(img.id, e)}
+                      >
+                        ✕
+                      </View>
+                    </View>
+                  ))}
+                  {uploadedImages.length < 4 && (
+                    <View className="thumbnail-add" onClick={handlePhotosUpload}>
+                      <Text>+</Text>
+                    </View>
+                  )}
+                </View>
               </View>
             )}
           </View>
+
+          {/* Step 2: Preview & Style Selection */}
+          {uploadedImages.length > 0 && activeImage && (
+            <View className="card">
+              <Text className="card-title">🖼️ 第二步：画面预览与风格化</Text>
+              
+              {/* Premium Image Card with Hover/Tap actions */}
+              <View className="preview-card">
+                <Image 
+                  className="preview-image"
+                  src={activeImage.styledSrc || activeImage.src} 
+                  mode="aspectRatio"
+                />
+                
+                <View className="preview-actions-overlay">
+                  {activeImage.styledSrc ? (
+                    <Button className="preview-action-btn btn-restore" onClick={restoreToOriginal}>
+                      ↩️ 恢复原图
+                    </Button>
+                  ) : (
+                    <Text style={{ color: '#fff', fontSize: '0.65rem', fontWeight: 600 }}>原图预览</Text>
+                  )}
+                  
+                  <Button 
+                    className="preview-action-btn btn-export" 
+                    onClick={() => saveOrDownloadImage(activeImage.styledSrc || activeImage.src, activeIdx)}
+                  >
+                    📥 导出图片
+                  </Button>
+                </View>
+              </View>
+
+              {/* Styled Picker Cards */}
+              <View className="style-picker-grid">
+                <View 
+                  className={`style-picker-card ${activeImage.activeStyle === 'cartoon' ? 'active' : ''}`}
+                  onClick={() => handleAIStyleTransfer('cartoon')}
+                >
+                  <Text className="style-picker-emoji">🎨</Text>
+                  <Text className="style-picker-name">吉卜力</Text>
+                  <Text className="style-picker-desc">温暖动漫色彩</Text>
+                </View>
+                
+                <View 
+                  className={`style-picker-card ${activeImage.activeStyle === 'clay' ? 'active' : ''}`}
+                  onClick={() => handleAIStyleTransfer('clay')}
+                >
+                  <Text className="style-picker-emoji">🧸</Text>
+                  <Text className="style-picker-name">泥塑黏土</Text>
+                  <Text className="style-picker-desc">软萌立体质感</Text>
+                </View>
+                
+                <View 
+                  className={`style-picker-card ${activeImage.activeStyle === 'japanese-film' ? 'active' : ''}`}
+                  onClick={() => handleAIStyleTransfer('japanese-film')}
+                >
+                  <Text className="style-picker-emoji">🎞️</Text>
+                  <Text className="style-picker-name">日式胶片</Text>
+                  <Text className="style-picker-desc">复古怀旧质感</Text>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {/* Step 3: AI Copywriting Generator */}
+          {uploadedImages.length > 0 && (
+            <View className="card">
+              <Text className="card-title">✍️ 第三步：生成爆款文案</Text>
+              
+              <View className="segmented-control">
+                {['探店', '旅行心情', '自定义'].map((style) => (
+                  <View
+                    key={style}
+                    className={`segmented-item ${copyStyle === style ? 'active' : ''}`}
+                    onClick={() => setCopyStyle(style)}
+                  >
+                    {style === '探店' && '🛍️ 探店'}
+                    {style === '旅行心情' && '✈️ 旅行'}
+                    {style === '自定义' && '⚙️ 自定义'}
+                  </View>
+                ))}
+              </View>
+
+              {copyStyle === '自定义' && (
+                <Input
+                  type="text"
+                  className="modern-input"
+                  placeholder="请输入您的自定义风格，例如“数码测评”..."
+                  value={customCopyStyle}
+                  onInput={(e) => setCustomCopyStyle(e.detail.value)}
+                />
+              )}
+
+              <Textarea
+                className="modern-textarea"
+                placeholder="添加亮点描述（选填，如拍摄主题、天气或特定亮点）..."
+                value={copyKeywords}
+                onInput={(e) => setCopyKeywords(e.detail.value)}
+              />
+
+              <Button
+                className="btn-pill"
+                onClick={handleGenerateAICopy}
+                disabled={isGeneratingCopy}
+              >
+                {isGeneratingCopy ? '🤖 智能撰写中...' : '🚀 一键生成爆款小红书文案'}
+              </Button>
+            </View>
+          )}
+
+          {/* Step 4: Copywriting Result Showcase */}
+          {uploadedImages.length > 0 && generatedCopyOptions.length > 0 && (
+            <View className="card">
+              <Text className="card-title">✨ AI 生成结果</Text>
+              
+              <View className="result-tabs">
+                {generatedCopyOptions.map((opt, idx) => (
+                  <View
+                    key={idx}
+                    className={`result-tab-item ${activeCopyOptionIdx === idx ? 'active' : ''}`}
+                    onClick={() => applyCopyOption(idx)}
+                  >
+                    方案 {idx + 1}
+                  </View>
+                ))}
+              </View>
+
+              <View className="paper-card">
+                <View className="paper-header">
+                  <Text className="paper-title">小红书格式预览</Text>
+                  <Button className="btn-copy-action" onClick={handleCopyClipboard}>
+                    📋 复制文案
+                  </Button>
+                </View>
+                
+                <View className="paper-content">
+                  <Text style={{ fontWeight: 'bold', display: 'block', marginBottom: '0.4rem', borderBottom: '1px dotted var(--border-color)', paddingBottom: '0.3rem' }}>
+                    标题：{aiTitle}
+                  </Text>
+                  <Text style={{ whiteSpace: 'pre-wrap', display: 'block' }}>
+                    {aiBody}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Collapsible micro-editor to keep layout concise */}
+              <View className="accordion">
+                <View 
+                  className="accordion-trigger" 
+                  onClick={() => setIsEditorExpanded(!isEditorExpanded)}
+                >
+                  <Text className="accordion-title">✏️ 对文案进行微调修改</Text>
+                  <Text className="accordion-icon">{isEditorExpanded ? '▲' : '▼'}</Text>
+                </View>
+                
+                {isEditorExpanded && (
+                  <View className="accordion-content">
+                    <View>
+                      <Text className="form-label">微调标题：</Text>
+                      <Input 
+                        type="text" 
+                        className="modern-input" 
+                        value={aiTitle} 
+                        onInput={(e) => setAiTitle(e.detail.value)}
+                      />
+                    </View>
+                    <View>
+                      <Text className="form-label">微调正文与标签：</Text>
+                      <Textarea 
+                        className="modern-textarea" 
+                        style={{ height: '120px' }}
+                        value={aiBody} 
+                        onInput={(e) => setAiBody(e.detail.value)}
+                      />
+                    </View>
+                  </View>
+                )}
+              </View>
+
+            </View>
+          )}
 
         </View>
       </ScrollView>
