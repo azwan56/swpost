@@ -82,7 +82,7 @@ page {
 
 
 .workspace {
-  padding: 0.35rem 0.45rem 140px 0.45rem;
+  padding: 0.35rem 0.45rem calc(160px + env(safe-area-inset-bottom)) 0.45rem;
   max-width: 600px;
   margin: 0 auto;
   display: flex;
@@ -439,7 +439,9 @@ page {
 
 /* Textarea & Inputs */
 .modern-textarea {
-  width: 100%;
+  width: 100% !important;
+  height: 80px !important;
+  min-height: 80px !important;
   background-color: var(--bg-main);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
@@ -447,7 +449,6 @@ page {
   font-size: 0.75rem;
   box-sizing: border-box;
   color: var(--text-primary);
-  height: 64px;
   transition: var(--transition-smooth);
 }
 
@@ -476,17 +477,27 @@ page {
 /* Modern Pill Buttons */
 .btn-pill {
   width: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  box-sizing: border-box !important;
   background: linear-gradient(135deg, var(--xhs-red), var(--primary-pink)) !important;
   color: white !important;
-  font-size: 0.8rem !important;
+  font-size: 0.85rem !important;
   font-weight: 700 !important;
   border-radius: 20px !important;
-  height: 38px !important;
-  line-height: 38px !important;
-  min-height: 38px !important;
-  box-shadow: var(--shadow-lg);
+  height: 40px !important;
+  line-height: 40px !important;
+  min-height: 40px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-shadow: var(--shadow-lg) !important;
   border: none !important;
   transition: var(--transition-smooth);
+}
+
+.btn-pill::after {
+  border: none !important;
 }
 
 .btn-pill:active {

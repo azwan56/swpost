@@ -464,7 +464,7 @@ function App() {
                 onClick={handleGenerateAICopy}
                 disabled={isGeneratingCopy}
               >
-                {isGeneratingCopy ? '🤖 智能撰写中...' : '🚀 一键生成小红书文案'}
+                {isGeneratingCopy ? '🤖 智能撰写中...' : '一键生成小红书文案'}
               </button>
             </div>
           )}

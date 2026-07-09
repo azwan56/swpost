@@ -568,6 +568,7 @@ export default function Index() {
 
               <Textarea
                 className="modern-textarea"
+                style={{ height: '80px', minHeight: '80px' }}
                 placeholder="添加亮点描述（选填，如拍摄主题、天气或特定亮点）..."
                 value={copyKeywords}
                 onInput={(e) => setCopyKeywords(e.detail.value)}
@@ -578,7 +579,7 @@ export default function Index() {
                 onClick={handleGenerateAICopy}
                 disabled={isGeneratingCopy}
               >
-                {isGeneratingCopy ? '🤖 智能撰写中...' : '🚀 一键生成爆款小红书文案'}
+                {isGeneratingCopy ? '🤖 智能撰写中...' : '一键生成爆款小红书文案'}
               </Button>
             </View>
           )}
