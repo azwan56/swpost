@@ -61,18 +61,22 @@ page {
   font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'PingFang SC', sans-serif;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  height: auto !important;
+  min-height: 100% !important;
+  overflow: visible !important;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* App Container & Scroll */
 .app-container {
-  display: flex;
-  flex-direction: column;
   min-height: 100vh;
   background-color: var(--bg-main);
+  box-sizing: border-box;
 }
 
 .workspace-scroll {
   width: 100%;
+  box-sizing: border-box;
 }
 
 .workspace {
