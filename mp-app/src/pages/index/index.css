@@ -67,14 +67,12 @@ page {
 .app-container {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  overflow: hidden;
+  min-height: 100vh;
   background-color: var(--bg-main);
 }
 
 .workspace-scroll {
-  flex: 1;
-  height: 100%;
+  width: 100%;
 }
 
 .workspace {
@@ -305,20 +303,19 @@ page {
   background-color: var(--border-color);
 }
 
-/* Premium Image Preview with Actions Overlay */
 .preview-card {
   position: relative;
   border-radius: var(--radius-lg);
   overflow: hidden;
   background-color: #0b0c10;
   box-shadow: var(--shadow-md);
-  aspect-ratio: 4/3;
   width: 100%;
 }
 
 .preview-image {
   width: 100%;
-  height: 100%;
+  height: auto;
+  display: block;
 }
 
 .preview-actions-overlay {

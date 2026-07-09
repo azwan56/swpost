@@ -1,3 +1,3 @@
 export default definePageConfig({
-  navigationBarTitleText: '画风与文案生成'
+  navigationBarTitleText: '小红书画风与文案生成器'
 })

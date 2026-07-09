@@ -394,26 +394,6 @@ export default function Index() {
 
   return (
     <View className="app-container">
-      {/* Header */}
-      <View className="app-header">
-        <View className="logo-section">
-          <View className="logo-badge">书</View>
-          <View className="logo-text">
-            <Text className="h1-text">小红书画风与文案生成器</Text>
-            <Text className="sub-text">豆包大模型一键风格化 & AI爆款文案</Text>
-          </View>
-        </View>
-        
-        {uploadedImages.length > 0 && (
-          <Button 
-            className="btn-clear"
-            onClick={clearAllImages}
-          >
-            🧹 清空
-          </Button>
-        )}
-      </View>
-
       {/* Loading Overlay */}
       {isLoading && (
         <View className="loading-overlay">
@@ -422,8 +402,8 @@ export default function Index() {
         </View>
       )}
 
-      {/* Main Workspace Scroll Wrapper */}
-      <ScrollView scrollY className="workspace-scroll">
+      {/* Main Workspace Scroll Wrapper - Using natural page scrolling */}
+      <View className="workspace-scroll">
         <View className="workspace">
           
           {/* Stepper Progress */}
@@ -453,7 +433,17 @@ export default function Index() {
 
           {/* Step 1: Upload & Thumbnail Manager */}
           <View className="card">
-            <Text className="card-title">📸 第一步：管理您的图片</Text>
+            <View style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+              <Text className="card-title">📸 第一步：管理您的图片</Text>
+              {uploadedImages.length > 0 && (
+                <Button 
+                  className="btn-clear"
+                  onClick={clearAllImages}
+                >
+                  🧹 清空全部
+                </Button>
+              )}
+            </View>
             
             {uploadedImages.length === 0 ? (
               <View className="upload-zone" onClick={handlePhotosUpload}>
@@ -501,7 +491,7 @@ export default function Index() {
                 <Image 
                   className="preview-image"
                   src={activeImage.styledSrc || activeImage.src} 
-                  mode="aspectRatio"
+                  mode="widthFix"
                 />
                 
                 <View className="preview-actions-overlay">
@@ -673,7 +663,7 @@ export default function Index() {
           )}
 
         </View>
-      </ScrollView>
+      </View>
     </View>
   );
 }
