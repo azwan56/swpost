@@ -271,7 +271,7 @@ function App() {
         <div className="logo-section">
           <div className="logo-badge">书</div>
           <div className="logo-text">
-            <h1>小红书豆包模型风格化工具</h1>
+            <h1>你拍照我生文</h1>
             <p>AI 一键卡通化 / 泥塑风 / 胶片风 · 智能爆款文案生成</p>
           </div>
         </div>

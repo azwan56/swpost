@@ -5,7 +5,7 @@ export default defineAppConfig({
   window: {
     backgroundTextStyle: 'light',
     navigationBarBackgroundColor: '#fff',
-    navigationBarTitleText: '小红书画风与文案生成器',
+    navigationBarTitleText: '你拍照我生文',
     navigationBarTextStyle: 'black'
   }
 })
