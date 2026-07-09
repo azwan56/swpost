@@ -141,14 +141,13 @@ const drawPolaroidCanvas = (base64) => {
 
 // Helper: Save styled image to album (Mini Program) or download directly (Web)
 const saveOrDownloadImage = async (base64, activeIdx, activeStyle) => {
-  let finalBase64 = base64;
-  if (activeStyle === 'polaroid' && Taro.getEnv() === Taro.ENV_TYPE.WEB) {
-    Taro.showLoading({ title: '正在生成拍立得...' });
-    finalBase64 = await drawPolaroidCanvas(base64);
-    Taro.hideLoading();
-  }
-
   if (Taro.getEnv() === Taro.ENV_TYPE.WEB) {
+    let finalBase64 = base64;
+    if (activeStyle === 'polaroid') {
+      Taro.showLoading({ title: '正在生成拍立得...' });
+      finalBase64 = await drawPolaroidCanvas(base64);
+      Taro.hideLoading();
+    }
     // Web environment: use anchor link download
     const link = document.createElement('a');
     link.href = finalBase64;
@@ -157,6 +156,74 @@ const saveOrDownloadImage = async (base64, activeIdx, activeStyle) => {
     Taro.showToast({ title: '已下载到本地', icon: 'success' });
   } else {
     // WeChat Mini Program environment
+    if (activeStyle === 'polaroid') {
+      // Use native Mini Program Canvas to draw the frame
+      Taro.showLoading({ title: '处理相框...' });
+      const matches = /data:image\/(\w+);base64,(.*)/.exec(base64);
+      const bodyData = matches ? matches[2] : base64.replace(/^data:image\/\w+;base64,/, '');
+      const fs = Taro.getFileSystemManager();
+      const rawFilePath = `${Taro.env.USER_DATA_PATH}/temp_raw_${activeIdx}_${Date.now()}.jpg`;
+      
+      fs.writeFile({
+        filePath: rawFilePath,
+        data: bodyData,
+        encoding: 'base64',
+        success: () => {
+          const ctx = Taro.createCanvasContext('polaroidCanvas');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, 885, 1075);
+          ctx.setStrokeStyle('#e2e8f0');
+          ctx.setLineWidth(2);
+          ctx.strokeRect(1, 1, 883, 1073);
+          
+          // AI Image is 1024x1024 (1:1). Target is 768x789 (0.973)
+          // To crop center: src x = 13.6, src width = 996.7
+          ctx.drawImage(rawFilePath, 13.6, 0, 996.7, 1024, 58, 58, 768, 789);
+          
+          ctx.setStrokeStyle('rgba(0, 0, 0, 0.05)');
+          ctx.setLineWidth(1);
+          ctx.strokeRect(58, 58, 768, 789);
+          
+          ctx.draw(false, () => {
+            setTimeout(() => {
+              Taro.canvasToTempFilePath({
+                canvasId: 'polaroidCanvas',
+                width: 885,
+                height: 1075,
+                destWidth: 885,
+                destHeight: 1075,
+                fileType: 'jpg',
+                quality: 0.95,
+                success: (res) => {
+                  Taro.saveImageToPhotosAlbum({
+                    filePath: res.tempFilePath,
+                    success: () => {
+                      Taro.hideLoading();
+                      Taro.showToast({ title: '已保存拍立得', icon: 'success' });
+                    },
+                    fail: (err) => {
+                      Taro.hideLoading();
+                      console.error('Save to album failed:', err);
+                    }
+                  });
+                },
+                fail: (err) => {
+                  Taro.hideLoading();
+                  console.error('Canvas export failed:', err);
+                }
+              });
+            }, 300);
+          });
+        },
+        fail: () => {
+          Taro.hideLoading();
+          Taro.showToast({ title: '图片处理失败', icon: 'none' });
+        }
+      });
+      return;
+    }
+
+    // Standard image save
     const matches = /data:image\/(\w+);base64,(.*)/.exec(base64);
     if (!matches) {
       Taro.showToast({ title: '数据格式错误', icon: 'none' });
@@ -456,6 +523,9 @@ export default function Index() {
 
   return (
     <View className="app-container">
+      {/* Hidden Canvas for WeChat Mini Program Polaroid drawing */}
+      <Canvas canvasId="polaroidCanvas" style={{ width: '885px', height: '1075px', position: 'fixed', left: '-9999px' }} />
+
       {/* Loading Overlay */}
       {isLoading && (
         <View className="loading-overlay">
@@ -474,12 +544,8 @@ export default function Index() {
         </View>
       )}
 
-      {/* Main Workspace - ScrollView guarantees scrolling inside WeChat container */}
-      <ScrollView
-        scrollY
-        className="workspace-scroll"
-        enableFlex
-      >
+      {/* Main Workspace - Using natural page scrolling */}
+      <View className="workspace-scroll">
         <View className="workspace">
           
 
@@ -550,11 +616,13 @@ export default function Index() {
               {activeImage.activeStyle === 'polaroid' && activeImage.styledSrc ? (
                 <View className="preview-card polaroid-style">
                   <View className="polaroid-frame">
-                    <Image
-                      className="polaroid-inner-photo"
-                      src={activeImage.styledSrc}
-                      mode="aspectFill"
-                    />
+                    <View className="polaroid-photo-container">
+                      <Image
+                        className="polaroid-inner-photo"
+                        src={activeImage.styledSrc}
+                        mode="aspectFill"
+                      />
+                    </View>
                   </View>
                   <View className="preview-actions-overlay" style={{ borderRadius: '0 0 3px 3px' }}>
                     <Button className="preview-action-btn btn-restore" onClick={restoreToOriginal}>
@@ -744,7 +812,7 @@ export default function Index() {
           )}
 
         </View>
-      </ScrollView>
+      </View>
     </View>
   );
 }
