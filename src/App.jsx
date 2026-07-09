@@ -140,7 +140,7 @@ function App() {
     try {
       // Use styledSrc as input if styled already, or fallback to original src
       const inputSrc = activeImage.styledSrc || activeImage.src;
-      const compressedImage = await resizeImageBase64(inputSrc, 1600, 0.85);
+      const compressedImage = await resizeImageBase64(inputSrc, 2048, 0.9);
 
       const res = await fetch(`${API_BASE}/api/ai/style-transfer`, {
         method: 'POST',

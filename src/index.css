@@ -76,6 +76,53 @@ body {
   min-height: 100vh;
 }
 
+@media (min-width: 1101px) {
+  body {
+    height: 100vh;
+    overflow: hidden;
+  }
+  .app-container {
+    height: 100vh;
+    overflow: hidden;
+  }
+  .workspace {
+    height: 100%;
+    overflow: hidden;
+    padding: 1.5rem 2rem;
+  }
+  .editor-panel {
+    height: 100%;
+    overflow-y: auto;
+    padding-right: 0.5rem;
+  }
+  .preview-panel {
+    position: static !important;
+    height: 100%;
+    overflow-y: auto;
+    padding-right: 0.5rem;
+    align-items: stretch !important;
+  }
+  
+  /* Premium Scrollbar Styling */
+  .editor-panel::-webkit-scrollbar,
+  .preview-panel::-webkit-scrollbar {
+    width: 6px;
+  }
+  .editor-panel::-webkit-scrollbar-track,
+  .preview-panel::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .editor-panel::-webkit-scrollbar-thumb,
+  .preview-panel::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.08);
+    border-radius: 3px;
+  }
+  .editor-panel::-webkit-scrollbar-thumb:hover,
+  .preview-panel::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.2);
+  }
+}
+
 /* Header */
 .app-header {
   display: flex;

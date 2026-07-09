@@ -84,146 +84,17 @@ const readImageAsBase64 = (tempFile) => {
   });
 };
 
-// Helper: Draw Polaroid white border on Canvas for Web H5 downloads
-const drawPolaroidCanvas = (base64) => {
-  return new Promise((resolve) => {
-    if (Taro.getEnv() !== Taro.ENV_TYPE.WEB) {
-      resolve(base64);
-      return;
-    }
-    const img = new global.Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      // 88.5mm x 107.5mm scaled to 885x1075 resolution
-      const canvas = document.createElement('canvas');
-      canvas.width = 885;
-      canvas.height = 1075;
-      const ctx = canvas.getContext('2d');
-      
-      // Draw white card background
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, 885, 1075);
-      
-      // Draw a subtle border around the card
-      ctx.strokeStyle = '#e2e8f0';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(1, 1, 883, 1073);
-      
-      // 76.8mm x 78.9mm inner photo scaled to 768x789 resolution
-      const targetW = 768;
-      const targetH = 789;
-      const targetRatio = targetW / targetH;
-      const imgRatio = img.width / img.height;
-      
-      let sx = 0, sy = 0, sw = img.width, sh = img.height;
-      if (imgRatio > targetRatio) {
-        sw = img.height * targetRatio;
-        sx = (img.width - sw) / 2;
-      } else {
-        sh = img.width / targetRatio;
-        sy = (img.height - sh) / 2;
-      }
-      
-      // Draw the cropped image inside the Polaroid frame (centered crop, at x=58, y=58)
-      ctx.drawImage(img, sx, sy, sw, sh, 58, 58, targetW, targetH);
-      
-      // Draw a thin border around the photo
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.05)';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(58, 58, targetW, targetH);
-      
-      resolve(canvas.toDataURL('image/jpeg', 0.95));
-    };
-    img.onerror = () => resolve(base64);
-    img.src = base64;
-  });
-};
-
 // Helper: Save styled image to album (Mini Program) or download directly (Web)
 const saveOrDownloadImage = async (base64, activeIdx, activeStyle) => {
   if (Taro.getEnv() === Taro.ENV_TYPE.WEB) {
-    let finalBase64 = base64;
-    if (activeStyle === 'polaroid') {
-      Taro.showLoading({ title: '正在生成拍立得...' });
-      finalBase64 = await drawPolaroidCanvas(base64);
-      Taro.hideLoading();
-    }
     // Web environment: use anchor link download
     const link = document.createElement('a');
-    link.href = finalBase64;
-    link.download = `polaroid-${activeIdx + 1}-${Date.now()}.jpg`;
+    link.href = base64;
+    link.download = `styled-${activeStyle || 'original'}-${activeIdx + 1}-${Date.now()}.jpg`;
     link.click();
     Taro.showToast({ title: '已下载到本地', icon: 'success' });
   } else {
     // WeChat Mini Program environment
-    if (activeStyle === 'polaroid') {
-      // Use native Mini Program Canvas to draw the frame
-      Taro.showLoading({ title: '处理相框...' });
-      const matches = /data:image\/(\w+);base64,(.*)/.exec(base64);
-      const bodyData = matches ? matches[2] : base64.replace(/^data:image\/\w+;base64,/, '');
-      const fs = Taro.getFileSystemManager();
-      const rawFilePath = `${Taro.env.USER_DATA_PATH}/temp_raw_${activeIdx}_${Date.now()}.jpg`;
-      
-      fs.writeFile({
-        filePath: rawFilePath,
-        data: bodyData,
-        encoding: 'base64',
-        success: () => {
-          const ctx = Taro.createCanvasContext('polaroidCanvas');
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, 885, 1075);
-          ctx.setStrokeStyle('#e2e8f0');
-          ctx.setLineWidth(2);
-          ctx.strokeRect(1, 1, 883, 1073);
-          
-          // AI Image is 1024x1024 (1:1). Target is 768x789 (0.973)
-          // To crop center: src x = 13.6, src width = 996.7
-          ctx.drawImage(rawFilePath, 13.6, 0, 996.7, 1024, 58, 58, 768, 789);
-          
-          ctx.setStrokeStyle('rgba(0, 0, 0, 0.05)');
-          ctx.setLineWidth(1);
-          ctx.strokeRect(58, 58, 768, 789);
-          
-          ctx.draw(false, () => {
-            setTimeout(() => {
-              Taro.canvasToTempFilePath({
-                canvasId: 'polaroidCanvas',
-                width: 885,
-                height: 1075,
-                destWidth: 885,
-                destHeight: 1075,
-                fileType: 'jpg',
-                quality: 0.95,
-                success: (res) => {
-                  Taro.saveImageToPhotosAlbum({
-                    filePath: res.tempFilePath,
-                    success: () => {
-                      Taro.hideLoading();
-                      Taro.showToast({ title: '已保存拍立得', icon: 'success' });
-                    },
-                    fail: (err) => {
-                      Taro.hideLoading();
-                      console.error('Save to album failed:', err);
-                    }
-                  });
-                },
-                fail: (err) => {
-                  Taro.hideLoading();
-                  console.error('Canvas export failed:', err);
-                }
-              });
-            }, 300);
-          });
-        },
-        fail: () => {
-          Taro.hideLoading();
-          Taro.showToast({ title: '图片处理失败', icon: 'none' });
-        }
-      });
-      return;
-    }
-
-    // Standard image save
     const matches = /data:image\/(\w+);base64,(.*)/.exec(base64);
     if (!matches) {
       Taro.showToast({ title: '数据格式错误', icon: 'none' });
@@ -382,7 +253,7 @@ export default function Index() {
     if (!activeImage) return;
     
     setIsLoading(true);
-    const styleLabel = styleName === 'clay' ? '泥塑黏土化' : styleName === 'polaroid' ? '经典宝利来' : '吉卜力卡通化';
+    const styleLabel = styleName === 'clay' ? '泥塑黏土化' : styleName === 'japanese-film' ? '日式胶片风' : '吉卜力卡通化';
     setAiOperationName(`豆包模型 ${styleLabel}`);
     setErrorMsg('');
 
@@ -523,8 +394,6 @@ export default function Index() {
 
   return (
     <View className="app-container">
-      {/* Hidden Canvas for WeChat Mini Program Polaroid drawing */}
-      <Canvas canvasId="polaroidCanvas" style={{ width: '885px', height: '1075px', position: 'fixed', left: '-9999px' }} />
 
       {/* Loading Overlay */}
       {isLoading && (
@@ -612,54 +481,29 @@ export default function Index() {
             <View className="card">
               <Text className="card-title">🖼️ 第二步：画面预览与风格化</Text>
               
-              {/* Image preview: Polaroid frame vs. standard dark preview */}
-              {activeImage.activeStyle === 'polaroid' && activeImage.styledSrc ? (
-                <View className="preview-card polaroid-style">
-                  <View className="polaroid-frame">
-                    <View className="polaroid-photo-container">
-                      <Image
-                        className="polaroid-inner-photo"
-                        src={activeImage.styledSrc}
-                        mode="aspectFill"
-                      />
-                    </View>
-                  </View>
-                  <View className="preview-actions-overlay" style={{ borderRadius: '0 0 3px 3px' }}>
+              {/* Image preview */}
+              <View className="preview-card">
+                <Image
+                  className="preview-image"
+                  src={activeImage.styledSrc || activeImage.src}
+                  mode="widthFix"
+                />
+                <View className="preview-actions-overlay">
+                  {activeImage.styledSrc ? (
                     <Button className="preview-action-btn btn-restore" onClick={restoreToOriginal}>
                       ↩️ 恢复原图
                     </Button>
-                    <Button
-                      className="preview-action-btn btn-export"
-                      onClick={() => saveOrDownloadImage(activeImage.styledSrc, activeIdx, 'polaroid')}
-                    >
-                      📥 导出图片
-                    </Button>
-                  </View>
+                  ) : (
+                    <Text style={{ color: '#fff', fontSize: '0.65rem', fontWeight: 600 }}>原图预览</Text>
+                  )}
+                  <Button
+                    className="preview-action-btn btn-export"
+                    onClick={() => saveOrDownloadImage(activeImage.styledSrc || activeImage.src, activeIdx, activeImage.activeStyle)}
+                  >
+                    📥 导出图片
+                  </Button>
                 </View>
-              ) : (
-                <View className="preview-card">
-                  <Image
-                    className="preview-image"
-                    src={activeImage.styledSrc || activeImage.src}
-                    mode="widthFix"
-                  />
-                  <View className="preview-actions-overlay">
-                    {activeImage.styledSrc ? (
-                      <Button className="preview-action-btn btn-restore" onClick={restoreToOriginal}>
-                        ↩️ 恢复原图
-                      </Button>
-                    ) : (
-                      <Text style={{ color: '#fff', fontSize: '0.65rem', fontWeight: 600 }}>原图预览</Text>
-                    )}
-                    <Button
-                      className="preview-action-btn btn-export"
-                      onClick={() => saveOrDownloadImage(activeImage.styledSrc || activeImage.src, activeIdx, activeImage.activeStyle)}
-                    >
-                      📥 导出图片
-                    </Button>
-                  </View>
-                </View>
-              )}
+              </View>
 
               {/* Styled Picker Cards */}
               <View className="style-picker-grid">
@@ -682,12 +526,12 @@ export default function Index() {
                 </View>
                 
                 <View 
-                  className={`style-picker-card ${activeImage.activeStyle === 'polaroid' ? 'active' : ''}`}
-                  onClick={() => handleAIStyleTransfer('polaroid')}
+                  className={`style-picker-card ${activeImage.activeStyle === 'japanese-film' ? 'active' : ''}`}
+                  onClick={() => handleAIStyleTransfer('japanese-film')}
                 >
-                  <Text className="style-picker-emoji">📸</Text>
-                  <Text className="style-picker-name">宝利来</Text>
-                  <Text className="style-picker-desc">经典拍立得</Text>
+                  <Text className="style-picker-emoji">🎞️</Text>
+                  <Text className="style-picker-name">日式胶片</Text>
+                  <Text className="style-picker-desc">复古胶片颗粒</Text>
                 </View>
               </View>
             </View>
