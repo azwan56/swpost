@@ -406,23 +406,7 @@ export default function Index() {
       <View className="workspace-scroll">
         <View className="workspace">
           
-          {/* Stepper Progress */}
-          <View className="stepper">
-            <View className={`step-item ${uploadedImages.length === 0 ? 'active' : ''}`}>
-              <View className="step-num">1</View>
-              <Text>添加图片</Text>
-            </View>
-            <View className="step-line"></View>
-            <View className={`step-item ${uploadedImages.length > 0 && !activeImage?.styledSrc ? 'active' : ''}`}>
-              <View className="step-num">2</View>
-              <Text>重绘风格</Text>
-            </View>
-            <View className="step-line"></View>
-            <View className={`step-item ${generatedCopyOptions.length > 0 ? 'active' : ''}`}>
-              <View className="step-num">3</View>
-              <Text>生成文案</Text>
-            </View>
-          </View>
+
 
           {errorMsg && (
             <View className="error-banner">
