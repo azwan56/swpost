@@ -80,7 +80,7 @@ page {
 }
 
 .workspace {
-  padding: 0.35rem 0.45rem 1.2rem 0.45rem;
+  padding: 0.35rem 0.45rem 140px 0.45rem;
   max-width: 600px;
   margin: 0 auto;
   display: flex;
@@ -267,12 +267,33 @@ page {
   background-color: #0b0c10;
   box-shadow: var(--shadow-md);
   width: 100%;
+  box-sizing: border-box;
+  transition: var(--transition-smooth);
+}
+
+.preview-card.polaroid-style {
+  background-color: #ffffff;
+  /* Margins: Left/Right/Top = 5.85 / 88.5 = 6.61% */
+  /* Bottom = 22.75 / 88.5 = 25.7% */
+  padding: 6.6% 6.6% 25.7% 6.6%;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-md);
 }
 
 .preview-image {
   width: 100%;
   height: auto;
   display: block;
+}
+
+.preview-card.polaroid-style .preview-image {
+  width: 100%;
+  /* Aspect ratio: 76.8 : 78.9 */
+  aspect-ratio: 76.8 / 78.9;
+  object-fit: cover;
+  object-position: center; /* Always keep main subject centered */
+  border-radius: 0;
 }
 
 .preview-actions-overlay {

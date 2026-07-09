@@ -84,13 +84,75 @@ const readImageAsBase64 = (tempFile) => {
   });
 };
 
+// Helper: Draw Polaroid white border on Canvas for Web H5 downloads
+const drawPolaroidCanvas = (base64) => {
+  return new Promise((resolve) => {
+    if (Taro.getEnv() !== Taro.ENV_TYPE.WEB) {
+      resolve(base64);
+      return;
+    }
+    const img = new global.Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      // 88.5mm x 107.5mm scaled to 885x1075 resolution
+      const canvas = document.createElement('canvas');
+      canvas.width = 885;
+      canvas.height = 1075;
+      const ctx = canvas.getContext('2d');
+      
+      // Draw white card background
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, 885, 1075);
+      
+      // Draw a subtle border around the card
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(1, 1, 883, 1073);
+      
+      // 76.8mm x 78.9mm inner photo scaled to 768x789 resolution
+      const targetW = 768;
+      const targetH = 789;
+      const targetRatio = targetW / targetH;
+      const imgRatio = img.width / img.height;
+      
+      let sx = 0, sy = 0, sw = img.width, sh = img.height;
+      if (imgRatio > targetRatio) {
+        sw = img.height * targetRatio;
+        sx = (img.width - sw) / 2;
+      } else {
+        sh = img.width / targetRatio;
+        sy = (img.height - sh) / 2;
+      }
+      
+      // Draw the cropped image inside the Polaroid frame (centered crop, at x=58, y=58)
+      ctx.drawImage(img, sx, sy, sw, sh, 58, 58, targetW, targetH);
+      
+      // Draw a thin border around the photo
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.05)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(58, 58, targetW, targetH);
+      
+      resolve(canvas.toDataURL('image/jpeg', 0.95));
+    };
+    img.onerror = () => resolve(base64);
+    img.src = base64;
+  });
+};
+
 // Helper: Save styled image to album (Mini Program) or download directly (Web)
-const saveOrDownloadImage = (base64, activeIdx) => {
+const saveOrDownloadImage = async (base64, activeIdx, activeStyle) => {
+  let finalBase64 = base64;
+  if (activeStyle === 'polaroid' && Taro.getEnv() === Taro.ENV_TYPE.WEB) {
+    Taro.showLoading({ title: '正在生成拍立得...' });
+    finalBase64 = await drawPolaroidCanvas(base64);
+    Taro.hideLoading();
+  }
+
   if (Taro.getEnv() === Taro.ENV_TYPE.WEB) {
     // Web environment: use anchor link download
     const link = document.createElement('a');
-    link.href = base64;
-    link.download = `xhs-style-${activeIdx + 1}-${Date.now()}.jpg`;
+    link.href = finalBase64;
+    link.download = `polaroid-${activeIdx + 1}-${Date.now()}.jpg`;
     link.click();
     Taro.showToast({ title: '已下载到本地', icon: 'success' });
   } else {
@@ -481,11 +543,11 @@ export default function Index() {
               <Text className="card-title">🖼️ 第二步：画面预览与风格化</Text>
               
               {/* Premium Image Card with Hover/Tap actions */}
-              <View className="preview-card">
+              <View className={`preview-card ${activeImage.activeStyle === 'polaroid' ? 'polaroid-style' : ''}`}>
                 <Image 
                   className="preview-image"
                   src={activeImage.styledSrc || activeImage.src} 
-                  mode="widthFix"
+                  mode={activeImage.activeStyle === 'polaroid' ? 'aspectFill' : 'widthFix'}
                 />
                 
                 <View className="preview-actions-overlay">
@@ -499,7 +561,7 @@ export default function Index() {
                   
                   <Button 
                     className="preview-action-btn btn-export" 
-                    onClick={() => saveOrDownloadImage(activeImage.styledSrc || activeImage.src, activeIdx)}
+                    onClick={() => saveOrDownloadImage(activeImage.styledSrc || activeImage.src, activeIdx, activeImage.activeStyle)}
                   >
                     📥 导出图片
                   </Button>
