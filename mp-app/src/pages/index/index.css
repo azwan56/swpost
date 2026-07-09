@@ -82,7 +82,8 @@ page {
 
 
 .workspace {
-  padding: 0.35rem 0.45rem calc(160px + env(safe-area-inset-bottom)) 0.45rem;
+  padding: 0.35rem 0.45rem 180px 0.45rem; /* Fallback for older parsers */
+  padding: 0.35rem 0.45rem calc(180px + env(safe-area-inset-bottom)) 0.45rem;
   max-width: 600px;
   margin: 0 auto;
   display: flex;
@@ -480,7 +481,8 @@ page {
   margin: 0 !important;
   padding: 0 !important;
   box-sizing: border-box !important;
-  background: linear-gradient(135deg, var(--xhs-red), var(--primary-pink)) !important;
+  background-color: var(--xhs-red) !important; /* Fallback solid color */
+  background-image: linear-gradient(135deg, var(--xhs-red), var(--primary-pink)) !important;
   color: white !important;
   font-size: 0.85rem !important;
   font-weight: 700 !important;
