@@ -474,8 +474,12 @@ export default function Index() {
         </View>
       )}
 
-      {/* Main Workspace Scroll Wrapper - Using natural page scrolling */}
-      <View className="workspace-scroll">
+      {/* Main Workspace - ScrollView guarantees scrolling inside WeChat container */}
+      <ScrollView
+        scrollY
+        className="workspace-scroll"
+        enableFlex
+      >
         <View className="workspace">
           
 
@@ -542,31 +546,52 @@ export default function Index() {
             <View className="card">
               <Text className="card-title">🖼️ 第二步：画面预览与风格化</Text>
               
-              {/* Premium Image Card with Hover/Tap actions */}
-              <View className={`preview-card ${activeImage.activeStyle === 'polaroid' ? 'polaroid-style' : ''}`}>
-                <Image 
-                  className="preview-image"
-                  src={activeImage.styledSrc || activeImage.src} 
-                  mode={activeImage.activeStyle === 'polaroid' ? 'aspectFill' : 'widthFix'}
-                />
-                
-                <View className="preview-actions-overlay">
-                  {activeImage.styledSrc ? (
+              {/* Image preview: Polaroid frame vs. standard dark preview */}
+              {activeImage.activeStyle === 'polaroid' && activeImage.styledSrc ? (
+                <View className="preview-card polaroid-style">
+                  <View className="polaroid-frame">
+                    <Image
+                      className="polaroid-inner-photo"
+                      src={activeImage.styledSrc}
+                      mode="aspectFill"
+                    />
+                  </View>
+                  <View className="preview-actions-overlay" style={{ borderRadius: '0 0 3px 3px' }}>
                     <Button className="preview-action-btn btn-restore" onClick={restoreToOriginal}>
                       ↩️ 恢复原图
                     </Button>
-                  ) : (
-                    <Text style={{ color: '#fff', fontSize: '0.65rem', fontWeight: 600 }}>原图预览</Text>
-                  )}
-                  
-                  <Button 
-                    className="preview-action-btn btn-export" 
-                    onClick={() => saveOrDownloadImage(activeImage.styledSrc || activeImage.src, activeIdx, activeImage.activeStyle)}
-                  >
-                    📥 导出图片
-                  </Button>
+                    <Button
+                      className="preview-action-btn btn-export"
+                      onClick={() => saveOrDownloadImage(activeImage.styledSrc, activeIdx, 'polaroid')}
+                    >
+                      📥 导出图片
+                    </Button>
+                  </View>
                 </View>
-              </View>
+              ) : (
+                <View className="preview-card">
+                  <Image
+                    className="preview-image"
+                    src={activeImage.styledSrc || activeImage.src}
+                    mode="widthFix"
+                  />
+                  <View className="preview-actions-overlay">
+                    {activeImage.styledSrc ? (
+                      <Button className="preview-action-btn btn-restore" onClick={restoreToOriginal}>
+                        ↩️ 恢复原图
+                      </Button>
+                    ) : (
+                      <Text style={{ color: '#fff', fontSize: '0.65rem', fontWeight: 600 }}>原图预览</Text>
+                    )}
+                    <Button
+                      className="preview-action-btn btn-export"
+                      onClick={() => saveOrDownloadImage(activeImage.styledSrc || activeImage.src, activeIdx, activeImage.activeStyle)}
+                    >
+                      📥 导出图片
+                    </Button>
+                  </View>
+                </View>
+              )}
 
               {/* Styled Picker Cards */}
               <View className="style-picker-grid">
@@ -719,7 +744,7 @@ export default function Index() {
           )}
 
         </View>
-      </View>
+      </ScrollView>
     </View>
   );
 }

@@ -74,10 +74,15 @@ page {
   box-sizing: border-box;
 }
 
+
 .workspace-scroll {
   width: 100%;
+  height: 100vh;
   box-sizing: border-box;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
+
 
 .workspace {
   padding: 0.35rem 0.45rem 140px 0.45rem;
@@ -271,29 +276,37 @@ page {
   transition: var(--transition-smooth);
 }
 
+/* Polaroid style overrides - must come after base to override overflow */
 .preview-card.polaroid-style {
+  overflow: visible;
+  background-color: transparent;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.polaroid-frame {
   background-color: #ffffff;
-  /* Margins: Left/Right/Top = 5.85 / 88.5 = 6.61% */
-  /* Bottom = 22.75 / 88.5 = 25.7% */
   padding: 6.6% 6.6% 25.7% 6.6%;
-  border-radius: 4px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: var(--shadow-md);
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.10);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25), 0 1px 4px rgba(0, 0, 0, 0.15);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.polaroid-inner-photo {
+  width: 100%;
+  display: block;
+  /* Aspect ratio 76.8 : 78.9 */
+  aspect-ratio: 76.8 / 78.9;
+  object-fit: cover;
+  object-position: center top;
 }
 
 .preview-image {
   width: 100%;
   height: auto;
   display: block;
-}
-
-.preview-card.polaroid-style .preview-image {
-  width: 100%;
-  /* Aspect ratio: 76.8 : 78.9 */
-  aspect-ratio: 76.8 / 78.9;
-  object-fit: cover;
-  object-position: center; /* Always keep main subject centered */
-  border-radius: 0;
 }
 
 .preview-actions-overlay {
@@ -307,6 +320,20 @@ page {
   justify-content: space-between;
   align-items: center;
   z-index: 2;
+}
+
+/* For polaroid cards, the overlay is relative (below the white frame), not absolute */
+.preview-card.polaroid-style .preview-actions-overlay {
+  position: relative;
+  background: transparent;
+  padding: 0.5rem 0;
+  margin-top: 0.4rem;
+}
+
+.preview-card.polaroid-style .btn-restore {
+  background: rgba(0, 0, 0, 0.08) !important;
+  color: #333 !important;
+  border: 1px solid rgba(0, 0, 0, 0.15) !important;
 }
 
 .preview-action-btn {
