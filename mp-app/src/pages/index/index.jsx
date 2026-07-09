@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import Taro, { useLoad } from '@tarojs/taro';
-import { View, Text, Image, Button, Input, Textarea, ScrollView } from '@tarojs/components';
+import { View, Text, Image, Button, Input, Textarea, ScrollView, Canvas } from '@tarojs/components';
 import './index.css';
 
 // Helper: Resize and compress base64 image (Web only)
