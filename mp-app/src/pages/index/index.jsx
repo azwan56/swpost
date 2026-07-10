@@ -173,6 +173,7 @@ export default function Index() {
   const [aiBody, setAiBody] = useState('');
   
   // General UI States
+  const [showWelcome, setShowWelcome] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [aiOperationName, setAiOperationName] = useState(''); 
   const [errorMsg, setErrorMsg] = useState('');
@@ -391,6 +392,80 @@ export default function Index() {
   };
 
   const activeImage = uploadedImages[activeIdx];
+
+  if (showWelcome) {
+    return (
+      <View className="welcome-screen">
+        <View className="welcome-container">
+          <View className="welcome-logo-section">
+            <View className="welcome-logo-badge">闪</View>
+            <Text className="welcome-logo-text">闪贴 AI</Text>
+          </View>
+          <Text className="welcome-title">你拍照我生文</Text>
+          <Text className="welcome-subtitle">AI 智能画风转换与爆款文案助手</Text>
+          
+          <View className="welcome-workflow">
+            <Text className="workflow-title">💡 极简工作流程说明</Text>
+            <View className="workflow-steps">
+              <View className="workflow-step">
+                <Text className="step-num">1</Text>
+                <View className="step-content">
+                  <Text className="step-content-title">上传照片</Text>
+                  <Text className="step-content-desc">最多可支持上传 4 张照片。</Text>
+                </View>
+              </View>
+              <View className="workflow-step">
+                <Text className="step-num">2</Text>
+                <View className="step-content">
+                  <Text className="step-content-title">艺术风格化</Text>
+                  <Text className="step-content-desc">选择喜欢的图片处理风格（吉卜力/泥塑/胶片），一键转换。</Text>
+                </View>
+              </View>
+              <View className="workflow-step">
+                <Text className="step-num">3</Text>
+                <View className="step-content">
+                  <Text className="step-content-title">图片存档</Text>
+                  <Text className="step-content-desc">将生成的精美图片一键导出保存。</Text>
+                </View>
+              </View>
+              <View className="workflow-step">
+                <Text className="step-num">4</Text>
+                <View className="step-content">
+                  <Text className="step-content-title">选择文案风格</Text>
+                  <Text className="step-content-desc">选择文案基调风格（如探店、旅行、自定义等）。</Text>
+                </View>
+              </View>
+              <View className="workflow-step">
+                <Text className="step-num">5</Text>
+                <View className="step-content">
+                  <Text className="step-content-title">AI 智能生成</Text>
+                  <Text className="step-content-desc">AI 根据图片拍摄的场景、时间、地点及想要的重点生成文案。</Text>
+                </View>
+              </View>
+              <View className="workflow-step">
+                <Text className="step-num">6</Text>
+                <View className="step-content">
+                  <Text className="step-content-title">挑选与拷贝</Text>
+                  <Text className="step-content-desc">在 3 个精选文案方案中挑选并一键复制。</Text>
+                </View>
+              </View>
+              <View className="workflow-step">
+                <Text className="step-num">7</Text>
+                <View className="step-content">
+                  <Text className="step-content-title">即刻发文</Text>
+                  <Text className="step-content-desc">去微信朋友圈、小红书、Ins 发文分享！</Text>
+                </View>
+              </View>
+            </View>
+          </View>
+          
+          <Button className="welcome-enter-btn" onClick={() => setShowWelcome(false)}>
+            开启灵感之旅 🚀
+          </Button>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View className="app-container">
