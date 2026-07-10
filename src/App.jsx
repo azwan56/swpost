@@ -270,8 +270,7 @@ function App() {
       <div className="welcome-screen">
         <div className="welcome-container">
           <div className="welcome-logo-section">
-            <div className="welcome-logo-badge">闪</div>
-            <div className="welcome-logo-text">闪贴 AI</div>
+            <img src="/logo.jpg" alt="闪贴 AI" className="welcome-logo-img" />
           </div>
           <h1 className="welcome-title">你拍照我生文</h1>
           <p className="welcome-subtitle">AI 智能画风转换与爆款文案助手</p>

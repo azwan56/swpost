@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import Taro, { useLoad } from '@tarojs/taro';
 import { View, Text, Image, Button, Input, Textarea, ScrollView, Canvas } from '@tarojs/components';
 import './index.css';
+import logoImg from '../../assets/logo.jpg';
 
 // Helper: Resize and compress base64 image (Web only)
 const resizeImageBase64 = (dataUrl, maxDim = 1600, quality = 0.85) => {
@@ -398,8 +399,7 @@ export default function Index() {
       <View className="welcome-screen">
         <View className="welcome-container">
           <View className="welcome-logo-section">
-            <View className="welcome-logo-badge">闪</View>
-            <Text className="welcome-logo-text">闪贴 AI</Text>
+            <Image src={logoImg} className="welcome-logo-img" mode="widthFix" />
           </View>
           <Text className="welcome-title">你拍照我生文</Text>
           <Text className="welcome-subtitle">AI 智能画风转换与爆款文案助手</Text>
