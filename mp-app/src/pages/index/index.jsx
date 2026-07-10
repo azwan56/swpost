@@ -405,55 +405,27 @@ export default function Index() {
           <Text className="welcome-subtitle">AI 智能画风转换与爆款文案助手</Text>
           
           <View className="welcome-workflow">
-            <Text className="workflow-title">💡 极简工作流程说明</Text>
+            <Text className="workflow-title" style={{ textAlign: 'center', width: '100%', display: 'block' }}>✨ 三步体验：拍、变、生！</Text>
             <View className="workflow-steps">
               <View className="workflow-step">
                 <Text className="step-num">1</Text>
                 <View className="step-content">
-                  <Text className="step-content-title">上传照片</Text>
-                  <Text className="step-content-desc">最多可支持上传 4 张照片。</Text>
+                  <Text className="step-content-title">📸 上传照片（拍）</Text>
+                  <Text className="step-content-desc">随手添加 1-4 张照片，系统自动解析读取 EXIF 时间与 GPS 位置。</Text>
                 </View>
               </View>
               <View className="workflow-step">
                 <Text className="step-num">2</Text>
                 <View className="step-content">
-                  <Text className="step-content-title">艺术风格化</Text>
-                  <Text className="step-content-desc">选择喜欢的图片处理风格（吉卜力/泥塑/胶片），一键转换。</Text>
+                  <Text className="step-content-title">🎨 艺术重绘（变）</Text>
+                  <Text className="step-content-desc">一键转换为治愈吉卜力、软萌泥塑或复古日式胶片风，并可保存高清原图。</Text>
                 </View>
               </View>
               <View className="workflow-step">
                 <Text className="step-num">3</Text>
                 <View className="step-content">
-                  <Text className="step-content-title">图片存档</Text>
-                  <Text className="step-content-desc">将生成的精美图片一键导出保存。</Text>
-                </View>
-              </View>
-              <View className="workflow-step">
-                <Text className="step-num">4</Text>
-                <View className="step-content">
-                  <Text className="step-content-title">选择文案风格</Text>
-                  <Text className="step-content-desc">选择文案基调风格（如探店、旅行、自定义等）。</Text>
-                </View>
-              </View>
-              <View className="workflow-step">
-                <Text className="step-num">5</Text>
-                <View className="step-content">
-                  <Text className="step-content-title">AI 智能生成</Text>
-                  <Text className="step-content-desc">AI 根据图片拍摄的场景、时间、地点及想要的重点生成文案。</Text>
-                </View>
-              </View>
-              <View className="workflow-step">
-                <Text className="step-num">6</Text>
-                <View className="step-content">
-                  <Text className="step-content-title">挑选与拷贝</Text>
-                  <Text className="step-content-desc">在 3 个精选文案方案中挑选并一键复制。</Text>
-                </View>
-              </View>
-              <View className="workflow-step">
-                <Text className="step-num">7</Text>
-                <View className="step-content">
-                  <Text className="step-content-title">即刻发文</Text>
-                  <Text className="step-content-desc">去微信朋友圈、小红书、Ins 发文分享！</Text>
+                  <Text className="step-content-title">✍️ 一键生成（生）</Text>
+                  <Text className="step-content-desc">AI 结合画面时空撰写 3 款不同风格的爆款文案，复制即可去朋友圈、小红书、Ins 发文！</Text>
                 </View>
               </View>
             </View>
