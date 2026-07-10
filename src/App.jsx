@@ -270,7 +270,7 @@ function App() {
       <div className="welcome-screen">
         <div className="welcome-container">
           <div className="welcome-logo-section">
-            <img src="/logo.jpg" alt="闪贴 AI" className="welcome-logo-img" />
+            <img src={`${(import.meta.env.BASE_URL || '/').replace(/\/$/, '')}/logo.jpg`} alt="闪贴 AI" className="welcome-logo-img" />
           </div>
           <h1 className="welcome-title">你拍照我生文</h1>
           <p className="welcome-subtitle">AI 智能画风转换与爆款文案助手</p>
