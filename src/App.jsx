@@ -198,11 +198,7 @@ function App() {
 
   // Generate copywriting via backend LLM
   const handleGenerateAICopy = async () => {
-    const selectedStyle = copyStyle === '自定义' ? customCopyStyle.trim() : copyStyle;
-    if (copyStyle === '自定义' && !selectedStyle) {
-      setErrorMsg('请输入您自定义的文案风格，例如“数码测评”');
-      return;
-    }
+    const selectedStyle = copyStyle;
 
     setIsGeneratingCopy(true);
     setErrorMsg('');
@@ -485,7 +481,7 @@ function App() {
               <div style={{ marginBottom: '0.75rem' }}>
                 <label className="form-label" style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.25rem', fontWeight: 600 }}>文案风格：</label>
                 <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                  {['探店', '旅行心情', '自定义'].map((style) => (
+                  {['探店', '旅行心情', '运动'].map((style) => (
                     <button
                       key={style}
                       className="btn"
@@ -503,21 +499,10 @@ function App() {
                     >
                       {style === '探店' && '🛍️ 探店'}
                       {style === '旅行心情' && '✈️ 旅行心情'}
-                      {style === '自定义' && '⚙️ 自定义'}
+                      {style === '运动' && '🏃 运动'}
                     </button>
                   ))}
                 </div>
-
-                {copyStyle === '自定义' && (
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="如：科技测评、搞笑吐槽、日常随笔..."
-                    style={{ width: '100%', marginBottom: '0.5rem', padding: '0.4rem 0.5rem', fontSize: '0.8rem' }}
-                    value={customCopyStyle}
-                    onChange={(e) => setCustomCopyStyle(e.target.value)}
-                  />
-                )}
               </div>
 
               <div style={{ marginBottom: '0.75rem' }}>

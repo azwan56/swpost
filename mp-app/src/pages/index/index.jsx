@@ -324,11 +324,7 @@ export default function Index() {
 
   // Generate copywriting via backend LLM
   const handleGenerateAICopy = () => {
-    const selectedStyle = copyStyle === '自定义' ? customCopyStyle.trim() : copyStyle;
-    if (copyStyle === '自定义' && !selectedStyle) {
-      setErrorMsg('请输入自定义风格，例如“数码测评”');
-      return;
-    }
+    const selectedStyle = copyStyle;
 
     setIsGeneratingCopy(true);
     setErrorMsg('');
@@ -618,7 +614,7 @@ export default function Index() {
               <Text className="card-title">✍️ 第三步：生成爆款文案</Text>
               
               <View className="segmented-control">
-                {['探店', '旅行心情', '自定义'].map((style) => (
+                {['探店', '旅行心情', '运动'].map((style) => (
                   <View
                     key={style}
                     className={`segmented-item ${copyStyle === style ? 'active' : ''}`}
@@ -626,20 +622,10 @@ export default function Index() {
                   >
                     {style === '探店' && '🛍️ 探店'}
                     {style === '旅行心情' && '✈️ 旅行'}
-                    {style === '自定义' && '⚙️ 自定义'}
+                    {style === '运动' && '🏃 运动'}
                   </View>
                 ))}
               </View>
-
-              {copyStyle === '自定义' && (
-                <Input
-                  type="text"
-                  className="modern-input"
-                  placeholder="请输入您的自定义风格，例如“数码测评”..."
-                  value={customCopyStyle}
-                  onInput={(e) => setCustomCopyStyle(e.detail.value)}
-                />
-              )}
 
               <Textarea
                 className="modern-textarea"
