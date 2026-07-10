@@ -337,7 +337,8 @@ export default function Index() {
       },
       data: {
         style: selectedStyle,
-        keywords: copyKeywords
+        keywords: copyKeywords,
+        images: uploadedImages.map(img => img.src)
       },
       success: (res) => {
         setIsGeneratingCopy(false);
@@ -352,8 +353,10 @@ export default function Index() {
           setGeneratedCopyOptions(result.options);
           setActiveCopyOptionIdx(0);
           
-          setAiTitle(result.options[0].title);
-          setAiBody(`${result.options[0].body}\n\n${result.options[0].tags}`);
+          const firstOpt = result.options[0];
+          setAiTitle(firstOpt.title);
+          const cleanTags = (firstOpt.tags && firstOpt.tags !== 'undefined') ? firstOpt.tags : '';
+          setAiBody(firstOpt.body + (cleanTags && !firstOpt.body.includes(cleanTags) ? `\n\n${cleanTags}` : ''));
         } else {
           setErrorMsg('未返回有效的文案选项');
         }
@@ -371,7 +374,8 @@ export default function Index() {
     setActiveCopyOptionIdx(idx);
     const opt = generatedCopyOptions[idx];
     setAiTitle(opt.title);
-    setAiBody(`${opt.body}\n\n${opt.tags}`);
+    const cleanTags = (opt.tags && opt.tags !== 'undefined') ? opt.tags : '';
+    setAiBody(opt.body + (cleanTags && !opt.body.includes(cleanTags) ? `\n\n${cleanTags}` : ''));
   };
 
   // Copy copywriting to clipboard
@@ -680,39 +684,7 @@ export default function Index() {
                 </View>
               </View>
 
-              {/* Collapsible micro-editor to keep layout concise */}
-              <View className="accordion">
-                <View 
-                  className="accordion-trigger" 
-                  onClick={() => setIsEditorExpanded(!isEditorExpanded)}
-                >
-                  <Text className="accordion-title">✏️ 对文案进行微调修改</Text>
-                  <Text className="accordion-icon">{isEditorExpanded ? '▲' : '▼'}</Text>
-                </View>
-                
-                {isEditorExpanded && (
-                  <View className="accordion-content">
-                    <View>
-                      <Text className="form-label">微调标题：</Text>
-                      <Input 
-                        type="text" 
-                        className="modern-input" 
-                        value={aiTitle} 
-                        onInput={(e) => setAiTitle(e.detail.value)}
-                      />
-                    </View>
-                    <View>
-                      <Text className="form-label">微调正文与标签：</Text>
-                      <Textarea 
-                        className="modern-textarea" 
-                        style={{ height: '120px' }}
-                        value={aiBody} 
-                        onInput={(e) => setAiBody(e.detail.value)}
-                      />
-                    </View>
-                  </View>
-                )}
-              </View>
+
 
             </View>
           )}

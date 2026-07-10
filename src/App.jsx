@@ -211,7 +211,8 @@ function App() {
         },
         body: JSON.stringify({
           style: selectedStyle,
-          keywords: copyKeywords
+          keywords: copyKeywords,
+          images: uploadedImages.map(img => img.src)
         })
       });
 
@@ -226,8 +227,10 @@ function App() {
         setActiveCopyOptionIdx(0);
         
         // Populate inputs
-        setAiTitle(result.options[0].title);
-        setAiBody(`${result.options[0].body}\n\n${result.options[0].tags}`);
+        const firstOpt = result.options[0];
+        setAiTitle(firstOpt.title);
+        const cleanTags = (firstOpt.tags && firstOpt.tags !== 'undefined') ? firstOpt.tags : '';
+        setAiBody(firstOpt.body + (cleanTags && !firstOpt.body.includes(cleanTags) ? `\n\n${cleanTags}` : ''));
       } else {
         throw new Error('未返回有效的文案选项');
       }
@@ -244,7 +247,8 @@ function App() {
     setActiveCopyOptionIdx(idx);
     const opt = generatedCopyOptions[idx];
     setAiTitle(opt.title);
-    setAiBody(`${opt.body}\n\n${opt.tags}`);
+    const cleanTags = (opt.tags && opt.tags !== 'undefined') ? opt.tags : '';
+    setAiBody(opt.body + (cleanTags && !opt.body.includes(cleanTags) ? `\n\n${cleanTags}` : ''));
   };
 
   // Download the currently displayed styled (or original) active image
@@ -598,31 +602,6 @@ function App() {
                     </div>
                     <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)', whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>
                       {aiBody}
-                    </div>
-                  </div>
-
-                  {/* Copy Editor */}
-                  <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' }}>
-                    <h4 style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.5rem' }}>✍️ 微调编辑：</h4>
-                    <div style={{ marginBottom: '0.5rem' }}>
-                      <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>修改标题</label>
-                      <input 
-                        type="text" 
-                        className="form-control" 
-                        style={{ width: '100%', padding: '0.4rem 0.5rem', fontSize: '0.8rem', boxSizing: 'border-box' }}
-                        value={aiTitle} 
-                        onChange={(e) => setAiTitle(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>修改正文与标签</label>
-                      <textarea 
-                        className="form-control" 
-                        rows="5"
-                        style={{ width: '100%', padding: '0.4rem 0.5rem', fontSize: '0.8rem', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }}
-                        value={aiBody} 
-                        onChange={(e) => setAiBody(e.target.value)}
-                      />
                     </div>
                   </div>
                 </div>

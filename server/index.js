@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import ExifReader from 'exifreader';
 
 // Load environment variables
 dotenv.config();
@@ -72,6 +73,45 @@ function ensureDataUri(base64Image) {
     return base64Image;
   }
   return `data:image/jpeg;base64,${base64Image}`;
+}
+
+// Helper: Extract Date, Time, Location, Device from EXIF data (supports Base64 images)
+function extractExif(imageBase64) {
+  if (!imageBase64) return null;
+  try {
+    const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+    const buffer = Buffer.from(base64Data, 'base64');
+    const tags = ExifReader.load(buffer);
+    
+    // Date/Time
+    const dateTime = tags['DateTimeOriginal'] ? tags['DateTimeOriginal'].description : (tags['DateTime'] ? tags['DateTime'].description : null);
+    
+    // GPS Coordinates
+    let gps = null;
+    if (tags['GPSLatitude'] && tags['GPSLongitude']) {
+      const lat = tags['GPSLatitude'].description;
+      const lon = tags['GPSLongitude'].description;
+      const latRef = tags['GPSLatitudeRef'] ? tags['GPSLatitudeRef'].description : '';
+      const lonRef = tags['GPSLongitudeRef'] ? tags['GPSLongitudeRef'].description : '';
+      gps = {
+        lat,
+        lon,
+        latRef,
+        lonRef
+      };
+    }
+    
+    // Device/Camera model
+    const device = tags['Model'] ? tags['Model'].description : (tags['Make'] ? tags['Make'].description : null);
+
+    return {
+      dateTime,
+      gps,
+      device
+    };
+  } catch (err) {
+    return null;
+  }
 }
 
 // AI Style Transfer (Ghibli, Claymation, Retro Film using Doubao model via Volcano Ark)
@@ -257,7 +297,7 @@ app.post('/api/ai/style-transfer', async (req, res) => {
 // AI Copywriting Generator
 app.post('/api/ai/generate-copy', async (req, res) => {
   try {
-    const { style = '探店', keywords = '' } = req.body;
+    const { style = '探店', keywords = '', images = [] } = req.body;
 
     const volcKey = process.env.VOLC_API_KEY;
     if (!volcKey) {
@@ -300,6 +340,32 @@ app.post('/api/ai/generate-copy', async (req, res) => {
       keywordsPrompt = `用户未提供具体的关键词，请基于该风格的特点创作一个通用的、具有代表性的小红书爆款模板内容。`;
     }
 
+    // Extract EXIF details from uploaded images to guide AI generation
+    let exifGuidance = '';
+    if (images && images.length > 0) {
+      let exifInfos = [];
+      for (let i = 0; i < images.length; i++) {
+        const img = images[i];
+        const info = extractExif(img);
+        if (info && (info.dateTime || info.gps || info.device)) {
+          exifInfos.push(`图片 ${i + 1} EXIF 元数据：
+  - 拍摄日期时间: ${info.dateTime || '未知'}
+  - 拍摄位置(GPS坐标): ${info.gps ? `纬度 ${info.gps.lat} (${info.gps.latRef}), 经度 ${info.gps.lon} (${info.gps.lonRef})` : '未知'}
+  - 拍摄设备: ${info.device || '未知'}`);
+        }
+      }
+      if (exifInfos.length > 0) {
+        exifGuidance = `
+⚠️ 极其重要（结合真实图片EXIF拍摄信息进行创作）：
+检测到这组照片中包含以下真实的 EXIF 拍摄元数据。请利用你的知识合理地将拍摄时间、日期、以及拍摄地点（如果有GPS坐标，请利用你的地理知识推算出它对应哪个真实的城市、商业区、街道或附近的地标，例如：纬度 31.218 经度 121.488 对应的是上海徐汇区/衡山路附近）自然地融入文案中。
+不要机械呆板地罗列参数，而是把它们写进故事里或作为场景背景铺垫（例如：“在这个惬意的周末午后”、“在上海衡山路街头”、“拿起我的XX手机随手一拍”等），使文案显得更具现场感、真实可信和日常化。
+
+以下是提取出的 EXIF 元数据信息：
+${exifInfos.join('\n')}
+`;
+      }
+    }
+
     console.log(`Generating Xiaohongshu copy for style [${style}] and keywords [${keywords}] using Volcano...`);
     const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
       method: 'POST',
@@ -321,8 +387,9 @@ app.post('/api/ai/generate-copy', async (req, res) => {
 ${promptStyleGuidance}
 
 ${keywordsPrompt}
+${exifGuidance}
 
-请直接输出规范的 JSON 格式数据，以便系统直接解析，结构如下：
+⚠️ 极其重要格式规范：请直接输出规范的 JSON 格式数据，以便系统直接解析，结构如下：
 {
   "options": [
     {
