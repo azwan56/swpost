@@ -114,6 +114,55 @@ function extractExif(imageBase64) {
   }
 }
 
+// Helper: Analyze image content, text, people, and atmosphere using Qwen-VL-Plus
+async function analyzeImageMultimodal(imageBase64, apiKey) {
+  if (!imageBase64 || !apiKey) return null;
+  try {
+    const dataUri = imageBase64.startsWith('data:') ? imageBase64 : `data:image/jpeg;base64,${imageBase64}`;
+    const response = await fetch('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'qwen-vl-plus',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: '请仔细观察这张图片，提取并用一段话概括以下信息用于撰写社交媒体文案：\n1. 画面内容与具体场景（如物品、食物、背景等）\n2. 画面中能够识别出的所有文字或牌匾招牌信息\n3. 画面中的人物（如有，描述其数量、着装、神态或动作）\n4. 画面整体营造出的情感氛围与色彩色调（如温馨、热烈、孤独、复古、冷色调等）。\n请直接用150字以内输出描述，不要输出任何引言或解释。'
+              },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: dataUri
+                }
+              }
+            ]
+          }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.warn('[VL Analysis] Failed to analyze image:', response.status, errText);
+      return null;
+    }
+
+    const resData = await response.json();
+    const description = resData.choices?.[0]?.message?.content?.trim();
+    console.log('[VL Analysis] Image analysis results:', description);
+    return description;
+  } catch (err) {
+    console.warn('[VL Analysis] Qwen-VL error:', err.message);
+    return null;
+  }
+}
+
 // AI Style Transfer (Ghibli, Claymation, Retro Film using Doubao model via Volcano Ark)
 app.post('/api/ai/style-transfer', async (req, res) => {
   try {
@@ -366,6 +415,24 @@ ${exifInfos.join('\n')}
       }
     }
 
+    // Analyze image content using Qwen-VL-Plus (multimodal analysis for atmosphere, people, text, objects)
+    let visualGuidance = '';
+    if (images && images.length > 0 && dashscopeApiKey) {
+      console.log(`[Copywriter] Analyzing active image using Qwen-VL...`);
+      // Analyze the first image (which is the active/preview image) for copy keywords
+      const firstImage = images[0];
+      const description = await analyzeImageMultimodal(firstImage, dashscopeApiKey);
+      if (description) {
+        visualGuidance = `
+重要提示（结合照片视觉细节与氛围进行创作）：
+大模型对您上传的照片进行了多模态视觉分析，提取到了以下画面具体细节：
+“${description}”
+
+请必须紧密结合上述分析出的画面内容（如具体餐食、商品、背景物件等）、画面中的文字招牌/路牌、画面中的人物状态（神态动作与人数等）以及整体的情感氛围，来创作您的文案内容。例如，如果描述提到画面里有“一位笑着的女生在喝奶茶，桌上有本打开的书，阳光洒在桌上”，文案正文中务必要出现对这一温馨瞬间、温暖阳光以及看书喝奶茶场景的描写，坚决避免凭空胡编乱造与照片风马牛不相及的主题，使图文高度契合、极具种草感染力。
+`;
+      }
+    }
+
     console.log(`Generating Xiaohongshu copy for style [${style}] and keywords [${keywords}] using Volcano...`);
     const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
       method: 'POST',
@@ -388,20 +455,20 @@ ${promptStyleGuidance}
 
 ${keywordsPrompt}
 ${exifGuidance}
+${visualGuidance}
 
 ⚠️ 极其重要格式规范：请直接输出规范的 JSON 格式数据，以便系统直接解析，结构如下：
 {
   "options": [
     {
       "styleName": "选项一的 styleName，如：强力种草",
-      "title": "标题...",
-      "body": "正文内容...",
-      "tags": "#标签1 #标签2"
-    },
-    ...
+      "title": "直接输出标题，绝对不要包含 '【爆款标题】' 标签前缀",
+      "body": "直接输出正文内容，绝对不要包含 '【笔记正文】' 标签前缀",
+      "tags": "直接输出话题标签（如 #探店 #美食），绝对不要包含 '【推荐话题标签】' 标签前缀"
+    }
   ]
 }
-不要输出任何 Markdown 格式包裹（如 \`\`\`json 标记），不要输出任何解释性话语，直接返回纯 JSON 对象。`
+注意：JSON 中的字段值应当是完全纯净的文案本身，千万不要在其内容中夹杂 '【爆款标题】'、'【笔记正文】' 或 '【推荐话题标签】' 这些起提示作用的汉字字符标签！不要输出任何 Markdown 格式包裹（如 \`\`\`json 标记），不要输出任何解释性话语，直接返回纯 JSON 对象。`
           }
         ]
       })
