@@ -349,6 +349,7 @@ app.post('/api/ai/generate-copy', async (req, res) => {
     const { style = '探店', keywords = '', images = [] } = req.body;
 
     const volcKey = process.env.VOLC_API_KEY;
+    const dashscopeApiKey = process.env.DASHSCOPE_API_KEY;
     if (!volcKey) {
       return res.status(500).json({ error: 'Volcano Ark Key is not configured on the server.' });
     }
