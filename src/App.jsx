@@ -145,68 +145,75 @@ function App() {
     setAiBody('');
   };
 
-  // Call Doubao style transfer model via backend
+  // Call Doubao style transfer model via backend (supporting multi-image parallel processing)
   const handleAIStyleTransfer = async (styleName) => {
-    const activeImage = uploadedImages[activeIdx];
-    if (!activeImage) return;
+    let targets = uploadedImages.filter(img => img.selected !== false);
+    if (targets.length === 0) {
+      const activeImage = uploadedImages[activeIdx];
+      if (activeImage) targets = [activeImage];
+    }
+    
+    if (targets.length === 0) return;
     
     setIsLoading(true);
     const styleLabel = styleName === 'clay' ? '泥塑黏土化' : styleName === 'japanese-film' ? '日式胶片风' : '吉卜力卡通化';
-    setAiOperationName(`豆包模型 ${styleLabel}`);
+    setAiOperationName(`豆包模型 ${styleLabel} (${targets.length}张)`);
     setErrorMsg('');
 
     try {
-      // Use styledSrc as input if styled already, or fallback to original src
-      const inputSrc = activeImage.styledSrc || activeImage.src;
-      const compressedImage = await resizeImageBase64(inputSrc, 2048, 0.9);
+      await Promise.all(targets.map(async (targetImage) => {
+        // Use styledSrc as input if styled already, or fallback to original src
+        const inputSrc = targetImage.styledSrc || targetImage.src;
+        const compressedImage = await resizeImageBase64(inputSrc, 2048, 0.9);
 
-      // Measure dimensions of original image to send to server for aspect ratio preservation
-      let originalWidth = activeImage.width;
-      let originalHeight = activeImage.height;
-      if (!originalWidth || !originalHeight) {
-        const dims = await new Promise((resolve) => {
-          const tempImg = new Image();
-          tempImg.onload = () => resolve({ w: tempImg.width, h: tempImg.height });
-          tempImg.onerror = () => resolve({ w: 1024, h: 1024 });
-          tempImg.src = activeImage.src;
-        });
-        originalWidth = dims.w;
-        originalHeight = dims.h;
-      }
-
-      const res = await fetch(`${API_BASE}/api/ai/style-transfer`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          image: compressedImage,
-          style: styleName,
-          width: originalWidth,
-          height: originalHeight
-        })
-      });
-
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || '风格化重绘失败');
-      }
-
-      const result = await res.json();
-      
-      // Draw premium Leica-style visual watermark on the canvas before updating styledSrc
-      const watermarkedImage = await applyVisualWatermark(result.image, styleName, result.model, result.exif);
-      
-      // Update the image with the styled result
-      setUploadedImages(prev => prev.map((img, idx) => {
-        if (idx === activeIdx) {
-          return { 
-            ...img, 
-            styledSrc: watermarkedImage,
-            activeStyle: styleName
-          };
+        // Measure dimensions of original image to send to server for aspect ratio preservation
+        let originalWidth = targetImage.width;
+        let originalHeight = targetImage.height;
+        if (!originalWidth || !originalHeight) {
+          const dims = await new Promise((resolve) => {
+            const tempImg = new Image();
+            tempImg.onload = () => resolve({ w: tempImg.width, h: tempImg.height });
+            tempImg.onerror = () => resolve({ w: 1024, h: 1024 });
+            tempImg.src = targetImage.src;
+          });
+          originalWidth = dims.w;
+          originalHeight = dims.h;
         }
-        return img;
+
+        const res = await fetch(`${API_BASE}/api/ai/style-transfer`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            image: compressedImage,
+            style: styleName,
+            width: originalWidth,
+            height: originalHeight
+          })
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || '风格化重绘失败');
+        }
+
+        const result = await res.json();
+        
+        // Draw premium Leica-style visual watermark on the canvas before updating styledSrc
+        const watermarkedImage = await applyVisualWatermark(result.image, styleName, result.model, result.exif);
+        
+        // Update the image with the styled result
+        setUploadedImages(prev => prev.map((img) => {
+          if (img.id === targetImage.id) {
+            return { 
+              ...img, 
+              styledSrc: watermarkedImage,
+              activeStyle: styleName
+            };
+          }
+          return img;
+        }));
       }));
 
     } catch (err) {
@@ -220,8 +227,13 @@ function App() {
 
   // Restore styled image to original
   const restoreToOriginal = () => {
-    setUploadedImages(prev => prev.map((img, idx) => {
-      if (idx === activeIdx) {
+    let targets = uploadedImages.filter(img => img.selected !== false);
+    if (targets.length === 0) {
+      targets = [uploadedImages[activeIdx]].filter(Boolean);
+    }
+    const targetIds = targets.map(t => t.id);
+    setUploadedImages(prev => prev.map((img) => {
+      if (targetIds.includes(img.id)) {
         return { 
           ...img, 
           styledSrc: null,
@@ -464,14 +476,25 @@ function App() {
       const ttsAudioBuffer = await audioCtx.decodeAudioData(audioArrayBuffer);
       const totalDuration = ttsAudioBuffer.duration; // in seconds
 
-      // 4. Fetch and decode BGM
-      const bgmRes = await fetch('/bgm.mp3');
-      if (!bgmRes.ok) {
-        throw new Error('默认背景音乐加载失败，请确保 public/bgm.mp3 文件存在');
+      // 4. Fetch and decode BGM (with safe fallback for remote HTML/SPA routing)
+      let bgmAudioBuffer = null;
+      try {
+        const bgmRes = await fetch('/bgm.mp3');
+        if (bgmRes.ok) {
+          const contentType = bgmRes.headers.get('content-type') || '';
+          if (!contentType.includes('text/html')) {
+            const bgmBlob = await bgmRes.blob();
+            const bgmArrayBuffer = await bgmBlob.arrayBuffer();
+            bgmAudioBuffer = await audioCtx.decodeAudioData(bgmArrayBuffer);
+          } else {
+            console.warn('[VideoGen] bgm.mp3 returned text/html (SPA fallback), skipping BGM.');
+          }
+        } else {
+          console.warn('[VideoGen] bgm.mp3 returned HTTP ' + bgmRes.status + ', skipping BGM.');
+        }
+      } catch (bgmErr) {
+        console.warn('[VideoGen] Background music failed to load or decode, continuing without BGM:', bgmErr);
       }
-      const bgmBlob = await bgmRes.blob();
-      const bgmArrayBuffer = await bgmBlob.arrayBuffer();
-      const bgmAudioBuffer = await audioCtx.decodeAudioData(bgmArrayBuffer);
 
       // 5. Load HTML Images
       setVideoProgress('正在载入重绘图片...');
@@ -493,22 +516,25 @@ function App() {
       ttsAudioSource = audioCtx.createBufferSource();
       ttsAudioSource.buffer = ttsAudioBuffer;
 
-      bgmAudioSource = audioCtx.createBufferSource();
-      bgmAudioSource.buffer = bgmAudioBuffer;
-      bgmAudioSource.loop = true;
-
-      const bgmGain = audioCtx.createGain();
-      bgmGain.gain.value = 0.15; // Set BGM volume to 15%
-
       const audioDest = audioCtx.createMediaStreamDestination();
 
-      // Connect nodes
+      // Connect TTS voiceover nodes
       ttsAudioSource.connect(audioDest);
       ttsAudioSource.connect(audioCtx.destination);
 
-      bgmAudioSource.connect(bgmGain);
-      bgmGain.connect(audioDest);
-      bgmGain.connect(audioCtx.destination);
+      // Connect BGM nodes only if successfully loaded and decoded
+      if (bgmAudioBuffer) {
+        bgmAudioSource = audioCtx.createBufferSource();
+        bgmAudioSource.buffer = bgmAudioBuffer;
+        bgmAudioSource.loop = true;
+
+        const bgmGain = audioCtx.createGain();
+        bgmGain.gain.value = 0.15; // Set BGM volume to 15%
+
+        bgmAudioSource.connect(bgmGain);
+        bgmGain.connect(audioDest);
+        bgmGain.connect(audioCtx.destination);
+      }
 
       // 7. Setup Canvas Rendering
       setVideoProgress('正在合成与录制视频中...');
@@ -795,17 +821,39 @@ function App() {
                 </div>
               )}
 
-              {/* Uploaded Thumbnails Manager */}
+               {/* Uploaded Thumbnails Manager */}
               {uploadedImages.length > 0 && (
                 <div>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>点击选中某张照片进行画风转换：</p>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>勾选需要重绘的图片（支持多选同时处理，点击图片可预览）：</p>
                   <div className="uploaded-images-list">
                     {uploadedImages.map((img, idx) => (
                       <div 
                         key={img.id}
                         className={`uploaded-image-thumbnail ${activeIdx === idx ? 'active' : ''}`}
                         onClick={() => setActiveIdx(idx)}
+                        style={{ position: 'relative' }}
                       >
+                        {/* Checkbox overlay for batch style-transfer selection */}
+                        <input 
+                          type="checkbox"
+                          checked={img.selected !== false}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => {
+                            setUploadedImages(prev => prev.map((item) => 
+                              item.id === img.id ? { ...item, selected: e.target.checked } : item
+                            ));
+                          }}
+                          style={{
+                            position: 'absolute',
+                            top: '6px',
+                            left: '6px',
+                            zIndex: 10,
+                            cursor: 'pointer',
+                            width: '18px',
+                            height: '18px',
+                            accentColor: 'var(--primary-color)'
+                          }}
+                        />
                         <img src={img.styledSrc || img.src} alt={`Thumbnail ${idx}`} />
                         <button 
                           className="uploaded-image-remove"
@@ -826,7 +874,7 @@ function App() {
             <div className="card">
               <h2 className="card-title">🎨 豆包 AI 画风重绘</h2>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-                选择一种艺术画风，调用豆包 Seedream 模型重绘选中的第 {activeIdx + 1} 张图片：
+                选择一种艺术画风，同时重绘所勾选的 **{uploadedImages.filter(img => img.selected !== false).length}** 张图片：
               </p>
               
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', marginBottom: '1rem' }}>

@@ -270,7 +270,7 @@ app.post('/api/ai/style-transfer', async (req, res) => {
 
       let prompt = '将参考图转换成极其精美的吉卜力动画风格，宫崎骏工作室手绘画画风，温暖治愈的水彩线条，梦幻柔和的动漫光影，明亮清新的色彩，高清原画品质';
       if (style === 'clay') {
-        prompt = '将参考图重新渲染成软萌可爱的3D泥塑黏土人偶玩具风格，黏土橡皮泥材质，温润反光表面，明亮清新的色彩，纯色背景，高分辨率，3d clay illustration';
+        prompt = '将参考图中的人物和场景重新渲染成精美的3D泥塑黏土风格，保留参考图中的人物主体和构图布局，黏土橡皮泥材质，温润反光表面，明亮温暖的色彩，3d clay illustration';
       } else if (style === 'japanese-film') {
         prompt = '将参考图重新渲染成经典的日式复古胶片风，柔和自然的色调，清冷干净的画面，微弱的胶片颗粒感，色彩饱和度适中，温暖怀旧，富士胶片质感，高清原画品质，Japanese retro film style, soft and warm vintage colors, natural lighting, analog film grain, high quality';
       } else if (style === 'polaroid') {
