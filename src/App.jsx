@@ -248,7 +248,7 @@ function App() {
         body: JSON.stringify({
           style: selectedStyle,
           keywords: copyKeywords,
-          images: uploadedImages.map(img => img.src)
+          images: uploadedImages.map(img => img.styledSrc || img.src)
         })
       });
 

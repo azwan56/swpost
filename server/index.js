@@ -230,26 +230,33 @@ app.post('/api/ai/style-transfer', async (req, res) => {
     if (volcApiKey) {
       console.log(`[StyleTransfer] 使用 Volcano Ark (Doubao Seedream 5.0), style=${style}, original width=${width}, height=${height}`);
       
-      let size = '2K'; // Default fallback
+      let size = '2048x2048'; // Default fallback (4M pixels, compatible with Seedream 5.0)
       if (width && height) {
         let w = parseInt(width, 10);
         let h = parseInt(height, 10);
         if (!isNaN(w) && !isNaN(h) && w > 0 && h > 0) {
-          const maxDim = 1440;
-          if (w > maxDim || h > maxDim) {
-            if (w > h) {
-              h = Math.round((h * maxDim) / w);
-              w = maxDim;
+          const ratio = w / h;
+          const minPixels = 3686400; // Required minimum pixels for Seedream 5.0
+          
+          // Calculate w and h maintaining aspect ratio with at least minPixels area
+          let targetW = Math.sqrt(minPixels * ratio);
+          let targetH = targetW / ratio;
+          
+          // Round to nearest multiple of 16 for network efficiency
+          w = Math.round(targetW / 16) * 16;
+          h = Math.round(targetH / 16) * 16;
+          
+          // Ensure we don't fall below minPixels due to rounding down
+          while (w * h < minPixels) {
+            if (ratio > 1) {
+              w += 16;
             } else {
-              w = Math.round((w * maxDim) / h);
-              h = maxDim;
+              h += 16;
             }
           }
-          // Align to multiples of 16 for neural network compatibility
-          w = Math.round(w / 16) * 16;
-          h = Math.round(h / 16) * 16;
-          size = `${w}*${h}`;
-          console.log(`[StyleTransfer] Calculated aspect-ratio size for Seedream: ${size}`);
+          
+          size = `${w}x${h}`;
+          console.log(`[StyleTransfer] Calculated aspect-ratio size for Seedream: ${size} (Total pixels: ${w * h})`);
         }
       }
 
@@ -260,7 +267,7 @@ app.post('/api/ai/style-transfer', async (req, res) => {
         prompt = '将参考图重新渲染成经典的日式复古胶片风，柔和自然的色调，清冷干净的画面，微弱的胶片颗粒感，色彩饱和度适中，温暖怀旧，富士胶片质感，高清原画品质，Japanese retro film style, soft and warm vintage colors, natural lighting, analog film grain, high quality';
       } else if (style === 'polaroid') {
         prompt = '将参考图重新渲染成经典的宝利来拍立得相机照片风格，1:1正方形构图，复古怀旧色调，画面四周带有拍立得经典的标志性宽大白色实体卡纸相框边框（底部相框较宽），富士胶片质感，温暖复古，Classic Polaroid photo with a signature white border frame, 1:1 square crop, vintage analog film look';
-        size = '1024*1024';
+        size = '2048x2048';
       }
 
       const volcPayload = {
@@ -489,18 +496,27 @@ ${exifInfos.join('\n')}
     // Analyze image content using Qwen-VL-Plus (multimodal analysis for atmosphere, people, text, objects)
     let visualGuidance = '';
     if (images && images.length > 0 && dashscopeApiKey) {
-      console.log(`[Copywriter] Analyzing active image using Qwen-VL...`);
-      // Analyze the first image (which is the active/preview image) for copy keywords
-      const firstImage = images[0];
-      const description = await analyzeImageMultimodal(firstImage, dashscopeApiKey);
-      if (description) {
-        visualGuidance = `
-重要提示（结合照片视觉细节与氛围进行创作）：
-大模型对您上传的照片进行了多模态视觉分析，提取到了以下画面具体细节：
-“${description}”
+      console.log(`[Copywriter] Analyzing ${images.length} images using Qwen-VL in parallel...`);
+      try {
+        const descriptions = await Promise.all(
+          images.map((img, index) => 
+            analyzeImageMultimodal(img, dashscopeApiKey)
+              .then(desc => desc ? `照片 ${index + 1} 画面细节描述：${desc}` : null)
+          )
+        );
+        
+        const combinedDescriptions = descriptions.filter(desc => desc !== null).join('\n');
+        if (combinedDescriptions) {
+          visualGuidance = `
+重要提示（结合这组照片的整体视觉细节与氛围进行创作）：
+我们对您上传的这组照片（共 ${images.length} 张）分别进行了多模态视觉分析，各张照片的细节描述如下：
+${combinedDescriptions}
 
-请必须紧密结合上述分析出的画面内容（如具体餐食、商品、背景物件等）、画面中的文字招牌/路牌、画面中的人物状态（神态动作与人数等）以及整体的情感氛围，来创作您的文案内容。例如，如果描述提到画面里有“一位笑着的女生在喝奶茶，桌上有本打开的书，阳光洒在桌上”，文案正文中务必要出现对这一温馨瞬间、温暖阳光以及看书喝奶茶场景的描写，坚决避免凭空胡编乱造与照片风马牛不相及的主题，使图文高度契合、极具种草感染力。
+请务必将这几张照片所描绘的画面内容（如具体餐食、商品、运动场景、背景物件等）、画面中的文字招牌/路牌、画面中的人物状态与神态，整合成一个连贯、真实的故事或分享内容。不要只描述其中一张，要巧妙融入所有照片反映的完整场景与体验细节，使图文高度契合、极具种草感染力。
 `;
+        }
+      } catch (err) {
+        console.warn('[Copywriter] Multi-image analysis error:', err.message);
       }
     }
 
