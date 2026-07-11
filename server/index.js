@@ -116,13 +116,30 @@ function extractExif(imageBase64) {
 }
 
 // Helper: Copy EXIF headers from original image to styled image, adding custom style/model/brand tag markers
+// NOTE: piexifjs only works with JPEG. AI models (Seedream, Wanx) return PNG images.
+// For PNG outputs, we skip binary EXIF injection here — the client handles it via the structured exif object.
 function copyAndModifyExif(originalBase64, styledBase64, styleName, modelName) {
   try {
+    // Detect if styled image is PNG (piexifjs cannot inject EXIF into PNG)
+    const styledMimeMatch = styledBase64.match(/^data:(image\/\w+);base64,/);
+    const styledMime = styledMimeMatch ? styledMimeMatch[1] : 'image/jpeg';
+    
+    if (styledMime === 'image/png') {
+      console.log('[EXIF] Styled image is PNG — skipping server-side EXIF injection (client will handle it).');
+      return styledBase64;
+    }
+
     const originalClean = originalBase64.replace(/^data:image\/\w+;base64,/, "");
     const styledClean = styledBase64.replace(/^data:image\/\w+;base64,/, "");
 
     const originalBinary = Buffer.from(originalClean, 'base64').toString('binary');
     const styledBinary = Buffer.from(styledClean, 'base64').toString('binary');
+
+    // Check if styled binary is actually JPEG (starts with 0xFF 0xD8)
+    if (styledBinary.charCodeAt(0) !== 0xFF || styledBinary.charCodeAt(1) !== 0xD8) {
+      console.log('[EXIF] Styled image binary is not JPEG — skipping EXIF injection.');
+      return styledBase64;
+    }
 
     // Load EXIF from original
     let exifObj = { "0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": null };
@@ -148,10 +165,7 @@ function copyAndModifyExif(originalBase64, styledBase64, styleName, modelName) {
     // Convert back to Base64
     const newBase64 = Buffer.from(newBinary, 'binary').toString('base64');
     
-    const mimeMatch = styledBase64.match(/^data:(image\/\w+);base64,/);
-    const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
-    
-    return `data:${mime};base64,${newBase64}`;
+    return `data:${styledMime};base64,${newBase64}`;
   } catch (err) {
     console.error('[EXIF Write] Failed to copy EXIF:', err.message);
     return styledBase64;

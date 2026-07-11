@@ -433,19 +433,54 @@ function App() {
         
         const watermarkedDataUri = canvas.toDataURL('image/jpeg', 0.95);
         try {
-          // piexifjs browser API works directly with Data URIs (not raw binary)
-          // Extract EXIF from the styled image that was returned by the server (which has EXIF injected)
-          let exifObj = piexif.load(base64Image);
-          // Standardize Software tag (ASCII only to avoid encoding issues)
+          // Build EXIF object from the structured exif data passed by the server
+          // (We cannot piexif.load() from the styled image because AI models return PNG, not JPEG)
+          const exifObj = { "0th": {}, "Exif": {}, "GPS": {}, "Interop": {}, "1st": {}, "thumbnail": null };
+          
+          // Software tag (ASCII only)
           exifObj["0th"][piexif.ImageIFD.Software] = "Shantie AI";
           
-          const exifBytes = piexif.dump(exifObj);
+          if (exif) {
+            // Write DateTime
+            if (exif.dateTime) {
+              exifObj["0th"][piexif.ImageIFD.DateTime] = exif.dateTime;
+              exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal] = exif.dateTime;
+              exifObj["Exif"][piexif.ExifIFD.DateTimeDigitized] = exif.dateTime;
+            }
+            
+            // Write Device/Camera
+            if (exif.device) {
+              exifObj["0th"][piexif.ImageIFD.Model] = exif.device;
+            }
+            
+            // Write GPS coordinates
+            if (exif.gps) {
+              const latVal = parseFloat(exif.gps.lat);
+              const lonVal = parseFloat(exif.gps.lon);
+              if (!isNaN(latVal) && !isNaN(lonVal)) {
+                const latAbs = Math.abs(latVal);
+                const lonAbs = Math.abs(lonVal);
+                const latDeg = Math.floor(latAbs);
+                const latMin = Math.floor((latAbs - latDeg) * 60);
+                const latSec = Math.round(((latAbs - latDeg) * 60 - latMin) * 60 * 100);
+                const lonDeg = Math.floor(lonAbs);
+                const lonMin = Math.floor((lonAbs - lonDeg) * 60);
+                const lonSec = Math.round(((lonAbs - lonDeg) * 60 - lonMin) * 60 * 100);
+                
+                exifObj["GPS"][piexif.GPSIFD.GPSLatitude] = [[latDeg, 1], [latMin, 1], [latSec, 100]];
+                exifObj["GPS"][piexif.GPSIFD.GPSLatitudeRef] = exif.gps.latRef || (latVal >= 0 ? "N" : "S");
+                exifObj["GPS"][piexif.GPSIFD.GPSLongitude] = [[lonDeg, 1], [lonMin, 1], [lonSec, 100]];
+                exifObj["GPS"][piexif.GPSIFD.GPSLongitudeRef] = exif.gps.lonRef || (lonVal >= 0 ? "E" : "W");
+              }
+            }
+          }
           
-          // Insert EXIF into the watermarked canvas output (Data URI in, Data URI out)
+          const exifBytes = piexif.dump(exifObj);
+          // watermarkedDataUri is 'data:image/jpeg;base64,...' from canvas — valid input for piexif.insert
           const finalDataUri = piexif.insert(exifBytes, watermarkedDataUri);
           resolve(finalDataUri);
         } catch (exifErr) {
-          console.warn('[Watermark EXIF] Failed to copy EXIF to watermarked canvas:', exifErr);
+          console.warn('[Watermark EXIF] Failed to inject EXIF into watermarked image:', exifErr);
           resolve(watermarkedDataUri);
         }
       };
