@@ -132,15 +132,13 @@ function copyAndModifyExif(originalBase64, styledBase64, styleName, modelName) {
       console.log('[EXIF] No original EXIF to copy, creating default.');
     }
 
-    // Convert Chinese style names
-    const styleLabel = styleName === 'clay' ? '泥塑黏土风' : styleName === 'japanese-film' ? '日式复古胶片风' : styleName === 'polaroid' ? '经典拍立得风' : '吉卜力卡通动漫风';
+    // Convert style names to English ASCII to prevent unicode serialization issues in some EXIF readers
+    const styleLabelEn = styleName === 'clay' ? 'Claymation' : styleName === 'japanese-film' ? 'Japanese Retro Film' : styleName === 'polaroid' ? 'Polaroid' : 'Ghibli Anime';
 
-    // Write custom tags/markers
-    // 0th IFD Software tag
-    exifObj["0th"][piexif.ImageIFD.Software] = "闪贴AI - 你拍照我生文";
+    // Write custom tags/markers in English ASCII
+    exifObj["0th"][piexif.ImageIFD.Software] = "Shantie AI - Photo to Copywriter";
     
-    // Exif IFD UserComment tag
-    const commentText = `Style: ${styleLabel}, Model: ${modelName}, Software: ShantieAI`;
+    const commentText = `Style: ${styleLabelEn}, Model: ${modelName}, Software: ShantieAI`;
     exifObj["Exif"][piexif.ExifIFD.UserComment] = commentText;
 
     // Dump and insert into styled image
@@ -547,6 +545,8 @@ ${combinedDescriptions}
 
 这三款文案的风格要求如下：
 ${promptStyleGuidance}
+
+⚠️ 极其重要约束：除【探店】风格外，其他任何风格（如【旅行心情】、【运动】及自定义风格）的文案正文中，绝对不要出现任何类似于“📍 店名”、“📍 地址”、“💰 人均”等店铺类占位信息或相关的前缀，请直接开始自然的情感/故事正文描写。
 
 ${keywordsPrompt}
 ${exifGuidance}
