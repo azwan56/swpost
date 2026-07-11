@@ -582,7 +582,9 @@ function App() {
       // 9. Start synthesis loop and audio sources
       mediaRecorder.start();
       ttsAudioSource.start(0);
-      bgmAudioSource.start(0);
+      if (bgmAudioSource) {
+        bgmAudioSource.start(0);
+      }
 
       const startTime = audioCtx.currentTime;
 
@@ -616,7 +618,9 @@ function App() {
           // Audio synthesis finished, stop everything
           mediaRecorder.stop();
           ttsAudioSource.stop();
-          bgmAudioSource.stop();
+          if (bgmAudioSource) {
+            bgmAudioSource.stop();
+          }
           audioCtx.close();
           return;
         }
