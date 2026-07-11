@@ -226,6 +226,7 @@ function App() {
     try {
       await Promise.all(targets.map(async (targetImage) => {
         // Use styledSrc as input if styled already, or fallback to original src
+        const inputSrc = targetImage.styledSrc || targetImage.src;
         const compressedImage = await resizeImageBase64(inputSrc, 1024, 0.85);
 
         // Measure dimensions of original image to send to server for aspect ratio preservation
