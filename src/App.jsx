@@ -441,7 +441,7 @@ function App() {
       // Determine heights
       let imagesHeight = 0;
       if (validImages.length > 0) {
-        imagesHeight = validImages.length <= 2 ? 300 : 580;
+        imagesHeight = validImages.length === 1 ? 400 : (validImages.length === 2 ? 300 : 580);
       }
       
       const exifHeight = 120;
@@ -489,11 +489,11 @@ function App() {
       ctx.fillStyle = '#1A1A1A';
       ctx.textAlign = 'left';
       ctx.font = 'bold 26px sans-serif';
-      ctx.fillText('SHANTIE AI', 40, 75);
+      ctx.fillText('闪贴 AI', 40, 75);
 
       ctx.fillStyle = '#6366F1';
       ctx.font = 'bold 12px sans-serif';
-      ctx.fillText('· 智能图文分析报告 ·', 210, 70);
+      ctx.fillText('· 智能图文分析报告 ·', 150, 70);
 
       ctx.fillStyle = '#666666';
       ctx.font = '13px sans-serif';
@@ -510,54 +510,60 @@ function App() {
 
       let currentY = 120;
 
-      // 4. Draw Image Grid
+      // 4. Draw Image Grid (using contain style with light background frame to prevent cropping)
       if (validImages.length > 0) {
         const gap = 15;
-        const drawCoverImage = (context, img, x, y, w, h) => {
+        const drawContainImage = (context, img, x, y, w, h) => {
           context.save();
+          // Draw a clean light background for the frame
+          context.fillStyle = '#EAE8E4';
+          context.beginPath();
+          context.roundRect(x, y, w, h, 8);
+          context.fill();
+
           context.beginPath();
           context.roundRect(x, y, w, h, 8);
           context.clip();
 
           const imgRatio = img.width / img.height;
           const targetRatio = w / h;
-          let sx, sy, sWidth, sHeight;
+          let dx, dy, dWidth, dHeight;
 
           if (imgRatio > targetRatio) {
-            sHeight = img.height;
-            sWidth = img.height * targetRatio;
-            sx = (img.width - sWidth) / 2;
-            sy = 0;
+            dWidth = w;
+            dHeight = w / imgRatio;
+            dx = x;
+            dy = y + (h - dHeight) / 2;
           } else {
-            sWidth = img.width;
-            sHeight = img.width / targetRatio;
-            sx = 0;
-            sy = (img.height - sHeight) / 2;
+            dHeight = h;
+            dWidth = h * imgRatio;
+            dx = x + (w - dWidth) / 2;
+            dy = y;
           }
 
-          context.drawImage(img, sx, sy, sWidth, sHeight, x, y, w, h);
+          context.drawImage(img, dx, dy, dWidth, dHeight);
           context.restore();
         };
 
         if (validImages.length === 1) {
-          drawCoverImage(ctx, validImages[0], 40, currentY, 720, 270);
-          currentY += 270 + 20;
+          drawContainImage(ctx, validImages[0], 40, currentY, 720, 400);
+          currentY += 400 + 20;
         } else if (validImages.length === 2) {
           const imgW = 350;
-          const imgH = 260;
-          drawCoverImage(ctx, validImages[0], 40, currentY, imgW, imgH);
-          drawCoverImage(ctx, validImages[1], 40 + imgW + gap, currentY, imgW, imgH);
+          const imgH = 300;
+          drawContainImage(ctx, validImages[0], 40, currentY, imgW, imgH);
+          drawContainImage(ctx, validImages[1], 40 + imgW + gap, currentY, imgW, imgH);
           currentY += imgH + 20;
         } else {
           const imgW = 350;
           const imgH = 260;
           // Row 1
-          drawCoverImage(ctx, validImages[0], 40, currentY, imgW, imgH);
-          if (validImages[1]) drawCoverImage(ctx, validImages[1], 40 + imgW + gap, currentY, imgW, imgH);
+          drawContainImage(ctx, validImages[0], 40, currentY, imgW, imgH);
+          if (validImages[1]) drawContainImage(ctx, validImages[1], 40 + imgW + gap, currentY, imgW, imgH);
           currentY += imgH + gap;
           // Row 2
-          if (validImages[2]) drawCoverImage(ctx, validImages[2], 40, currentY, imgW, imgH);
-          if (validImages[3]) drawCoverImage(ctx, validImages[3], 40 + imgW + gap, currentY, imgW, imgH);
+          if (validImages[2]) drawContainImage(ctx, validImages[2], 40, currentY, imgW, imgH);
+          if (validImages[3]) drawContainImage(ctx, validImages[3], 40 + imgW + gap, currentY, imgW, imgH);
           currentY += imgH + 20;
         }
       }
