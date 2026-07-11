@@ -61,6 +61,7 @@ function App() {
   const [generatedCopyOptions, setGeneratedCopyOptions] = useState([]);
   const [activeCopyOptionIdx, setActiveCopyOptionIdx] = useState(0);
   const [isGeneratingCopy, setIsGeneratingCopy] = useState(false);
+  const [aiTitle, setAiTitle] = useState('');
   const [aiBody, setAiBody] = useState('');
   
   // Video States
