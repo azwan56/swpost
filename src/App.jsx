@@ -8,7 +8,9 @@ const resizeImageBase64 = (dataUrl, maxDim = 1600, quality = 0.85) => {
       return;
     }
     const img = new Image();
-    img.crossOrigin = 'anonymous';
+    if (dataUrl && !dataUrl.startsWith('data:')) {
+      img.crossOrigin = 'anonymous';
+    }
     img.onload = () => {
       let width = img.width;
       let height = img.height;
@@ -100,12 +102,21 @@ function App() {
         reader.readAsDataURL(file);
       });
 
+      const dimensions = await new Promise((resolve) => {
+        const tempImg = new Image();
+        tempImg.onload = () => resolve({ w: tempImg.width, h: tempImg.height });
+        tempImg.onerror = () => resolve({ w: 1024, h: 1024 });
+        tempImg.src = src;
+      });
+
       newImages.push({
         id,
         file,
         src,
         styledSrc: null,
-        activeStyle: null
+        activeStyle: null,
+        width: dimensions.w,
+        height: dimensions.h
       });
     }
 
@@ -149,6 +160,20 @@ function App() {
       const inputSrc = activeImage.styledSrc || activeImage.src;
       const compressedImage = await resizeImageBase64(inputSrc, 2048, 0.9);
 
+      // Measure dimensions of original image to send to server for aspect ratio preservation
+      let originalWidth = activeImage.width;
+      let originalHeight = activeImage.height;
+      if (!originalWidth || !originalHeight) {
+        const dims = await new Promise((resolve) => {
+          const tempImg = new Image();
+          tempImg.onload = () => resolve({ w: tempImg.width, h: tempImg.height });
+          tempImg.onerror = () => resolve({ w: 1024, h: 1024 });
+          tempImg.src = activeImage.src;
+        });
+        originalWidth = dims.w;
+        originalHeight = dims.h;
+      }
+
       const res = await fetch(`${API_BASE}/api/ai/style-transfer`, {
         method: 'POST',
         headers: {
@@ -156,7 +181,9 @@ function App() {
         },
         body: JSON.stringify({
           image: compressedImage,
-          style: styleName
+          style: styleName,
+          width: originalWidth,
+          height: originalHeight
         })
       });
 
@@ -296,7 +323,9 @@ function App() {
   const applyVisualWatermark = (base64Image, styleName, modelName, exif) => {
     return new Promise((resolve) => {
       const img = new Image();
-      img.crossOrigin = 'anonymous';
+      if (base64Image && !base64Image.startsWith('data:')) {
+        img.crossOrigin = 'anonymous';
+      }
       img.onload = () => {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
@@ -442,10 +471,11 @@ function App() {
         imagesToUse.map((src) => {
           return new Promise((resolve, reject) => {
             const img = new Image();
-            img.crossOrigin = 'anonymous';
+            if (src && !src.startsWith('data:')) {
+              img.crossOrigin = 'anonymous';
+            }
             img.onload = () => resolve(img);
             img.onerror = () => reject(new Error('部分图片载入失败'));
-            img.crossOrigin = 'anonymous';
             img.src = src;
           });
         })

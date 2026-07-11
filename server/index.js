@@ -212,7 +212,7 @@ async function analyzeImageMultimodal(imageBase64, apiKey) {
 // AI Style Transfer (Ghibli, Claymation, Retro Film using Doubao model via Volcano Ark)
 app.post('/api/ai/style-transfer', async (req, res) => {
   try {
-    const { image, style = 'cartoon' } = req.body;
+    const { image, style = 'cartoon', width, height } = req.body;
     if (!image) {
       return res.status(400).json({ error: 'Image base64 data is required.' });
     }
@@ -228,15 +228,36 @@ app.post('/api/ai/style-transfer', async (req, res) => {
 
     // ===== Primary: Volcano Ark Doubao-Seedream (highest quality style transfer) =====
     if (volcApiKey) {
-      console.log(`[StyleTransfer] 使用 Volcano Ark (Doubao Seedream 5.0), style=${style}`);
+      console.log(`[StyleTransfer] 使用 Volcano Ark (Doubao Seedream 5.0), style=${style}, original width=${width}, height=${height}`);
       
+      let size = '2K'; // Default fallback
+      if (width && height) {
+        let w = parseInt(width, 10);
+        let h = parseInt(height, 10);
+        if (!isNaN(w) && !isNaN(h) && w > 0 && h > 0) {
+          const maxDim = 1440;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          // Align to multiples of 16 for neural network compatibility
+          w = Math.round(w / 16) * 16;
+          h = Math.round(h / 16) * 16;
+          size = `${w}*${h}`;
+          console.log(`[StyleTransfer] Calculated aspect-ratio size for Seedream: ${size}`);
+        }
+      }
+
       let prompt = '将参考图转换成极其精美的吉卜力动画风格，宫崎骏工作室手绘画画风，温暖治愈的水彩线条，梦幻柔和的动漫光影，明亮清新的色彩，高清原画品质';
-      let size = '2K';
       if (style === 'clay') {
         prompt = '将参考图重新渲染成软萌可爱的3D泥塑黏土人偶玩具风格，黏土橡皮泥材质，温润反光表面，明亮清新的色彩，纯色背景，高分辨率，3d clay illustration';
       } else if (style === 'japanese-film') {
         prompt = '将参考图重新渲染成经典的日式复古胶片风，柔和自然的色调，清冷干净的画面，微弱的胶片颗粒感，色彩饱和度适中，温暖怀旧，富士胶片质感，高清原画品质，Japanese retro film style, soft and warm vintage colors, natural lighting, analog film grain, high quality';
-        size = '2K';
       } else if (style === 'polaroid') {
         prompt = '将参考图重新渲染成经典的宝利来拍立得相机照片风格，1:1正方形构图，复古怀旧色调，画面四周带有拍立得经典的标志性宽大白色实体卡纸相框边框（底部相框较宽），富士胶片质感，温暖复古，Classic Polaroid photo with a signature white border frame, 1:1 square crop, vintage analog film look';
         size = '1024*1024';
