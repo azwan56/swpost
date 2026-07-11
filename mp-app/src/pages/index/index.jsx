@@ -3,6 +3,7 @@ import Taro, { useLoad } from '@tarojs/taro';
 import { View, Text, Image, Button, Input, Textarea, ScrollView, Canvas } from '@tarojs/components';
 import './index.css';
 import logoImg from '../../assets/logo.jpg';
+import piexif from 'piexifjs';
 
 // Helper: Resize and compress base64 image (Web only)
 const resizeImageBase64 = (dataUrl, maxDim = 1600, quality = 0.85) => {
@@ -143,6 +144,67 @@ const saveOrDownloadImage = async (base64, activeIdx, activeStyle) => {
   }
 };
 
+// Helper: Extract Date, Time, Location, Device from EXIF data on client side using piexifjs
+const extractExifClient = (base64Image) => {
+  if (!base64Image) return null;
+  try {
+    const exifObj = piexif.load(base64Image);
+    
+    // Extract DateTime
+    let dateTime = null;
+    if (exifObj["Exif"] && exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal]) {
+      dateTime = exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal];
+    } else if (exifObj["0th"] && exifObj["0th"][piexif.ImageIFD.DateTime]) {
+      dateTime = exifObj["0th"][piexif.ImageIFD.DateTime];
+    }
+    
+    // Extract Device
+    let device = null;
+    const make = exifObj["0th"] && exifObj["0th"][piexif.ImageIFD.Make];
+    const model = exifObj["0th"] && exifObj["0th"][piexif.ImageIFD.Model];
+    if (model) {
+      device = model;
+    } else if (make) {
+      device = make;
+    }
+    
+    // Extract GPS Coordinates
+    let gps = null;
+    if (exifObj["GPS"]) {
+      const lat = exifObj["GPS"][piexif.GPSIFD.GPSLatitude];
+      const latRef = exifObj["GPS"][piexif.GPSIFD.GPSLatitudeRef];
+      const lon = exifObj["GPS"][piexif.GPSIFD.GPSLongitude];
+      const lonRef = exifObj["GPS"][piexif.GPSIFD.GPSLongitudeRef];
+      
+      if (lat && lon && lat.length >= 3 && lon.length >= 3) {
+        const convertDMS = (dms) => {
+          const d = dms[0][0] / dms[0][1];
+          const m = dms[1][0] / dms[1][1];
+          const s = dms[2][0] / dms[2][1];
+          return d + m / 60 + s / 3600;
+        };
+        const latVal = convertDMS(lat);
+        const lonVal = convertDMS(lon);
+        gps = {
+          lat: latVal.toString(),
+          lon: lonVal.toString(),
+          latRef: latRef || 'N',
+          lonRef: lonRef || 'E'
+        };
+      }
+    }
+    
+    return {
+      dateTime,
+      gps,
+      device
+    };
+  } catch (err) {
+    console.log('[EXIF Client Extract] No EXIF found or failed to parse:', err.message);
+    return null;
+  }
+};
+
 export default function Index() {
   // Define backend API endpoint. 
   // IMPORTANT: For WeChat Mini Program local debugging on real phones, 
@@ -172,6 +234,7 @@ export default function Index() {
   const [isGeneratingCopy, setIsGeneratingCopy] = useState(false);
   const [aiTitle, setAiTitle] = useState('');
   const [aiBody, setAiBody] = useState('');
+  const [cachedVisualDescriptions, setCachedVisualDescriptions] = useState(null);
   
   // General UI States
   const [showWelcome, setShowWelcome] = useState(true);
@@ -205,11 +268,13 @@ export default function Index() {
           try {
             const id = Math.random().toString(36).substring(2, 9);
             const base64Src = await readImageAsBase64(tempFile);
+            const exif = extractExifClient(base64Src);
             newImages.push({
               id,
               src: base64Src,
               styledSrc: null,
-              activeStyle: null
+              activeStyle: null,
+              exif
             });
           } catch (err) {
             console.error('Failed to read image:', err);
@@ -234,6 +299,7 @@ export default function Index() {
     e.stopPropagation();
     const filtered = uploadedImages.filter(img => img.id !== id);
     setUploadedImages(filtered);
+    setCachedVisualDescriptions(null); // Clear description cache
     
     if (activeIdx >= filtered.length) {
       setActiveIdx(Math.max(0, filtered.length - 1));
@@ -247,6 +313,7 @@ export default function Index() {
     setGeneratedCopyOptions([]);
     setAiTitle('');
     setAiBody('');
+    setCachedVisualDescriptions(null); // Clear description cache
   };
 
   // Call Doubao style transfer model via backend
@@ -338,7 +405,9 @@ export default function Index() {
       data: {
         style: selectedStyle,
         keywords: copyKeywords,
-        images: uploadedImages.map(img => img.src)
+        images: uploadedImages.map(img => img.src),
+        exifList: uploadedImages.map(img => img.exif),
+        visualDescriptions: cachedVisualDescriptions
       },
       success: (res) => {
         setIsGeneratingCopy(false);
@@ -349,6 +418,10 @@ export default function Index() {
         }
 
         const result = res.data || {};
+        if (result.visualDescriptions) {
+          setCachedVisualDescriptions(result.visualDescriptions);
+        }
+
         if (result.options && result.options.length > 0) {
           setGeneratedCopyOptions(result.options);
           setActiveCopyOptionIdx(0);
