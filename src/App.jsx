@@ -47,6 +47,67 @@ const resizeImageBase64 = (dataUrl, maxDim = 1600, quality = 0.85) => {
   });
 };
 
+// Helper: Extract Date, Time, Location, Device from EXIF data on client side using piexifjs
+const extractExifClient = (base64Image) => {
+  if (!base64Image) return null;
+  try {
+    const exifObj = piexif.load(base64Image);
+    
+    // Extract DateTime
+    let dateTime = null;
+    if (exifObj["Exif"] && exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal]) {
+      dateTime = exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal];
+    } else if (exifObj["0th"] && exifObj["0th"][piexif.ImageIFD.DateTime]) {
+      dateTime = exifObj["0th"][piexif.ImageIFD.DateTime];
+    }
+    
+    // Extract Device
+    let device = null;
+    const make = exifObj["0th"] && exifObj["0th"][piexif.ImageIFD.Make];
+    const model = exifObj["0th"] && exifObj["0th"][piexif.ImageIFD.Model];
+    if (model) {
+      device = model;
+    } else if (make) {
+      device = make;
+    }
+    
+    // Extract GPS Coordinates
+    let gps = null;
+    if (exifObj["GPS"]) {
+      const lat = exifObj["GPS"][piexif.GPSIFD.GPSLatitude];
+      const latRef = exifObj["GPS"][piexif.GPSIFD.GPSLatitudeRef];
+      const lon = exifObj["GPS"][piexif.GPSIFD.GPSLongitude];
+      const lonRef = exifObj["GPS"][piexif.GPSIFD.GPSLongitudeRef];
+      
+      if (lat && lon && lat.length >= 3 && lon.length >= 3) {
+        const convertDMS = (dms) => {
+          const d = dms[0][0] / dms[0][1];
+          const m = dms[1][0] / dms[1][1];
+          const s = dms[2][0] / dms[2][1];
+          return d + m / 60 + s / 3600;
+        };
+        const latVal = convertDMS(lat);
+        const lonVal = convertDMS(lon);
+        gps = {
+          lat: latVal.toString(),
+          lon: lonVal.toString(),
+          latRef: latRef || 'N',
+          lonRef: lonRef || 'E'
+        };
+      }
+    }
+    
+    return {
+      dateTime,
+      gps,
+      device
+    };
+  } catch (err) {
+    console.log('[EXIF Client Extract] No EXIF found or failed to parse:', err.message);
+    return null;
+  }
+};
+
 function App() {
   // API base path — adapts automatically to Vite's base setting
   const API_BASE = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
@@ -110,6 +171,8 @@ function App() {
         tempImg.src = src;
       });
 
+      const exif = extractExifClient(src);
+
       newImages.push({
         id,
         file,
@@ -117,7 +180,8 @@ function App() {
         styledSrc: null,
         activeStyle: null,
         width: dimensions.w,
-        height: dimensions.h
+        height: dimensions.h,
+        exif
       });
     }
 
@@ -202,7 +266,7 @@ function App() {
         const result = await res.json();
         
         // Draw premium Leica-style visual watermark on the canvas before updating styledSrc
-        const watermarkedImage = await applyVisualWatermark(result.image, styleName, result.model, result.exif);
+        const watermarkedImage = await applyVisualWatermark(result.image, styleName, result.model, targetImage.exif);
         
         // Update the image with the styled result
         setUploadedImages(prev => prev.map((img) => {
@@ -261,9 +325,8 @@ function App() {
         })
       );
 
-      // Send ORIGINAL un-compressed images separately for EXIF extraction
-      // (Canvas compression strips EXIF, so we must send originals for date/GPS/device)
-      const originalImagesForExif = uploadedImages.map(img => img.src);
+      // Send the pre-extracted EXIF data directly to the server (lightweight JSON list)
+      const exifDataList = uploadedImages.map(img => img.exif);
 
       const res = await fetch(`${API_BASE}/api/ai/generate-copy`, {
         method: 'POST',
@@ -274,7 +337,7 @@ function App() {
           style: selectedStyle,
           keywords: copyKeywords,
           images: compressedImagesForCopy,
-          originalImages: originalImagesForExif
+          exifList: exifDataList
         })
       });
 
@@ -343,6 +406,261 @@ function App() {
       result[i] = sentences.slice(start, end).join('，');
     }
     return result;
+  };
+
+  // Helper: Export full multi-modal analysis report (copywriting + original images + EXIF details) as a beautiful card image
+  const exportReportCard = async () => {
+    if (uploadedImages.length === 0) return;
+    const opt = generatedCopyOptions[activeCopyOptionIdx];
+    if (!opt) {
+      alert('请先生成 AI 文案后再导出报告卡片！');
+      return;
+    }
+
+    setIsGeneratingVideo(true);
+    setVideoProgress('正在生成分析报告图片...');
+
+    try {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const width = 800;
+
+      // Load all uploaded/styled images
+      const loadedImages = await Promise.all(uploadedImages.map(img => {
+        return new Promise((resolve) => {
+          const imageObj = new Image();
+          imageObj.crossOrigin = 'anonymous';
+          imageObj.onload = () => resolve(imageObj);
+          imageObj.onerror = () => resolve(null);
+          imageObj.src = img.styledSrc || img.src;
+        });
+      }));
+
+      const validImages = loadedImages.filter(Boolean);
+
+      // Determine heights
+      let imagesHeight = 0;
+      if (validImages.length > 0) {
+        imagesHeight = validImages.length <= 2 ? 300 : 580;
+      }
+      
+      const exifHeight = 120;
+      const contentWidth = width - 80; // 40px padding on each side
+
+      // Measure copywriting body wrapping height
+      ctx.font = '16px "Inter", sans-serif';
+      const bodyLines = (aiBody || '').split('\n');
+      let bodyLinesCount = 0;
+      bodyLines.forEach(lineText => {
+        const words = Array.from(lineText);
+        let currentLine = '';
+        bodyLinesCount++;
+        for (let i = 0; i < words.length; i++) {
+          let testLine = currentLine + words[i];
+          let metrics = ctx.measureText(testLine);
+          if (metrics.width > contentWidth && i > 0) {
+            bodyLinesCount++;
+            currentLine = words[i];
+          } else {
+            currentLine = testLine;
+          }
+        }
+      });
+      const bodyHeight = bodyLinesCount * 26 + 30;
+
+      const titleHeight = 45;
+      const footerHeight = 80;
+      const totalHeight = 120 + imagesHeight + exifHeight + titleHeight + bodyHeight + footerHeight + 40;
+
+      canvas.width = width;
+      canvas.height = totalHeight;
+
+      // 1. Draw Background
+      ctx.fillStyle = '#FAF9F6';
+      ctx.fillRect(0, 0, width, totalHeight);
+
+      // 2. Draw outer borders
+      ctx.strokeStyle = '#D1CFC7';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(20, 20, width - 40, totalHeight - 40);
+      ctx.strokeRect(24, 24, width - 48, totalHeight - 48);
+
+      // 3. Draw Header
+      ctx.fillStyle = '#1A1A1A';
+      ctx.textAlign = 'left';
+      ctx.font = 'bold 26px sans-serif';
+      ctx.fillText('SHANTIE AI', 40, 75);
+
+      ctx.fillStyle = '#6366F1';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.fillText('· 智能图文分析报告 ·', 210, 70);
+
+      ctx.fillStyle = '#666666';
+      ctx.font = '13px sans-serif';
+      ctx.textAlign = 'right';
+      const nowStr = new Date().toLocaleString('zh-CN', { hour12: false });
+      ctx.fillText(nowStr, width - 40, 72);
+
+      // Divider
+      ctx.strokeStyle = '#E2E0D9';
+      ctx.beginPath();
+      ctx.moveTo(40, 100);
+      ctx.lineTo(width - 40, 100);
+      ctx.stroke();
+
+      let currentY = 120;
+
+      // 4. Draw Image Grid
+      if (validImages.length > 0) {
+        const gap = 15;
+        const drawCoverImage = (context, img, x, y, w, h) => {
+          context.save();
+          context.beginPath();
+          context.roundRect(x, y, w, h, 8);
+          context.clip();
+
+          const imgRatio = img.width / img.height;
+          const targetRatio = w / h;
+          let sx, sy, sWidth, sHeight;
+
+          if (imgRatio > targetRatio) {
+            sHeight = img.height;
+            sWidth = img.height * targetRatio;
+            sx = (img.width - sWidth) / 2;
+            sy = 0;
+          } else {
+            sWidth = img.width;
+            sHeight = img.width / targetRatio;
+            sx = 0;
+            sy = (img.height - sHeight) / 2;
+          }
+
+          context.drawImage(img, sx, sy, sWidth, sHeight, x, y, w, h);
+          context.restore();
+        };
+
+        if (validImages.length === 1) {
+          drawCoverImage(ctx, validImages[0], 40, currentY, 720, 270);
+          currentY += 270 + 20;
+        } else if (validImages.length === 2) {
+          const imgW = 350;
+          const imgH = 260;
+          drawCoverImage(ctx, validImages[0], 40, currentY, imgW, imgH);
+          drawCoverImage(ctx, validImages[1], 40 + imgW + gap, currentY, imgW, imgH);
+          currentY += imgH + 20;
+        } else {
+          const imgW = 350;
+          const imgH = 260;
+          // Row 1
+          drawCoverImage(ctx, validImages[0], 40, currentY, imgW, imgH);
+          if (validImages[1]) drawCoverImage(ctx, validImages[1], 40 + imgW + gap, currentY, imgW, imgH);
+          currentY += imgH + gap;
+          // Row 2
+          if (validImages[2]) drawCoverImage(ctx, validImages[2], 40, currentY, imgW, imgH);
+          if (validImages[3]) drawCoverImage(ctx, validImages[3], 40 + imgW + gap, currentY, imgW, imgH);
+          currentY += imgH + 20;
+        }
+      }
+
+      // 5. Draw EXIF Meta Information Box
+      ctx.fillStyle = '#EAE8E4';
+      ctx.beginPath();
+      ctx.roundRect(40, currentY, width - 80, 100, 6);
+      ctx.fill();
+
+      ctx.fillStyle = '#1A1A1A';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('📸 照片 EXIF 元数据分析', 60, currentY + 30);
+
+      ctx.fillStyle = '#444444';
+      ctx.font = '13px sans-serif';
+
+      const activeImage = uploadedImages[activeIdx];
+      const activeExif = activeImage?.exif;
+      const deviceName = activeExif?.device || '未知设备 (无EXIF元数据)';
+      const dateText = activeExif?.dateTime || '未知时间 (无EXIF元数据)';
+      let gpsText = '无位置信息';
+      if (activeExif?.gps) {
+        const lat = parseFloat(activeExif.gps.lat) || 0;
+        const lon = parseFloat(activeExif.gps.lon) || 0;
+        gpsText = `${lat.toFixed(4)}° ${activeExif.gps.latRef || 'N'}, ${lon.toFixed(4)}° ${activeExif.gps.lonRef || 'E'}`;
+      }
+
+      ctx.fillText(`拍摄设备: ${deviceName}`, 60, currentY + 55);
+      ctx.fillText(`拍摄日期: ${dateText}`, 60, currentY + 75);
+      ctx.fillText(`拍摄地点: ${gpsText}`, 400, currentY + 55);
+      ctx.fillText(`分析图集: 共包含 ${uploadedImages.length} 张照片的组合分析`, 400, currentY + 75);
+
+      currentY += 120;
+
+      // 6. Draw Copywriting Block
+      ctx.fillStyle = '#6366F1';
+      ctx.fillRect(40, currentY, 4, bodyHeight + titleHeight);
+
+      // Title
+      ctx.fillStyle = '#1A1A1A';
+      ctx.font = 'bold 20px sans-serif';
+      ctx.fillText(`【${aiTitle || '未命名标题'}】`, 60, currentY + 25);
+
+      // Wrapped Body Text
+      ctx.fillStyle = '#2D2D2D';
+      ctx.font = '16px "Inter", sans-serif';
+      
+      const drawWrappedText = (context, text, x, y, maxWidth, lineHeight) => {
+        const lines = text.split('\n');
+        let tempY = y;
+        lines.forEach(lineText => {
+          const chars = Array.from(lineText);
+          let currentLine = '';
+          for (let n = 0; n < chars.length; n++) {
+            let testLine = currentLine + chars[n];
+            let metrics = context.measureText(testLine);
+            if (metrics.width > maxWidth && n > 0) {
+              context.fillText(currentLine, x, tempY);
+              currentLine = chars[n];
+              tempY += lineHeight;
+            } else {
+              currentLine = testLine;
+            }
+          }
+          context.fillText(currentLine, x, tempY);
+          tempY += lineHeight;
+        });
+      };
+
+      drawWrappedText(ctx, aiBody || '', 60, currentY + 60, contentWidth - 30, 26);
+      currentY += bodyHeight + titleHeight;
+
+      // 7. Draw Footer
+      ctx.strokeStyle = '#E2E0D9';
+      ctx.beginPath();
+      ctx.moveTo(40, currentY);
+      ctx.lineTo(width - 40, currentY);
+      ctx.stroke();
+
+      currentY += 30;
+
+      ctx.fillStyle = '#888888';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('本报告由 闪贴AI 平台多模态智能服务分析生成', 40, currentY);
+
+      ctx.textAlign = 'right';
+      ctx.fillText('你拍照 · 我生文 · 记录美好生活', width - 40, currentY);
+
+      // Trigger download
+      const link = document.createElement('a');
+      link.href = canvas.toDataURL('image/jpeg', 0.95);
+      link.download = `shantie-ai-report-${Date.now()}.jpg`;
+      link.click();
+    } catch (err) {
+      console.error('Failed to export report card:', err);
+      alert('导出报告卡片失败，请重试');
+    } finally {
+      setIsGeneratingVideo(false);
+      setVideoProgress('');
+    }
   };
 
   // Helper: Draw visual photography watermark (Leica-style white border at bottom)
@@ -1095,6 +1413,13 @@ function App() {
                           }}
                         >
                           📋 复制文案
+                        </button>
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: '0.2rem 0.5rem', fontSize: '0.7rem' }}
+                          onClick={exportReportCard}
+                        >
+                          📸 导出报告卡片
                         </button>
                         <button
                           className="btn"
