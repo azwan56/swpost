@@ -526,29 +526,33 @@ ${exifInfos.join('\n')}
 
     // Analyze image content using Qwen-VL-Plus (multimodal analysis for atmosphere, people, text, objects)
     let visualGuidance = '';
-    if (images && images.length > 0 && dashscopeApiKey) {
-      console.log(`[Copywriter] Analyzing ${images.length} images using Qwen-VL in parallel...`);
+    let combinedDescriptions = req.body.visualDescriptions || '';
+
+    if (!combinedDescriptions && images && images.length > 0 && dashscopeApiKey) {
+      const imagesToAnalyze = images.slice(0, 2);
+      console.log(`[Copywriter] Analyzing ${imagesToAnalyze.length} (capped at 2) images using Qwen-VL in parallel...`);
       try {
         const descriptions = await Promise.all(
-          images.map((img, index) => 
+          imagesToAnalyze.map((img, index) => 
             analyzeImageMultimodal(img, dashscopeApiKey)
               .then(desc => desc ? `照片 ${index + 1} 画面细节描述：${desc}` : null)
           )
         );
         
-        const combinedDescriptions = descriptions.filter(desc => desc !== null).join('\n');
-        if (combinedDescriptions) {
-          visualGuidance = `
+        combinedDescriptions = descriptions.filter(desc => desc !== null).join('\n');
+      } catch (err) {
+        console.warn('[Copywriter] Multi-image analysis error:', err.message);
+      }
+    }
+
+    if (combinedDescriptions) {
+      visualGuidance = `
 重要提示（结合这组照片的整体视觉细节与氛围进行创作）：
-我们对您上传的这组照片（共 ${images.length} 张）分别进行了多模态视觉分析，各张照片的细节描述如下：
+我们对您上传的这组照片分别进行了多模态视觉分析，各张照片的细节描述如下：
 ${combinedDescriptions}
 
 请务必将这几张照片所描绘的画面内容（如具体餐食、商品、运动场景、背景物件等）、画面中的文字招牌/路牌、画面中的人物状态与神态，整合成一个连贯、真实的故事或分享内容。不要只描述其中一张，要巧妙融入所有照片反映的完整场景与体验细节，使图文高度契合、极具种草感染力。
 `;
-        }
-      } catch (err) {
-        console.warn('[Copywriter] Multi-image analysis error:', err.message);
-      }
     }
 
     console.log(`Generating Xiaohongshu copy for style [${style}] and keywords [${keywords}] using Volcano...`);
@@ -611,7 +615,10 @@ ${visualGuidance}
 
     try {
       const parsed = JSON.parse(text);
-      res.json(parsed);
+      res.json({
+        options: parsed.options || [],
+        visualDescriptions: combinedDescriptions
+      });
     } catch (parseErr) {
       console.warn('JSON parsing failed, returning raw text. Text was:', text);
       res.json({
@@ -622,7 +629,8 @@ ${visualGuidance}
             body: text,
             tags: '#日常碎片 #AI生活记录'
           }
-        ]
+        ],
+        visualDescriptions: combinedDescriptions
       });
     }
   } catch (error) {

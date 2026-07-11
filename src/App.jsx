@@ -127,8 +127,7 @@ function App() {
   const [isGeneratingCopy, setIsGeneratingCopy] = useState(false);
   const [aiTitle, setAiTitle] = useState('');
   const [aiBody, setAiBody] = useState('');
-  
-
+  const [cachedVisualDescriptions, setCachedVisualDescriptions] = useState(null);
 
   // General UI States
   const [isLoading, setIsLoading] = useState(false);
@@ -144,6 +143,7 @@ function App() {
     if (files.length === 0) return;
 
     setErrorMsg('');
+    setCachedVisualDescriptions(null); // Clear description cache on new upload
     const availableSlots = 4 - uploadedImages.length;
     if (availableSlots <= 0) {
       setErrorMsg('最多支持上传 4 张图片！');
@@ -191,6 +191,7 @@ function App() {
     e.stopPropagation();
     const filtered = uploadedImages.filter(img => img.id !== id);
     setUploadedImages(filtered);
+    setCachedVisualDescriptions(null); // Clear description cache
     
     if (activeIdx >= filtered.length) {
       setActiveIdx(Math.max(0, filtered.length - 1));
@@ -204,6 +205,7 @@ function App() {
     setGeneratedCopyOptions([]);
     setAiTitle('');
     setAiBody('');
+    setCachedVisualDescriptions(null); // Clear description cache
   };
 
   // Call Doubao style transfer model via backend (supporting multi-image parallel processing)
@@ -224,8 +226,7 @@ function App() {
     try {
       await Promise.all(targets.map(async (targetImage) => {
         // Use styledSrc as input if styled already, or fallback to original src
-        const inputSrc = targetImage.styledSrc || targetImage.src;
-        const compressedImage = await resizeImageBase64(inputSrc, 2048, 0.9);
+        const compressedImage = await resizeImageBase64(inputSrc, 1024, 0.85);
 
         // Measure dimensions of original image to send to server for aspect ratio preservation
         let originalWidth = targetImage.width;
@@ -333,7 +334,8 @@ function App() {
           style: selectedStyle,
           keywords: copyKeywords,
           images: compressedImagesForCopy,
-          exifList: exifDataList
+          exifList: exifDataList,
+          visualDescriptions: cachedVisualDescriptions
         })
       });
 
@@ -343,6 +345,10 @@ function App() {
       }
 
       const result = await res.json();
+      if (result.visualDescriptions) {
+        setCachedVisualDescriptions(result.visualDescriptions);
+      }
+
       if (result.options && result.options.length > 0) {
         setGeneratedCopyOptions(result.options);
         setActiveCopyOptionIdx(0);
