@@ -128,11 +128,7 @@ function App() {
   const [aiTitle, setAiTitle] = useState('');
   const [aiBody, setAiBody] = useState('');
   
-  // Video States
-  const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
-  const [videoUrl, setVideoUrl] = useState(null);
-  const [showVideoModal, setShowVideoModal] = useState(false);
-  const [videoProgress, setVideoProgress] = useState('');
+
 
   // General UI States
   const [isLoading, setIsLoading] = useState(false);
@@ -377,37 +373,6 @@ function App() {
   };
 
   // Helper: Clean text from emojis, formatting, and hashtags for a clean TTS read
-  const cleanTextForTTS = (rawText) => {
-    if (!rawText) return '';
-    // Remove hashtags (e.g. #tag)
-    let text = rawText.replace(/#[a-zA-Z0-9_\u4e00-\u9fa5]+/g, '');
-    // Remove brackets like 【爆款标题】
-    text = text.replace(/【[^】]+】/g, '');
-    // Remove common emojis
-    text = text.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|\u200D|[\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDC00-\uDFFF]/g, '');
-    // Clean spaces and special symbols
-    text = text.replace(/[\s\r\n]+/g, '，').trim();
-    // Dedup commas
-    text = text.replace(/，+/g, '，').replace(/^，|，$/g, '');
-    return text;
-  };
-
-  // Helper: Split copy text into count buckets (subtitles) matching each slide duration
-  const splitTextIntoSegments = (text, count) => {
-    if (!text) return Array(count).fill('');
-    const sentences = text.split(/[，。！？；\n\r]/).map(s => s.trim()).filter(s => s.length > 0);
-    if (sentences.length === 0) return Array(count).fill('');
-    
-    const result = Array(count).fill('');
-    const sentencesPerBucket = Math.ceil(sentences.length / count);
-    for (let i = 0; i < count; i++) {
-      const start = i * sentencesPerBucket;
-      const end = Math.min(start + sentencesPerBucket, sentences.length);
-      result[i] = sentences.slice(start, end).join('，');
-    }
-    return result;
-  };
-
   // Helper: Export full multi-modal analysis report (copywriting + original images + EXIF details) as a beautiful card image
   const exportReportCard = async () => {
     if (uploadedImages.length === 0) return;
@@ -417,8 +382,8 @@ function App() {
       return;
     }
 
-    setIsGeneratingVideo(true);
-    setVideoProgress('正在生成分析报告图片...');
+    setIsLoading(true);
+    setAiOperationName('正在生成分析报告图片...');
 
     try {
       const canvas = document.createElement('canvas');
@@ -664,8 +629,8 @@ function App() {
       console.error('Failed to export report card:', err);
       alert('导出报告卡片失败，请重试');
     } finally {
-      setIsGeneratingVideo(false);
-      setVideoProgress('');
+      setIsLoading(false);
+      setAiOperationName('');
     }
   };
 
@@ -815,311 +780,7 @@ function App() {
     });
   };
 
-  // Main Canvas & Web Audio MediaRecorder short video generator
-  const generateComicVideo = async () => {
-    if (uploadedImages.length === 0) {
-      setErrorMsg('请先上传至少一张图片进行漫画重绘！');
-      return;
-    }
-    
-    setIsGeneratingVideo(true);
-    setVideoProgress('正在合成语音配音...');
-    setErrorMsg('');
 
-    let ttsAudioSource = null;
-    let bgmAudioSource = null;
-    let audioCtx = null;
-    let animationFrameId = null;
-
-    try {
-      // 1. Get styled images list
-      const imagesToUse = uploadedImages.map(img => img.styledSrc || img.src);
-      const textToSpeak = (aiTitle ? `${aiTitle}，` : '') + aiBody;
-      const cleanedText = cleanTextForTTS(textToSpeak);
-
-      // 2. Fetch TTS audio stream from backend
-      const ttsRes = await fetch(`${API_BASE}/api/ai/tts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: cleanedText, voice: 'longanhuan' })
-      });
-
-      if (!ttsRes.ok) {
-        let errMsg = '获取语音配音失败，请检查网络或后端配置';
-        try {
-          const errData = await ttsRes.json();
-          if (errData && errData.error) {
-            errMsg = errData.error;
-          }
-        } catch (_) {}
-        throw new Error(errMsg);
-      }
-
-      const audioBlob = await ttsRes.blob();
-      setVideoProgress('正在载入配音与背景音乐...');
-
-      // 3. Setup AudioContext and decode TTS Audio (Safe legacy Safari API compatibility)
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      if (audioCtx.state === 'suspended') {
-        await audioCtx.resume();
-      }
-
-      const audioArrayBuffer = await audioBlob.arrayBuffer();
-      
-      // Safe decodeAudioData promise wrapper for old iOS/Safari devices
-      const decodeAudioDataSafe = (context, buffer) => {
-        return new Promise((resolve, reject) => {
-          try {
-            const p = context.decodeAudioData(buffer, resolve, reject);
-            if (p && typeof p.then === 'function') {
-              p.then(resolve).catch(reject);
-            }
-          } catch (e) {
-            reject(e);
-          }
-        });
-      };
-
-      const ttsAudioBuffer = await decodeAudioDataSafe(audioCtx, audioArrayBuffer);
-      const totalDuration = ttsAudioBuffer.duration; // in seconds
-
-      // 4. Fetch and decode BGM (with safe fallback for remote HTML/SPA routing)
-      let bgmAudioBuffer = null;
-      try {
-        const bgmRes = await fetch('/bgm.mp3');
-        if (bgmRes.ok) {
-          const contentType = bgmRes.headers.get('content-type') || '';
-          if (!contentType.includes('text/html')) {
-            const bgmBlob = await bgmRes.blob();
-            const bgmArrayBuffer = await bgmBlob.arrayBuffer();
-            bgmAudioBuffer = await decodeAudioDataSafe(audioCtx, bgmArrayBuffer);
-          } else {
-            console.warn('[VideoGen] bgm.mp3 returned text/html (SPA fallback), skipping BGM.');
-          }
-        } else {
-          console.warn('[VideoGen] bgm.mp3 returned HTTP ' + bgmRes.status + ', skipping BGM.');
-        }
-      } catch (bgmErr) {
-        console.warn('[VideoGen] Background music failed to load or decode, continuing without BGM:', bgmErr);
-      }
-
-      // 5. Load HTML Images
-      setVideoProgress('正在载入重绘图片...');
-      const loadedImages = await Promise.all(
-        imagesToUse.map((src) => {
-          return new Promise((resolve, reject) => {
-            const img = new Image();
-            if (src && !src.startsWith('data:')) {
-              img.crossOrigin = 'anonymous';
-            }
-            img.onload = () => resolve(img);
-            img.onerror = () => reject(new Error('部分图片载入失败'));
-            img.src = src;
-          });
-        })
-      );
-
-      // 6. Initialize Audio Mixing Nodes
-      ttsAudioSource = audioCtx.createBufferSource();
-      ttsAudioSource.buffer = ttsAudioBuffer;
-
-      const audioDest = audioCtx.createMediaStreamDestination();
-
-      // Connect TTS voiceover nodes
-      ttsAudioSource.connect(audioDest);
-      ttsAudioSource.connect(audioCtx.destination);
-
-      // Connect BGM nodes only if successfully loaded and decoded
-      if (bgmAudioBuffer) {
-        bgmAudioSource = audioCtx.createBufferSource();
-        bgmAudioSource.buffer = bgmAudioBuffer;
-        bgmAudioSource.loop = true;
-
-        const bgmGain = audioCtx.createGain();
-        bgmGain.gain.value = 0.15; // Set BGM volume to 15%
-
-        bgmAudioSource.connect(bgmGain);
-        bgmGain.connect(audioDest);
-        bgmGain.connect(audioCtx.destination);
-      }
-
-      // 7. Setup Canvas Rendering
-      setVideoProgress('正在合成与录制视频中...');
-      const canvas = document.createElement('canvas');
-      canvas.width = 720;
-      canvas.height = 1280; // 9:16 portrait
-      const ctx = canvas.getContext('2d');
-
-      const slideDuration = totalDuration / loadedImages.length;
-      const subtitleSegments = splitTextIntoSegments(aiBody, loadedImages.length);
-
-      // 8. Capture streams and configure MediaRecorder (Safari cross-browser support)
-      const captureStreamFn = canvas.captureStream || canvas.webkitCaptureStream;
-      if (!captureStreamFn) {
-        throw new Error('您的浏览器不支持 Canvas 视频流采集，请更换现代浏览器（Chrome/Safari/Edge）后重试。');
-      }
-      const canvasStream = captureStreamFn.call(canvas, 30); // 30 FPS
-      const mixedStream = new MediaStream([
-        ...canvasStream.getVideoTracks(),
-        ...audioDest.stream.getAudioTracks()
-      ]);
-
-      // Detect supported MediaRecorder formats (Safari primarily supports video/mp4)
-      let selectedMime = 'video/webm';
-      const candidateTypes = [
-        'video/mp4;codecs=h264',
-        'video/mp4',
-        'video/webm;codecs=h264',
-        'video/webm;codecs=vp9',
-        'video/webm'
-      ];
-      for (const type of candidateTypes) {
-        if (MediaRecorder.isTypeSupported(type)) {
-          selectedMime = type;
-          break;
-        }
-      }
-      console.log('[VideoGen] Configured MediaRecorder MIME type:', selectedMime);
-
-      const mediaRecorder = new MediaRecorder(mixedStream, {
-        mimeType: selectedMime,
-        videoBitsPerSecond: 2500000 // 2.5 Mbps
-      });
-
-      const videoChunks = [];
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) videoChunks.push(e.data);
-      };
-
-      // Create a promise to wait for recording completion
-      const recordingPromise = new Promise((resolve) => {
-        mediaRecorder.onstop = () => {
-          const videoBlob = new Blob(videoChunks, { type: selectedMime.split(';')[0] });
-          const url = URL.createObjectURL(videoBlob);
-          resolve(url);
-        };
-      });
-
-      // 9. Start synthesis loop and audio sources
-      mediaRecorder.start();
-      ttsAudioSource.start(0);
-      if (bgmAudioSource) {
-        bgmAudioSource.start(0);
-      }
-
-      const startTime = audioCtx.currentTime;
-
-      // Subtitle wrap helper
-      const drawWrappedText = (context, text, x, y, maxWidth, lineHeight) => {
-        const words = text.split('');
-        let line = '';
-        let testLine = '';
-        let currentY = y;
-
-        for (let n = 0; n < words.length; n++) {
-          testLine = line + words[n];
-          const metrics = context.measureText(testLine);
-          const testWidth = metrics.width;
-          if (testWidth > maxWidth && n > 0) {
-            context.fillText(line, x, currentY);
-            line = words[n];
-            currentY += lineHeight;
-          } else {
-            line = testLine;
-          }
-        }
-        context.fillText(line, x, currentY);
-      };
-
-      // Synthesis frame render
-      const drawFrame = () => {
-        const elapsed = audioCtx.currentTime - startTime;
-        
-        if (elapsed >= totalDuration) {
-          // Audio synthesis finished, stop everything
-          mediaRecorder.stop();
-          ttsAudioSource.stop();
-          if (bgmAudioSource) {
-            bgmAudioSource.stop();
-          }
-          audioCtx.close();
-          return;
-        }
-
-        // Determine current slide
-        const currentIdx = Math.min(Math.floor(elapsed / slideDuration), loadedImages.length - 1);
-        const currentImg = loadedImages[currentIdx];
-        const progressInSlide = (elapsed % slideDuration) / slideDuration;
-
-        // Draw and zoom/pan image (Ken Burns Effect)
-        ctx.fillStyle = '#0f0f12';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        // Aspect ratio cover calculation
-        const scale = 1.05 + progressInSlide * 0.12; // Zoom-in from 1.05 to 1.17
-        
-        const canvasRatio = canvas.width / canvas.height;
-        const imgRatio = currentImg.width / currentImg.height;
-        let drawWidth, drawHeight;
-
-        if (imgRatio > canvasRatio) {
-          drawHeight = canvas.height * scale;
-          drawWidth = drawHeight * imgRatio;
-        } else {
-          drawWidth = canvas.width * scale;
-          drawHeight = drawWidth / imgRatio;
-        }
-
-        // Pan slightly downwards
-        const xOffset = (canvas.width - drawWidth) / 2;
-        const yOffset = (canvas.height - drawHeight) / 2 + (progressInSlide * 30); // 30px pan
-
-        ctx.drawImage(currentImg, xOffset, yOffset, drawWidth, drawHeight);
-
-        // Subtitle card background
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
-        ctx.fillRect(0, canvas.height - 240, canvas.width, 240);
-
-        // Title text rendering
-        ctx.font = 'bold 36px sans-serif';
-        ctx.fillStyle = '#ff3366'; // Pinkish color for title
-        ctx.textAlign = 'center';
-        ctx.fillText(aiTitle || '你拍照我生文', canvas.width / 2, canvas.height - 180);
-
-        // Caption text rendering
-        ctx.font = '28px sans-serif';
-        ctx.fillStyle = '#ffffff';
-        const currentSubtitle = subtitleSegments[currentIdx] || '';
-        drawWrappedText(ctx, currentSubtitle, canvas.width / 2, canvas.height - 120, canvas.width - 100, 38);
-
-        // Loop next frame
-        animationFrameId = requestAnimationFrame(drawFrame);
-      };
-
-      // Start drawing frames
-      drawFrame();
-
-      // Wait for output Blob URL
-      const finalVideoUrl = await recordingPromise;
-      setVideoUrl(finalVideoUrl);
-      setShowVideoModal(true);
-
-    } catch (err) {
-      console.error('[VideoGen] Error generating video:', err);
-      setErrorMsg(err.message || '视频生成出错，请重试');
-      
-      // Cleanup audio context if created
-      if (audioCtx) {
-        try { audioCtx.close(); } catch (_) {}
-      }
-    } finally {
-      setIsGeneratingVideo(false);
-      setVideoProgress('');
-      if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
-      }
-    }
-  };
 
   // Download the currently displayed styled (or original) active image
   const downloadActiveImage = () => {
@@ -1467,21 +1128,7 @@ function App() {
                         >
                           📸 导出报告卡片
                         </button>
-                        <button
-                          className="btn"
-                          disabled={isGeneratingVideo}
-                          style={{ 
-                            padding: '0.2rem 0.5rem', 
-                            fontSize: '0.7rem', 
-                            background: 'linear-gradient(135deg, #a855f7, #6366f1)', 
-                            color: '#ffffff',
-                            border: 'none',
-                            cursor: isGeneratingVideo ? 'not-allowed' : 'pointer'
-                          }}
-                          onClick={generateComicVideo}
-                        >
-                          {isGeneratingVideo ? `🎬 ${videoProgress}` : '🎬 生成漫画视频'}
-                        </button>
+
                       </div>
                     </div>
 
@@ -1565,96 +1212,7 @@ function App() {
 
       </main>
 
-      {/* Video Preview Modal */}
-      {showVideoModal && videoUrl && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.85)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 9999,
-          padding: '1rem',
-          backdropFilter: 'blur(8px)'
-        }}>
-          <div className="card" style={{
-            width: '100%',
-            maxWidth: '420px',
-            backgroundColor: 'var(--card-bg)',
-            borderRadius: '16px',
-            padding: '1.25rem',
-            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.3)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '1rem',
-            alignItems: 'center',
-            border: '1px solid var(--border-color)'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
-              <h3 style={{ fontSize: '1rem', margin: 0, fontWeight: 700 }}>🎬 漫画短视频预览</h3>
-              <button 
-                onClick={() => setShowVideoModal(false)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  fontSize: '1.25rem',
-                  cursor: 'pointer',
-                  color: 'var(--text-secondary)'
-                }}
-              >
-                ✕
-              </button>
-            </div>
-            
-            <video 
-              src={videoUrl} 
-              controls 
-              autoPlay 
-              loop
-              style={{
-                width: '100%',
-                borderRadius: '8px',
-                aspectRatio: '9/16',
-                objectFit: 'cover',
-                backgroundColor: '#000000',
-                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-              }}
-            />
 
-            <div style={{ display: 'flex', gap: '0.75rem', width: '100%' }}>
-              <button
-                className="btn btn-secondary"
-                style={{ flex: 1, padding: '0.5rem' }}
-                onClick={() => setShowVideoModal(false)}
-              >
-                关闭
-              </button>
-              <a
-                href={videoUrl}
-                download={`${aiTitle || '漫画视频'}.mp4`}
-                className="btn btn-primary"
-                style={{ 
-                  flex: 1, 
-                  padding: '0.5rem', 
-                  textAlign: 'center', 
-                  textDecoration: 'none',
-                  background: 'linear-gradient(135deg, #a855f7, #6366f1)',
-                  color: '#ffffff',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-              >
-                📥 下载视频
-              </a>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
