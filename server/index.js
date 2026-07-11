@@ -429,7 +429,7 @@ app.post('/api/ai/style-transfer', async (req, res) => {
 // AI Copywriting Generator
 app.post('/api/ai/generate-copy', async (req, res) => {
   try {
-    const { style = '探店', keywords = '', images = [] } = req.body;
+    const { style = '探店', keywords = '', images = [], originalImages = [] } = req.body;
 
     const volcKey = process.env.VOLC_API_KEY;
     const dashscopeApiKey = process.env.DASHSCOPE_API_KEY;
@@ -473,12 +473,13 @@ app.post('/api/ai/generate-copy', async (req, res) => {
       keywordsPrompt = `用户未提供具体的关键词，请基于该风格的特点创作一个通用的、具有代表性的小红书爆款模板内容。`;
     }
 
-    // Extract EXIF details from uploaded images to guide AI generation
+    // Extract EXIF from ORIGINAL un-compressed images (canvas-compressed ones have no EXIF)
     let exifGuidance = '';
-    if (images && images.length > 0) {
+    const exifSource = originalImages.length > 0 ? originalImages : images;
+    if (exifSource && exifSource.length > 0) {
       let exifInfos = [];
-      for (let i = 0; i < images.length; i++) {
-        const img = images[i];
+      for (let i = 0; i < exifSource.length; i++) {
+        const img = exifSource[i];
         const info = extractExif(img);
         if (info && (info.dateTime || info.gps || info.device)) {
           exifInfos.push(`图片 ${i + 1} EXIF 元数据：

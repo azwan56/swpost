@@ -253,13 +253,17 @@ function App() {
     setErrorMsg('');
 
     try {
-      // Compress all images to 512px low quality in parallel to speed up payload upload and vision analysis
+      // Compress all images to 512px low quality in parallel to speed up vision analysis
       const compressedImagesForCopy = await Promise.all(
         uploadedImages.map(async (img) => {
           const src = img.styledSrc || img.src;
           return await resizeImageBase64(src, 512, 0.7);
         })
       );
+
+      // Send ORIGINAL un-compressed images separately for EXIF extraction
+      // (Canvas compression strips EXIF, so we must send originals for date/GPS/device)
+      const originalImagesForExif = uploadedImages.map(img => img.src);
 
       const res = await fetch(`${API_BASE}/api/ai/generate-copy`, {
         method: 'POST',
@@ -269,7 +273,8 @@ function App() {
         body: JSON.stringify({
           style: selectedStyle,
           keywords: copyKeywords,
-          images: compressedImagesForCopy
+          images: compressedImagesForCopy,
+          originalImages: originalImagesForExif
         })
       });
 
@@ -426,29 +431,22 @@ function App() {
         const rightSubtitle = `${dateStr}  ${locStr}`.trim() || 'AI 智能创作';
         ctx.fillText(rightSubtitle, canvas.width - paddingX, img.height + watermarkHeight * 0.72);
         
-        const watermarkedBase64 = canvas.toDataURL('image/jpeg', 0.95);
+        const watermarkedDataUri = canvas.toDataURL('image/jpeg', 0.95);
         try {
-          // Extract EXIF binary header from the styled image (base64Image)
-          const cleanStyled = base64Image.replace(/^data:image\/\w+;base64,/, "");
-          const styledBinary = atob(cleanStyled);
-          
-          let exifObj = piexif.load(styledBinary);
-          // Standardize Software tag
-          exifObj["0th"][piexif.ImageIFD.Software] = "闪贴AI - 你拍照我生文";
+          // piexifjs browser API works directly with Data URIs (not raw binary)
+          // Extract EXIF from the styled image that was returned by the server (which has EXIF injected)
+          let exifObj = piexif.load(base64Image);
+          // Standardize Software tag (ASCII only to avoid encoding issues)
+          exifObj["0th"][piexif.ImageIFD.Software] = "Shantie AI";
           
           const exifBytes = piexif.dump(exifObj);
           
-          // Insert EXIF headers into the newly generated watermarked canvas image
-          const cleanWatermarked = watermarkedBase64.replace(/^data:image\/\w+;base64,/, "");
-          const watermarkedBinary = atob(cleanWatermarked);
-          const newBinary = piexif.insert(exifBytes, watermarkedBinary);
-          
-          // Encode back to data URI
-          const finalBase64 = 'data:image/jpeg;base64,' + btoa(newBinary);
-          resolve(finalBase64);
+          // Insert EXIF into the watermarked canvas output (Data URI in, Data URI out)
+          const finalDataUri = piexif.insert(exifBytes, watermarkedDataUri);
+          resolve(finalDataUri);
         } catch (exifErr) {
           console.warn('[Watermark EXIF] Failed to copy EXIF to watermarked canvas:', exifErr);
-          resolve(watermarkedBase64);
+          resolve(watermarkedDataUri);
         }
       };
       img.onerror = () => {
