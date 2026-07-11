@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import * as piexif from 'piexifjs';
 
 // Helper: Resize and compress base64 image if it exceeds maxDim or is too large to prevent backend payload issues
 const resizeImageBase64 = (dataUrl, maxDim = 1600, quality = 0.85) => {
@@ -425,7 +426,30 @@ function App() {
         const rightSubtitle = `${dateStr}  ${locStr}`.trim() || 'AI 智能创作';
         ctx.fillText(rightSubtitle, canvas.width - paddingX, img.height + watermarkHeight * 0.72);
         
-        resolve(canvas.toDataURL('image/jpeg', 0.95));
+        const watermarkedBase64 = canvas.toDataURL('image/jpeg', 0.95);
+        try {
+          // Extract EXIF binary header from the styled image (base64Image)
+          const cleanStyled = base64Image.replace(/^data:image\/\w+;base64,/, "");
+          const styledBinary = atob(cleanStyled);
+          
+          let exifObj = piexif.load(styledBinary);
+          // Standardize Software tag
+          exifObj["0th"][piexif.ImageIFD.Software] = "闪贴AI - 你拍照我生文";
+          
+          const exifBytes = piexif.dump(exifObj);
+          
+          // Insert EXIF headers into the newly generated watermarked canvas image
+          const cleanWatermarked = watermarkedBase64.replace(/^data:image\/\w+;base64,/, "");
+          const watermarkedBinary = atob(cleanWatermarked);
+          const newBinary = piexif.insert(exifBytes, watermarkedBinary);
+          
+          // Encode back to data URI
+          const finalBase64 = 'data:image/jpeg;base64,' + btoa(newBinary);
+          resolve(finalBase64);
+        } catch (exifErr) {
+          console.warn('[Watermark EXIF] Failed to copy EXIF to watermarked canvas:', exifErr);
+          resolve(watermarkedBase64);
+        }
       };
       img.onerror = () => {
         resolve(base64Image); // fallback
