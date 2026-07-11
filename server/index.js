@@ -165,6 +165,11 @@ async function analyzeImageMultimodal(imageBase64, apiKey) {
   if (!imageBase64 || !apiKey) return null;
   try {
     const dataUri = imageBase64.startsWith('data:') ? imageBase64 : `data:image/jpeg;base64,${imageBase64}`;
+    
+    // Add a 6-second timeout using AbortController to prevent hanging
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+
     const response = await fetch('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -190,8 +195,11 @@ async function analyzeImageMultimodal(imageBase64, apiKey) {
             ]
           }
         ]
-      })
+      }),
+      signal: controller.signal
     });
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errText = await response.text();

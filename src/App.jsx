@@ -240,6 +240,14 @@ function App() {
     setErrorMsg('');
 
     try {
+      // Compress all images to 512px low quality in parallel to speed up payload upload and vision analysis
+      const compressedImagesForCopy = await Promise.all(
+        uploadedImages.map(async (img) => {
+          const src = img.styledSrc || img.src;
+          return await resizeImageBase64(src, 512, 0.7);
+        })
+      );
+
       const res = await fetch(`${API_BASE}/api/ai/generate-copy`, {
         method: 'POST',
         headers: {
@@ -248,7 +256,7 @@ function App() {
         body: JSON.stringify({
           style: selectedStyle,
           keywords: copyKeywords,
-          images: uploadedImages.map(img => img.styledSrc || img.src)
+          images: compressedImagesForCopy
         })
       });
 
