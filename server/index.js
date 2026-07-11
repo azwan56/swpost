@@ -515,7 +515,7 @@ ${visualGuidance}
 // AI Text-To-Speech (TTS) voiceover generator using Alibaba Cloud CosyVoice
 app.post('/api/ai/tts', async (req, res) => {
   try {
-    const { text, voice = 'longxiaochun' } = req.body;
+    const { text, voice = 'longanhuan' } = req.body;
     if (!text) {
       return res.status(400).json({ error: 'Text content is required for TTS.' });
     }
@@ -553,12 +553,27 @@ app.post('/api/ai/tts', async (req, res) => {
       throw new Error(`语音合成服务商接口调用失败 (HTTP ${response.status})`);
     }
 
+    const resData = await response.json();
+    const audioUrl = resData.output?.audio?.url;
+    if (!audioUrl) {
+      console.error(`[TTS] DashScope response does not contain audio URL:`, JSON.stringify(resData));
+      throw new Error('未返回有效的音频文件下载地址');
+    }
+
+    console.log(`[TTS] Synthesized successfully. Fetching audio file from: ${audioUrl}`);
+
+    // Fetch the actual audio file from OSS storage
+    const audioFileResponse = await fetch(audioUrl);
+    if (!audioFileResponse.ok) {
+      throw new Error(`下载音频文件失败 (HTTP ${audioFileResponse.status})`);
+    }
+
     // Set headers to stream back the MP3 file
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Cache-Control', 'no-cache');
     
-    // Read response body as buffer and send
-    const arrayBuffer = await response.arrayBuffer();
+    // Send audio buffer to client
+    const arrayBuffer = await audioFileResponse.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
     res.send(buffer);
   } catch (error) {

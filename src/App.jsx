@@ -315,7 +315,7 @@ function App() {
       const ttsRes = await fetch(`${API_BASE}/api/ai/tts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: cleanedText, voice: 'longxiaochun' })
+        body: JSON.stringify({ text: cleanedText, voice: 'longanhuan' })
       });
 
       if (!ttsRes.ok) {
@@ -871,11 +871,72 @@ function App() {
                       </div>
                     </div>
 
-                    <div style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px dotted var(--border-color)' }}>
-                      标题：{aiTitle}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px dotted var(--border-color)' }}>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>标题：</span>
+                      <input 
+                        type="text" 
+                        value={aiTitle} 
+                        onChange={(e) => setAiTitle(e.target.value)}
+                        style={{
+                          flex: 1,
+                          border: 'none',
+                          outline: 'none',
+                          background: 'transparent',
+                          fontFamily: 'inherit',
+                          fontSize: '0.85rem',
+                          fontWeight: 800,
+                          color: 'var(--text-primary)',
+                          padding: '2px 4px',
+                          borderRadius: '4px',
+                          transition: 'background 0.2s',
+                          borderBottom: '1px dashed transparent'
+                        }}
+                        placeholder="在此输入标题..."
+                        onMouseEnter={(e) => e.target.style.borderBottom = '1px dashed var(--text-secondary)'}
+                        onMouseLeave={(e) => e.target.style.borderBottom = '1px dashed transparent'}
+                        onFocus={(e) => {
+                          e.target.style.backgroundColor = 'var(--bg-main)';
+                          e.target.style.borderBottom = '1px dashed var(--text-secondary)';
+                        }}
+                        onBlur={(e) => {
+                          e.target.style.backgroundColor = 'transparent';
+                          e.target.style.borderBottom = '1px dashed transparent';
+                        }}
+                      />
                     </div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)', whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>
-                      {aiBody}
+                    <div style={{ position: 'relative' }}>
+                      <textarea 
+                        value={aiBody} 
+                        onChange={(e) => setAiBody(e.target.value)}
+                        rows={10}
+                        style={{
+                          width: '100%',
+                          border: 'none',
+                          outline: 'none',
+                          background: 'transparent',
+                          fontFamily: 'inherit',
+                          fontSize: '0.8rem',
+                          color: 'var(--text-primary)',
+                          lineHeight: '1.5',
+                          resize: 'vertical',
+                          padding: '4px',
+                          boxSizing: 'border-box',
+                          borderRadius: '4px',
+                          transition: 'background 0.2s',
+                          border: '1px dashed transparent'
+                        }}
+                        placeholder="在此输入文案正文与标签..."
+                        onMouseEnter={(e) => e.target.style.border = '1px dashed var(--text-secondary)'}
+                        onMouseLeave={(e) => e.target.style.border = '1px dashed transparent'}
+                        onFocus={(e) => {
+                          e.target.style.backgroundColor = 'var(--bg-main)';
+                          e.target.style.border = '1px dashed var(--text-secondary)';
+                        }}
+                        onBlur={(e) => {
+                          e.target.style.backgroundColor = 'transparent';
+                          e.target.style.border = '1px dashed transparent';
+                        }}
+                      />
                     </div>
                   </div>
                 </div>
