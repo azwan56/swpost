@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import ExifReader from 'exifreader';
+import piexif from 'piexifjs';
 
 // Load environment variables
 dotenv.config();
@@ -114,6 +115,51 @@ function extractExif(imageBase64) {
   }
 }
 
+// Helper: Copy EXIF headers from original image to styled image, adding custom style/model/brand tag markers
+function copyAndModifyExif(originalBase64, styledBase64, styleName, modelName) {
+  try {
+    const originalClean = originalBase64.replace(/^data:image\/\w+;base64,/, "");
+    const styledClean = styledBase64.replace(/^data:image\/\w+;base64,/, "");
+
+    const originalBinary = Buffer.from(originalClean, 'base64').toString('binary');
+    const styledBinary = Buffer.from(styledClean, 'base64').toString('binary');
+
+    // Load EXIF from original
+    let exifObj = { "0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": null };
+    try {
+      exifObj = piexif.load(originalBinary);
+    } catch (e) {
+      console.log('[EXIF] No original EXIF to copy, creating default.');
+    }
+
+    // Convert Chinese style names
+    const styleLabel = styleName === 'clay' ? '泥塑黏土风' : styleName === 'japanese-film' ? '日式复古胶片风' : styleName === 'polaroid' ? '经典拍立得风' : '吉卜力卡通动漫风';
+
+    // Write custom tags/markers
+    // 0th IFD Software tag
+    exifObj["0th"][piexif.ImageIFD.Software] = "闪贴AI - 你拍照我生文";
+    
+    // Exif IFD UserComment tag
+    const commentText = `Style: ${styleLabel}, Model: ${modelName}, Software: ShantieAI`;
+    exifObj["Exif"][piexif.ExifIFD.UserComment] = commentText;
+
+    // Dump and insert into styled image
+    const exifBytes = piexif.dump(exifObj);
+    const newBinary = piexif.insert(exifBytes, styledBinary);
+
+    // Convert back to Base64
+    const newBase64 = Buffer.from(newBinary, 'binary').toString('base64');
+    
+    const mimeMatch = styledBase64.match(/^data:(image\/\w+);base64,/);
+    const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+    
+    return `data:${mime};base64,${newBase64}`;
+  } catch (err) {
+    console.error('[EXIF Write] Failed to copy EXIF:', err.message);
+    return styledBase64;
+  }
+}
+
 // Helper: Analyze image content, text, people, and atmosphere using Qwen-VL-Plus
 async function analyzeImageMultimodal(imageBase64, apiKey) {
   if (!imageBase64 || !apiKey) return null;
@@ -171,6 +217,7 @@ app.post('/api/ai/style-transfer', async (req, res) => {
       return res.status(400).json({ error: 'Image base64 data is required.' });
     }
 
+    const exifData = extractExif(image);
     const imageDataUri = ensureDataUri(image);
     const volcApiKey = process.env.VOLC_API_KEY;
     const dashscopeApiKey = process.env.DASHSCOPE_API_KEY;
@@ -220,7 +267,8 @@ app.post('/api/ai/style-transfer', async (req, res) => {
         if (resultUrl) {
           console.log('[StyleTransfer] ✅ Seedream 生成成功，正在转换为 base64...');
           const resultBase64 = await convertUrlToBase64(resultUrl);
-          return res.json({ image: resultBase64, model: 'doubao-seedream-5-0' });
+          const finalBase64 = copyAndModifyExif(image, resultBase64, style, 'doubao-seedream-5-0');
+          return res.json({ image: finalBase64, model: 'doubao-seedream-5-0', exif: exifData });
         } else {
           console.error('[StyleTransfer] ⚠️ Seedream returned OK but no image URL:', JSON.stringify(volcData));
           throw new Error('Seedream 返回成功但未包含图片，请重试。');
@@ -335,8 +383,9 @@ app.post('/api/ai/style-transfer', async (req, res) => {
     const resultUrl = await pollDashScopeTask(taskId);
     // Convert output image back to base64
     const resultBase64 = await convertUrlToBase64(resultUrl);
+    const finalBase64 = copyAndModifyExif(image, resultBase64, style, 'dashscope-wanx');
 
-    res.json({ image: resultBase64, model: 'dashscope-wanx' });
+    res.json({ image: finalBase64, model: 'dashscope-wanx', exif: exifData });
   } catch (error) {
     console.error('[StyleTransfer] ❌ Error:', error);
     res.status(500).json({ error: `风格化失败: ${error.message}` });

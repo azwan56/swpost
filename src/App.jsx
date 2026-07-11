@@ -167,12 +167,15 @@ function App() {
 
       const result = await res.json();
       
+      // Draw premium Leica-style visual watermark on the canvas before updating styledSrc
+      const watermarkedImage = await applyVisualWatermark(result.image, styleName, result.model, result.exif);
+      
       // Update the image with the styled result
       setUploadedImages(prev => prev.map((img, idx) => {
         if (idx === activeIdx) {
           return { 
             ...img, 
-            styledSrc: result.image,
+            styledSrc: watermarkedImage,
             activeStyle: styleName
           };
         }
@@ -287,6 +290,99 @@ function App() {
       result[i] = sentences.slice(start, end).join('，');
     }
     return result;
+  };
+
+  // Helper: Draw visual photography watermark (Leica-style white border at bottom)
+  const applyVisualWatermark = (base64Image, styleName, modelName, exif) => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        // We add an 8% height white border at the bottom for the watermark strip
+        const watermarkHeight = Math.round(img.height * 0.08);
+        canvas.width = img.width;
+        canvas.height = img.height + watermarkHeight;
+        
+        // Fill background white
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // Draw original styled image
+        ctx.drawImage(img, 0, 0);
+        
+        // Draw Watermark text
+        ctx.fillStyle = '#1a1a1a';
+        
+        // Left text: Brand & Style
+        const leftTitle = '闪贴 AI';
+        
+        let leftSubtitle = '吉卜力动漫风 | Ghibli Style';
+        if (styleName === 'clay') {
+          leftSubtitle = '泥塑黏土风 | Clay Style';
+        } else if (styleName === 'japanese-film') {
+          leftSubtitle = '日式胶片风 | Retro Film';
+        } else if (styleName === 'polaroid') {
+          leftSubtitle = '经典拍立得风 | Polaroid';
+        }
+        
+        const fontSizeMain = Math.round(watermarkHeight * 0.28);
+        const fontSizeSub = Math.round(watermarkHeight * 0.18);
+        const paddingX = Math.round(canvas.width * 0.04);
+        
+        // Align left texts
+        ctx.textAlign = 'left';
+        ctx.font = `bold ${fontSizeMain}px sans-serif`;
+        ctx.fillText(leftTitle, paddingX, img.height + watermarkHeight * 0.42);
+        
+        ctx.fillStyle = '#666666';
+        ctx.font = `${fontSizeSub}px sans-serif`;
+        ctx.fillText(leftSubtitle, paddingX, img.height + watermarkHeight * 0.72);
+        
+        // Right text: Model & Date/Location info
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#1a1a1a';
+        ctx.font = `bold ${fontSizeMain}px sans-serif`;
+        
+        let rightTitle = 'Doubao Seedream 5.0';
+        if (modelName === 'dashscope-wanx') {
+          rightTitle = 'DashScope Wanx 2.1';
+        }
+        ctx.fillText(rightTitle, canvas.width - paddingX, img.height + watermarkHeight * 0.42);
+        
+        // Extract date/time and GPS coords
+        let dateStr = '';
+        if (exif && exif.dateTime) {
+          // Reformat "2026:07:11 10:15:30" to "2026.07.11 10:15"
+          const parts = exif.dateTime.split(' ');
+          if (parts[0]) {
+            dateStr = parts[0].replace(/:/g, '.');
+          }
+        }
+        
+        let locStr = '';
+        if (exif && exif.gps) {
+          const lat = parseFloat(exif.gps.lat) || 0;
+          const lon = parseFloat(exif.gps.lon) || 0;
+          locStr = `${lat.toFixed(4)}° ${exif.gps.latRef || 'N'}  ${lon.toFixed(4)}° ${exif.gps.lonRef || 'E'}`;
+        } else if (exif && exif.device) {
+          locStr = exif.device;
+        }
+        
+        ctx.fillStyle = '#666666';
+        ctx.font = `${fontSizeSub}px sans-serif`;
+        const rightSubtitle = `${dateStr}  ${locStr}`.trim() || 'AI 智能创作';
+        ctx.fillText(rightSubtitle, canvas.width - paddingX, img.height + watermarkHeight * 0.72);
+        
+        resolve(canvas.toDataURL('image/jpeg', 0.95));
+      };
+      img.onerror = () => {
+        resolve(base64Image); // fallback
+      };
+      img.src = base64Image;
+    });
   };
 
   // Main Canvas & Web Audio MediaRecorder short video generator

@@ -12,6 +12,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "exifreader": "^4.23.3",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "piexifjs": "^1.0.6"
   }
 }
