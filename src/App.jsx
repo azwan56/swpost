@@ -845,16 +845,42 @@ function App() {
       });
 
       if (!ttsRes.ok) {
-        throw new Error('获取语音配音失败，请检查网络或后端配置');
+        let errMsg = '获取语音配音失败，请检查网络或后端配置';
+        try {
+          const errData = await ttsRes.json();
+          if (errData && errData.error) {
+            errMsg = errData.error;
+          }
+        } catch (_) {}
+        throw new Error(errMsg);
       }
 
       const audioBlob = await ttsRes.blob();
       setVideoProgress('正在载入配音与背景音乐...');
 
-      // 3. Setup AudioContext and decode TTS Audio
+      // 3. Setup AudioContext and decode TTS Audio (Safe legacy Safari API compatibility)
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+      }
+
       const audioArrayBuffer = await audioBlob.arrayBuffer();
-      const ttsAudioBuffer = await audioCtx.decodeAudioData(audioArrayBuffer);
+      
+      // Safe decodeAudioData promise wrapper for old iOS/Safari devices
+      const decodeAudioDataSafe = (context, buffer) => {
+        return new Promise((resolve, reject) => {
+          try {
+            const p = context.decodeAudioData(buffer, resolve, reject);
+            if (p && typeof p.then === 'function') {
+              p.then(resolve).catch(reject);
+            }
+          } catch (e) {
+            reject(e);
+          }
+        });
+      };
+
+      const ttsAudioBuffer = await decodeAudioDataSafe(audioCtx, audioArrayBuffer);
       const totalDuration = ttsAudioBuffer.duration; // in seconds
 
       // 4. Fetch and decode BGM (with safe fallback for remote HTML/SPA routing)
@@ -866,7 +892,7 @@ function App() {
           if (!contentType.includes('text/html')) {
             const bgmBlob = await bgmRes.blob();
             const bgmArrayBuffer = await bgmBlob.arrayBuffer();
-            bgmAudioBuffer = await audioCtx.decodeAudioData(bgmArrayBuffer);
+            bgmAudioBuffer = await decodeAudioDataSafe(audioCtx, bgmArrayBuffer);
           } else {
             console.warn('[VideoGen] bgm.mp3 returned text/html (SPA fallback), skipping BGM.');
           }
@@ -927,19 +953,33 @@ function App() {
       const slideDuration = totalDuration / loadedImages.length;
       const subtitleSegments = splitTextIntoSegments(aiBody, loadedImages.length);
 
-      // 8. Capture streams and configure MediaRecorder
-      const canvasStream = canvas.captureStream(30); // 30 FPS
+      // 8. Capture streams and configure MediaRecorder (Safari cross-browser support)
+      const captureStreamFn = canvas.captureStream || canvas.webkitCaptureStream;
+      if (!captureStreamFn) {
+        throw new Error('您的浏览器不支持 Canvas 视频流采集，请更换现代浏览器（Chrome/Safari/Edge）后重试。');
+      }
+      const canvasStream = captureStreamFn.call(canvas, 30); // 30 FPS
       const mixedStream = new MediaStream([
         ...canvasStream.getVideoTracks(),
         ...audioDest.stream.getAudioTracks()
       ]);
 
-      let selectedMime = 'video/webm;codecs=vp9';
-      if (MediaRecorder.isTypeSupported('video/mp4;codecs=h264')) {
-        selectedMime = 'video/mp4;codecs=h264';
-      } else if (MediaRecorder.isTypeSupported('video/webm;codecs=h264')) {
-        selectedMime = 'video/webm;codecs=h264';
+      // Detect supported MediaRecorder formats (Safari primarily supports video/mp4)
+      let selectedMime = 'video/webm';
+      const candidateTypes = [
+        'video/mp4;codecs=h264',
+        'video/mp4',
+        'video/webm;codecs=h264',
+        'video/webm;codecs=vp9',
+        'video/webm'
+      ];
+      for (const type of candidateTypes) {
+        if (MediaRecorder.isTypeSupported(type)) {
+          selectedMime = type;
+          break;
+        }
       }
+      console.log('[VideoGen] Configured MediaRecorder MIME type:', selectedMime);
 
       const mediaRecorder = new MediaRecorder(mixedStream, {
         mimeType: selectedMime,

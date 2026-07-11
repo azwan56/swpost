@@ -6,11 +6,15 @@ import { fileURLToPath } from 'url';
 import ExifReader from 'exifreader';
 import piexif from 'piexifjs';
 
-// Load environment variables
-dotenv.config();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Load environment variables
+dotenv.config();
+// Fallback if started from parent/root folder
+if (!process.env.DASHSCOPE_API_KEY) {
+  dotenv.config({ path: path.join(__dirname, '.env') });
+}
 
 const app = express();
 const port = process.env.PORT || 5001;
