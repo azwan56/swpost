@@ -467,6 +467,15 @@ export default function Index() {
           return next;
         });
         Taro.hideLoading();
+        
+        setTimeout(() => {
+          const hasExifCount = newImages.filter(img => img.exif !== null).length;
+          Taro.showToast({
+            title: `已导入 ${newImages.length} 张图片，其中 ${hasExifCount} 张成功获取 EXIF`,
+            icon: 'none',
+            duration: 4000
+          });
+        }, 300);
       },
       fail: (err) => {
         console.warn('Choose image failed or cancelled:', err);
