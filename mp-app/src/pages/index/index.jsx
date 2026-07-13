@@ -457,15 +457,34 @@ const extractExifClient = (base64Image) => {
       }
     }
     
-    // Extract raw EXIF bytes for lossless injection
+    // Extract raw EXIF bytes for lossless injection by parsing the APP1 segment directly
     let rawBytes = null;
     try {
-      // Modify software tag for watermark credit, then dump whole object
-      exifObj["0th"] = exifObj["0th"] || {};
-      exifObj["0th"][piexif.ImageIFD.Software] = "Shantie AI";
-      rawBytes = piexif.dump(exifObj);
+      if (typeof Taro.base64ToArrayBuffer === 'function') {
+        const buffer = Taro.base64ToArrayBuffer(base64Image);
+        const view = new Uint8Array(buffer);
+        if (view[0] === 0xFF && view[1] === 0xD8) {
+          let offset = 2;
+          while (offset < view.length) {
+            const marker = (view[offset] << 8) | view[offset + 1];
+            const length = (view[offset + 2] << 8) | view[offset + 3];
+            if (marker === 0xFFE1) {
+              if (view[offset + 4] === 69 && view[offset + 5] === 120 && view[offset + 6] === 105 && view[offset + 7] === 102 && view[offset + 8] === 0 && view[offset + 9] === 0) {
+                let exifStr = "";
+                for (let i = offset + 4; i < offset + 2 + length; i++) {
+                  exifStr += String.fromCharCode(view[i]);
+                }
+                rawBytes = exifStr;
+                break;
+              }
+            }
+            if ((marker & 0xFF00) !== 0xFF00) break;
+            offset += 2 + length;
+          }
+        }
+      }
     } catch (e) {
-      console.warn('[EXIF Client Extract] Failed to dump raw EXIF bytes:', e);
+      console.warn('[EXIF Client Extract] Failed to extract raw EXIF bytes:', e);
     }
 
     return {
