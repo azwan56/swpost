@@ -335,87 +335,140 @@ const drawWatermarkOnCanvas = (canvas, ctx, img, styleName, modelName, exif, res
         resolve(watermarkedDataUri);
       }
     } else {
-      // Mini Program: OffscreenCanvas does NOT support canvasToTempFilePath,
-      // so we use toDataURL() and then write the result to a local temp file.
-      let watermarkedDataUri;
+      // === Mini Program EXIF-safe export pipeline ===
+      // Problem: WeChat OffscreenCanvas.toDataURL('image/jpeg') often returns PNG
+      // silently, and piexif can ONLY inject EXIF into JPEG format.
+      // Solution: Write canvas output to temp file → force-convert to JPEG via
+      // Taro.compressImage → read JPEG → inject EXIF → write final file.
+
+      let rawDataUri;
       try {
-        watermarkedDataUri = canvas.toDataURL('image/jpeg', 0.95);
+        rawDataUri = canvas.toDataURL('image/jpeg', 0.95);
       } catch (e) {
         console.error('[Watermark] toDataURL failed:', e);
         resolve(fallbackBase64);
         return;
       }
 
-      // Verify it's actually JPEG (some engines silently return PNG)
-      const isJpeg = watermarkedDataUri && watermarkedDataUri.startsWith('data:image/jpeg');
-      if (!isJpeg) {
-        console.warn('[Watermark] toDataURL returned non-JPEG, trying to use as-is');
+      const rawMatch = /data:image\/([\w+]+);base64,(.+)/.exec(rawDataUri);
+      if (!rawMatch) {
+        console.error('[Watermark] Could not parse toDataURL output');
+        resolve(fallbackBase64);
+        return;
       }
 
-      // Build EXIF and inject it into the JPEG
-      let finalDataUri = watermarkedDataUri;
-      if (isJpeg && exif) {
-        try {
-          const exifObj = { "0th": {}, "Exif": {}, "GPS": {}, "Interop": {}, "1st": {}, "thumbnail": null };
-          exifObj["0th"][piexif.ImageIFD.Software] = "Shantie AI";
+      const rawFormat = rawMatch[1]; // 'jpeg' or 'png'
+      const rawBody = rawMatch[2];
+      const rawExt = (rawFormat === 'png') ? 'png' : 'jpg';
+      const rawTempPath = `${Taro.env.USER_DATA_PATH}/raw_canvas_${Date.now()}.${rawExt}`;
 
-          if (exif.dateTime) {
-            exifObj["0th"][piexif.ImageIFD.DateTime] = exif.dateTime;
-            exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal] = exif.dateTime;
-            exifObj["Exif"][piexif.ExifIFD.DateTimeDigitized] = exif.dateTime;
-          }
-          if (exif.device) {
-            exifObj["0th"][piexif.ImageIFD.Model] = exif.device;
-          }
-          if (exif.gps) {
-            const latVal = parseFloat(exif.gps.lat);
-            const lonVal = parseFloat(exif.gps.lon);
-            if (!isNaN(latVal) && !isNaN(lonVal)) {
-              const latAbs = Math.abs(latVal);
-              const lonAbs = Math.abs(lonVal);
-              const latDeg = Math.floor(latAbs);
-              const latMin = Math.floor((latAbs - latDeg) * 60);
-              const latSec = Math.round(((latAbs - latDeg) * 60 - latMin) * 60 * 100);
-              const lonDeg = Math.floor(lonAbs);
-              const lonMin = Math.floor((lonAbs - lonDeg) * 60);
-              const lonSec = Math.round(((lonAbs - lonDeg) * 60 - lonMin) * 60 * 100);
+      console.log(`[Watermark] toDataURL returned format: ${rawFormat}, writing to ${rawTempPath}`);
 
-              exifObj["GPS"][piexif.GPSIFD.GPSLatitude] = [[latDeg, 1], [latMin, 1], [latSec, 100]];
-              exifObj["GPS"][piexif.GPSIFD.GPSLatitudeRef] = exif.gps.latRef || (latVal >= 0 ? "N" : "S");
-              exifObj["GPS"][piexif.GPSIFD.GPSLongitude] = [[lonDeg, 1], [lonMin, 1], [lonSec, 100]];
-              exifObj["GPS"][piexif.GPSIFD.GPSLongitudeRef] = exif.gps.lonRef || (lonVal >= 0 ? "E" : "W");
-            }
-          }
-
-          const exifBytes = piexif.dump(exifObj);
-          finalDataUri = piexif.insert(exifBytes, watermarkedDataUri);
-          console.log('[Watermark EXIF] Successfully injected EXIF into JPEG');
-        } catch (exifErr) {
-          console.warn('[Watermark EXIF] Failed to inject EXIF:', exifErr);
-          // finalDataUri remains as watermarkedDataUri without EXIF
-        }
-      }
-
-      // Write the final image (with EXIF) to a local temp file instead of
-      // returning base64. This is critical because WeChat strips EXIF from
-      // base64 Data URIs when saving via long-press or saveImageToPhotosAlbum.
       try {
-        const matches = /data:image\/(jpeg|jpg|png);base64,(.*)/.exec(finalDataUri);
-        if (matches) {
-          const ext = (matches[1] === 'png') ? 'png' : 'jpg';
-          const bodyData = matches[2];
-          const localFilePath = `${Taro.env.USER_DATA_PATH}/watermarked_${Date.now()}.${ext}`;
-          const fs = Taro.getFileSystemManager();
-          fs.writeFileSync(localFilePath, bodyData, 'base64');
-          console.log('[Watermark] Wrote EXIF-injected image to local file:', localFilePath);
-          resolve(localFilePath);
-        } else {
-          console.warn('[Watermark] Could not parse data URI, returning base64 as fallback');
-          resolve(finalDataUri);
-        }
+        const fs = Taro.getFileSystemManager();
+        fs.writeFileSync(rawTempPath, rawBody, 'base64');
+
+        // Force convert to JPEG using Taro.compressImage (works regardless of input format)
+        Taro.compressImage({
+          src: rawTempPath,
+          quality: 95,
+          success: (compRes) => {
+            try {
+              const jpegTempPath = compRes.tempFilePath;
+              console.log('[Watermark] compressImage produced JPEG at:', jpegTempPath);
+
+              // Read the guaranteed-JPEG file as base64
+              const jpegBase64 = fs.readFileSync(jpegTempPath, 'base64');
+              const jpegDataUri = `data:image/jpeg;base64,${jpegBase64}`;
+
+              // Build and inject EXIF metadata
+              let finalDataUri = jpegDataUri;
+              if (exif) {
+                try {
+                  const exifObj = { "0th": {}, "Exif": {}, "GPS": {}, "Interop": {}, "1st": {}, "thumbnail": null };
+                  exifObj["0th"][piexif.ImageIFD.Software] = "Shantie AI";
+
+                  if (exif.dateTime) {
+                    exifObj["0th"][piexif.ImageIFD.DateTime] = exif.dateTime;
+                    exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal] = exif.dateTime;
+                    exifObj["Exif"][piexif.ExifIFD.DateTimeDigitized] = exif.dateTime;
+                  }
+                  if (exif.device) {
+                    exifObj["0th"][piexif.ImageIFD.Model] = exif.device;
+                  }
+                  if (exif.gps) {
+                    const latVal = parseFloat(exif.gps.lat);
+                    const lonVal = parseFloat(exif.gps.lon);
+                    if (!isNaN(latVal) && !isNaN(lonVal)) {
+                      const latAbs = Math.abs(latVal);
+                      const lonAbs = Math.abs(lonVal);
+                      const latDeg = Math.floor(latAbs);
+                      const latMin = Math.floor((latAbs - latDeg) * 60);
+                      const latSec = Math.round(((latAbs - latDeg) * 60 - latMin) * 60 * 100);
+                      const lonDeg = Math.floor(lonAbs);
+                      const lonMin = Math.floor((lonAbs - lonDeg) * 60);
+                      const lonSec = Math.round(((lonAbs - lonDeg) * 60 - lonMin) * 60 * 100);
+
+                      exifObj["GPS"][piexif.GPSIFD.GPSLatitude] = [[latDeg, 1], [latMin, 1], [latSec, 100]];
+                      exifObj["GPS"][piexif.GPSIFD.GPSLatitudeRef] = exif.gps.latRef || (latVal >= 0 ? "N" : "S");
+                      exifObj["GPS"][piexif.GPSIFD.GPSLongitude] = [[lonDeg, 1], [lonMin, 1], [lonSec, 100]];
+                      exifObj["GPS"][piexif.GPSIFD.GPSLongitudeRef] = exif.gps.lonRef || (lonVal >= 0 ? "E" : "W");
+                    }
+                  }
+
+                  const exifBytes = piexif.dump(exifObj);
+                  finalDataUri = piexif.insert(exifBytes, jpegDataUri);
+                  console.log('[Watermark EXIF] ✅ Successfully injected EXIF into JPEG');
+                } catch (exifErr) {
+                  console.warn('[Watermark EXIF] Failed to inject EXIF:', exifErr);
+                }
+              }
+
+              // Write the EXIF-injected JPEG to a final local file
+              const finalMatch = /data:image\/jpeg;base64,(.+)/.exec(finalDataUri);
+              if (finalMatch) {
+                const finalPath = `${Taro.env.USER_DATA_PATH}/watermarked_${Date.now()}.jpg`;
+                fs.writeFileSync(finalPath, finalMatch[1], 'base64');
+                console.log('[Watermark] ✅ Final EXIF image written to:', finalPath);
+                resolve(finalPath);
+              } else {
+                console.warn('[Watermark] Final data URI parse failed, using compressImage output');
+                resolve(jpegTempPath);
+              }
+            } catch (innerErr) {
+              console.error('[Watermark] Post-compress processing failed:', innerErr);
+              resolve(compRes.tempFilePath);
+            }
+          },
+          fail: (compErr) => {
+            console.warn('[Watermark] compressImage failed, using raw canvas output:', compErr);
+            // Fallback: try direct EXIF injection if the raw output happens to be JPEG
+            if (rawFormat === 'jpeg' && exif) {
+              try {
+                const exifObj = { "0th": {}, "Exif": {}, "GPS": {}, "Interop": {}, "1st": {}, "thumbnail": null };
+                exifObj["0th"][piexif.ImageIFD.Software] = "Shantie AI";
+                if (exif.dateTime) {
+                  exifObj["0th"][piexif.ImageIFD.DateTime] = exif.dateTime;
+                  exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal] = exif.dateTime;
+                }
+                if (exif.device) exifObj["0th"][piexif.ImageIFD.Model] = exif.device;
+                const exifBytes = piexif.dump(exifObj);
+                const finalUri = piexif.insert(exifBytes, rawDataUri);
+                const m = /data:image\/jpeg;base64,(.+)/.exec(finalUri);
+                if (m) {
+                  const fallbackPath = `${Taro.env.USER_DATA_PATH}/watermarked_fb_${Date.now()}.jpg`;
+                  fs.writeFileSync(fallbackPath, m[1], 'base64');
+                  resolve(fallbackPath);
+                  return;
+                }
+              } catch (e) { /* ignore */ }
+            }
+            resolve(rawTempPath);
+          }
+        });
       } catch (writeErr) {
-        console.error('[Watermark] Failed to write local temp file:', writeErr);
-        resolve(finalDataUri);
+        console.error('[Watermark] Failed to write raw canvas temp file:', writeErr);
+        resolve(fallbackBase64);
       }
     }
   } catch (err) {
