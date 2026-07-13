@@ -48,6 +48,7 @@ const resizeImageBase64 = (dataUrl, maxDim = 1600, quality = 0.85) => {
 // Helper: Read a selected media file as base64 (Unified for Web and Mini Program)
 const readImageAsBase64 = (tempFile) => {
   return new Promise((resolve, reject) => {
+    const path = tempFile.path || tempFile.tempFilePath || '';
     if (Taro.getEnv() === Taro.ENV_TYPE.WEB) {
       // H5 Web platform
       const fileObj = tempFile.originalFile || tempFile.file;
@@ -56,10 +57,10 @@ const readImageAsBase64 = (tempFile) => {
         reader.onload = (e) => resolve(e.target.result);
         reader.onerror = (err) => reject(err);
         reader.readAsDataURL(fileObj);
-      } else if (tempFile.tempFilePath.startsWith('data:')) {
-        resolve(tempFile.tempFilePath);
+      } else if (path && path.startsWith('data:')) {
+        resolve(path);
       } else {
-        fetch(tempFile.tempFilePath)
+        fetch(path)
           .then(res => res.blob())
           .then(blob => {
             const reader = new FileReader();
@@ -71,11 +72,11 @@ const readImageAsBase64 = (tempFile) => {
     } else {
       // WeChat Mini Program platform
       Taro.getFileSystemManager().readFile({
-        filePath: tempFile.tempFilePath,
+        filePath: path,
         encoding: 'base64',
         success: (res) => {
           let mime = 'image/jpeg';
-          const pathLower = tempFile.tempFilePath.toLowerCase();
+          const pathLower = path.toLowerCase();
           if (pathLower.endsWith('.png')) mime = 'image/png';
           if (pathLower.endsWith('.gif')) mime = 'image/gif';
           resolve(`data:${mime};base64,${res.data}`);
@@ -406,7 +407,7 @@ export default function Index() {
     console.log('Taro Page loaded. API Base set to:', API_BASE);
   });
 
-  // Handle photos upload using Taro unified chooseMedia API
+  // Handle photos upload using Taro chooseImage API (Forces original selection to preserve EXIF)
   const handlePhotosUpload = () => {
     const availableSlots = 4 - uploadedImages.length;
     if (availableSlots <= 0) {
@@ -414,11 +415,10 @@ export default function Index() {
       return;
     }
 
-    Taro.chooseMedia({
+    Taro.chooseImage({
       count: availableSlots,
-      mediaType: ['image'],
+      sizeType: ['original'], // Forced to original, otherwise WeChat strips EXIF
       sourceType: ['album', 'camera'],
-      sizeType: ['original'],
       success: async (res) => {
         Taro.showLoading({ title: '加载图片中...' });
         setErrorMsg('');
@@ -426,28 +426,29 @@ export default function Index() {
         for (const tempFile of res.tempFiles) {
           try {
             const id = Math.random().toString(36).substring(2, 9);
+            const path = tempFile.path;
             
             // 1. Read original file as base64 to extract EXIF data before compression (since compression strips EXIF metadata)
             const originalBase64 = await readImageAsBase64(tempFile);
             const exif = extractExifClient(originalBase64);
 
             // 2. Native compress for WeChat Mini Program to avoid oversized payload and API failure
-            let finalPath = tempFile.tempFilePath;
+            let finalPath = path;
             if (Taro.getEnv() !== Taro.ENV_TYPE.WEB) {
               finalPath = await new Promise((resolve) => {
                 Taro.compressImage({
-                  src: tempFile.tempFilePath,
+                  src: path,
                   quality: 80,
                   success: (cRes) => resolve(cRes.tempFilePath),
                   fail: (err) => {
                     console.warn('Taro.compressImage failed, fallback to original:', err);
-                    resolve(tempFile.tempFilePath);
+                    resolve(path);
                   }
                 });
               });
             }
 
-            const base64Src = await readImageAsBase64({ tempFilePath: finalPath });
+            const base64Src = await readImageAsBase64({ path: finalPath });
             newImages.push({
               id,
               src: base64Src,
@@ -468,7 +469,7 @@ export default function Index() {
         Taro.hideLoading();
       },
       fail: (err) => {
-        console.warn('Choose media failed or cancelled:', err);
+        console.warn('Choose image failed or cancelled:', err);
       }
     });
   };
