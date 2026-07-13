@@ -144,6 +144,163 @@ const saveOrDownloadImage = async (base64, activeIdx, activeStyle) => {
   }
 };
 
+// Helper: Draw visual photography watermark (Leica-style white border at bottom)
+const applyVisualWatermark = (base64Image, styleName, modelName, exif) => {
+  return new Promise((resolve) => {
+    let canvas, ctx;
+    const isWeb = Taro.getEnv() === Taro.ENV_TYPE.WEB;
+    
+    if (isWeb) {
+      const img = new global.Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        canvas = document.createElement('canvas');
+        ctx = canvas.getContext('2d');
+        drawWatermarkOnCanvas(canvas, ctx, img, styleName, modelName, exif, resolve, base64Image);
+      };
+      img.onerror = () => resolve(base64Image);
+      img.src = base64Image;
+    } else {
+      try {
+        const tempCanvas = Taro.createOffscreenCanvas({ type: '2d', width: 100, height: 100 });
+        const img = tempCanvas.createImage();
+        img.onload = () => {
+          const w = img.width;
+          const h = img.height;
+          const watermarkHeight = Math.round(h * 0.08);
+          
+          canvas = Taro.createOffscreenCanvas({ type: '2d', width: w, height: h + watermarkHeight });
+          ctx = canvas.getContext('2d');
+          drawWatermarkOnCanvas(canvas, ctx, img, styleName, modelName, exif, resolve, base64Image);
+        };
+        img.onerror = (err) => {
+          console.error('Image load failed in Mini Program offscreen canvas:', err);
+          resolve(base64Image);
+        };
+        img.src = base64Image;
+      } catch (err) {
+        console.error('Failed to create offscreen canvas:', err);
+        resolve(base64Image);
+      }
+    }
+  });
+};
+
+const drawWatermarkOnCanvas = (canvas, ctx, img, styleName, modelName, exif, resolve, fallbackBase64) => {
+  try {
+    const isWeb = Taro.getEnv() === Taro.ENV_TYPE.WEB;
+    const watermarkHeight = Math.round(img.height * 0.08);
+    
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    ctx.drawImage(img, 0, 0);
+    
+    ctx.fillStyle = '#1a1a1a';
+    
+    const leftTitle = '闪贴 AI';
+    let leftSubtitle = '吉卜力动漫风 | Ghibli Style';
+    if (styleName === 'clay') {
+      leftSubtitle = '泥塑黏土风 | Clay Style';
+    } else if (styleName === 'japanese-film') {
+      leftSubtitle = '日式胶片风 | Retro Film';
+    } else if (styleName === 'polaroid') {
+      leftSubtitle = '经典拍立得风 | Polaroid';
+    }
+    
+    const fontSizeMain = Math.round(watermarkHeight * 0.28);
+    const fontSizeSub = Math.round(watermarkHeight * 0.18);
+    const paddingX = Math.round(canvas.width * 0.04);
+    
+    ctx.textAlign = 'left';
+    ctx.font = `bold ${fontSizeMain}px sans-serif`;
+    ctx.fillText(leftTitle, paddingX, img.height + watermarkHeight * 0.42);
+    
+    ctx.fillStyle = '#666666';
+    ctx.font = `${fontSizeSub}px sans-serif`;
+    ctx.fillText(leftSubtitle, paddingX, img.height + watermarkHeight * 0.72);
+    
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#1a1a1a';
+    ctx.font = `bold ${fontSizeMain}px sans-serif`;
+    
+    let rightTitle = 'Doubao Seedream 5.0';
+    if (modelName === 'dashscope-wanx') {
+      rightTitle = 'DashScope Wanx 2.1';
+    }
+    ctx.fillText(rightTitle, canvas.width - paddingX, img.height + watermarkHeight * 0.42);
+    
+    let dateStr = '';
+    if (exif && exif.dateTime) {
+      const parts = exif.dateTime.split(' ');
+      if (parts[0]) {
+        dateStr = parts[0].replace(/:/g, '.');
+      }
+    }
+    
+    let locStr = '';
+    if (exif && exif.gps) {
+      const lat = parseFloat(exif.gps.lat) || 0;
+      const lon = parseFloat(exif.gps.lon) || 0;
+      locStr = `${lat.toFixed(4)}° ${exif.gps.latRef || 'N'}  ${lon.toFixed(4)}° ${exif.gps.lonRef || 'E'}`;
+    } else if (exif && exif.device) {
+      locStr = exif.device;
+    }
+    
+    ctx.fillStyle = '#666666';
+    ctx.font = `${fontSizeSub}px sans-serif`;
+    const rightSubtitle = `${dateStr}  ${locStr}`.trim() || 'AI 智能创作';
+    ctx.fillText(rightSubtitle, canvas.width - paddingX, img.height + watermarkHeight * 0.72);
+    
+    const watermarkedDataUri = canvas.toDataURL('image/jpeg', 0.95);
+    
+    try {
+      const exifObj = { "0th": {}, "Exif": {}, "GPS": {}, "Interop": {}, "1st": {}, "thumbnail": null };
+      exifObj["0th"][piexif.ImageIFD.Software] = "Shantie AI";
+      
+      if (exif) {
+        if (exif.dateTime) {
+          exifObj["0th"][piexif.ImageIFD.DateTime] = exif.dateTime;
+          exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal] = exif.dateTime;
+          exifObj["Exif"][piexif.ExifIFD.DateTimeDigitized] = exif.dateTime;
+        }
+        if (exif.device) {
+          exifObj["0th"][piexif.ImageIFD.Model] = exif.device;
+        }
+        if (exif.gps) {
+          const latVal = parseFloat(exif.gps.lat);
+          const lonVal = parseFloat(exif.gps.lon);
+          if (!isNaN(latVal) && !isNaN(lonVal)) {
+            const latAbs = Math.abs(latVal);
+            const lonAbs = Math.abs(lonVal);
+            const latDeg = Math.floor(latAbs);
+            const latMin = Math.floor((latAbs - latDeg) * 60);
+            const latSec = Math.round(((latAbs - latDeg) * 60 - latMin) * 60 * 100);
+            const lonDeg = Math.floor(lonAbs);
+            const lonMin = Math.floor((lonAbs - lonDeg) * 60);
+            const lonSec = Math.round(((lonAbs - lonDeg) * 60 - lonMin) * 60 * 100);
+            
+            exifObj["GPS"][piexif.GPSIFD.GPSLatitude] = [[latDeg, 1], [latMin, 1], [latSec, 100]];
+            exifObj["GPS"][piexif.GPSIFD.GPSLatitudeRef] = exif.gps.latRef || (latVal >= 0 ? "N" : "S");
+            exifObj["GPS"][piexif.GPSIFD.GPSLongitude] = [[lonDeg, 1], [lonMin, 1], [lonSec, 100]];
+            exifObj["GPS"][piexif.GPSIFD.GPSLongitudeRef] = exif.gps.lonRef || (lonVal >= 0 ? "E" : "W");
+          }
+        }
+      }
+      
+      const exifBytes = piexif.dump(exifObj);
+      const finalDataUri = piexif.insert(exifBytes, watermarkedDataUri);
+      resolve(finalDataUri);
+    } catch (exifErr) {
+      console.warn('[Watermark EXIF] Failed to inject EXIF:', exifErr);
+      resolve(watermarkedDataUri);
+    }
+  } catch (err) {
+    console.error('Error drawing watermark:', err);
+    resolve(fallbackBase64);
+  }
+};
+
 // Helper: Extract Date, Time, Location, Device from EXIF data on client side using piexifjs
 const extractExifClient = (base64Image) => {
   if (!base64Image) return null;
@@ -367,17 +524,38 @@ export default function Index() {
           }
 
           const result = res.data || {};
-          setUploadedImages(prev => prev.map((img, idx) => {
-            if (idx === activeIdx) {
-              return { 
-                ...img, 
-                styledSrc: result.image,
-                activeStyle: styleName
-              };
-            }
-            return img;
-          }));
-          setIsLoading(false);
+          
+          Taro.showLoading({ title: '添加照片水印...' });
+          applyVisualWatermark(result.image, styleName, result.model, activeImage.exif)
+            .then(watermarkedImage => {
+              setUploadedImages(prev => prev.map((img, idx) => {
+                if (idx === activeIdx) {
+                  return { 
+                    ...img, 
+                    styledSrc: watermarkedImage,
+                    activeStyle: styleName
+                  };
+                }
+                return img;
+              }));
+              Taro.hideLoading();
+              setIsLoading(false);
+            })
+            .catch(err => {
+              console.error('Watermark drawing failed, using fallback:', err);
+              setUploadedImages(prev => prev.map((img, idx) => {
+                if (idx === activeIdx) {
+                  return { 
+                    ...img, 
+                    styledSrc: result.image,
+                    activeStyle: styleName
+                  };
+                }
+                return img;
+              }));
+              Taro.hideLoading();
+              setIsLoading(false);
+            });
         },
         fail: (err) => {
           console.error(err);
