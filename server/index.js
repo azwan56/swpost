@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import ExifReader from 'exifreader';
 import piexif from 'piexifjs';
+import sharp from 'sharp';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,11 +20,14 @@ if (!process.env.DASHSCOPE_API_KEY) {
 const app = express();
 const port = process.env.PORT || 5001;
 
-// Middlewares
+// Enable CORS for all origins and increase body size limit for base64 image uploads
 app.use(cors());
-app.use(express.json({ limit: '50mb' })); // Support large base64 strings
+app.use(express.json({ limit: '50mb' }));
 
-// Helper: Poll DashScope asynchronous task
+// Serve static frontend assets from parent directory (for single-server deployments)
+app.use(express.static(path.join(__dirname, '../dist')));
+
+// Helper: Poll DashScope async task until completion
 async function pollDashScopeTask(taskId) {
   const apiKey = process.env.DASHSCOPE_API_KEY;
   const url = `https://dashscope.aliyuncs.com/api/v1/tasks/${taskId}`;
@@ -119,35 +123,33 @@ function extractExif(imageBase64) {
   }
 }
 
-// Helper: Copy EXIF headers from original image to styled image, adding custom style/model/brand tag markers
-// NOTE: piexifjs only works with JPEG. AI models (Seedream, Wanx) return PNG images.
-// For PNG outputs, we skip binary EXIF injection here — the client handles it via the structured exif object.
-function copyAndModifyExif(originalBase64, styledBase64, styleName, modelName) {
+// Helper: Copy EXIF headers from original image to styled image, adding custom style/model/brand tag markers.
+// Uses sharp to convert PNG to JPEG before EXIF injection (piexifjs only supports JPEG).
+async function copyAndModifyExif(originalBase64, styledBase64, styleName, modelName) {
   try {
-    // Detect if styled image is PNG (piexifjs cannot inject EXIF into PNG)
-    const styledMimeMatch = styledBase64.match(/^data:(image\/\w+);base64,/);
-    const styledMime = styledMimeMatch ? styledMimeMatch[1] : 'image/jpeg';
-    
-    if (styledMime === 'image/png') {
-      console.log('[EXIF] Styled image is PNG — skipping server-side EXIF injection (client will handle it).');
-      return styledBase64;
-    }
-
-    const originalClean = originalBase64.replace(/^data:image\/\w+;base64,/, "");
     const styledClean = styledBase64.replace(/^data:image\/\w+;base64,/, "");
+    let styledBuffer = Buffer.from(styledClean, 'base64');
 
-    const originalBinary = Buffer.from(originalClean, 'base64').toString('binary');
-    const styledBinary = Buffer.from(styledClean, 'base64').toString('binary');
+    // Use sharp to force-convert to JPEG (handles PNG, WebP, etc.)
+    styledBuffer = await sharp(styledBuffer)
+      .jpeg({ quality: 95 })
+      .toBuffer();
+    console.log(`[EXIF] Converted styled image to JPEG (${styledBuffer.length} bytes)`);
 
-    // Check if styled binary is actually JPEG (starts with 0xFF 0xD8)
+    // Convert to binary string for piexifjs
+    const styledBinary = styledBuffer.toString('binary');
+
+    // Verify JPEG signature
     if (styledBinary.charCodeAt(0) !== 0xFF || styledBinary.charCodeAt(1) !== 0xD8) {
-      console.log('[EXIF] Styled image binary is not JPEG — skipping EXIF injection.');
-      return styledBase64;
+      console.log('[EXIF] sharp output is not JPEG — skipping EXIF injection.');
+      return `data:image/jpeg;base64,${styledBuffer.toString('base64')}`;
     }
 
     // Load EXIF from original
     let exifObj = { "0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": null };
     try {
+      const originalClean = originalBase64.replace(/^data:image\/\w+;base64,/, "");
+      const originalBinary = Buffer.from(originalClean, 'base64').toString('binary');
       exifObj = piexif.load(originalBinary);
     } catch (e) {
       console.log('[EXIF] No original EXIF to copy, creating default.');
@@ -168,8 +170,9 @@ function copyAndModifyExif(originalBase64, styledBase64, styleName, modelName) {
 
     // Convert back to Base64
     const newBase64 = Buffer.from(newBinary, 'binary').toString('base64');
+    console.log('[EXIF] ✅ Successfully injected EXIF into styled JPEG');
     
-    return `data:${styledMime};base64,${newBase64}`;
+    return `data:image/jpeg;base64,${newBase64}`;
   } catch (err) {
     console.error('[EXIF Write] Failed to copy EXIF:', err.message);
     return styledBase64;
@@ -319,7 +322,7 @@ app.post('/api/ai/style-transfer', async (req, res) => {
         if (resultUrl) {
           console.log('[StyleTransfer] ✅ Seedream 生成成功，正在转换为 base64...');
           const resultBase64 = await convertUrlToBase64(resultUrl);
-          const finalBase64 = copyAndModifyExif(image, resultBase64, style, 'doubao-seedream-5-0');
+          const finalBase64 = await copyAndModifyExif(image, resultBase64, style, 'doubao-seedream-5-0');
           return res.json({ image: finalBase64, model: 'doubao-seedream-5-0', exif: exifData });
         } else {
           console.error('[StyleTransfer] ⚠️ Seedream returned OK but no image URL:', JSON.stringify(volcData));
@@ -435,7 +438,7 @@ app.post('/api/ai/style-transfer', async (req, res) => {
     const resultUrl = await pollDashScopeTask(taskId);
     // Convert output image back to base64
     const resultBase64 = await convertUrlToBase64(resultUrl);
-    const finalBase64 = copyAndModifyExif(image, resultBase64, style, 'dashscope-wanx');
+    const finalBase64 = await copyAndModifyExif(image, resultBase64, style, 'dashscope-wanx');
 
     res.json({ image: finalBase64, model: 'dashscope-wanx', exif: exifData });
   } catch (error) {
