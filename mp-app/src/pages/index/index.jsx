@@ -88,17 +88,52 @@ const readImageAsBase64 = (tempFile) => {
 };
 
 // Helper: Save styled image to album (Mini Program) or download directly (Web)
-const saveOrDownloadImage = async (base64, activeIdx, activeStyle) => {
+const saveOrDownloadImage = async (base64OrFilePath, activeIdx, activeStyle) => {
   if (Taro.getEnv() === Taro.ENV_TYPE.WEB) {
     // Web environment: use anchor link download
     const link = document.createElement('a');
-    link.href = base64;
+    link.href = base64OrFilePath;
     link.download = `styled-${activeStyle || 'original'}-${activeIdx + 1}-${Date.now()}.jpg`;
     link.click();
     Taro.showToast({ title: '已下载到本地', icon: 'success' });
   } else {
     // WeChat Mini Program environment
-    const matches = /data:image\/(\w+);base64,(.*)/.exec(base64);
+    // Check if it's already a local temp file path (e.g. wxfile://usr/...)
+    const isLocalPath = typeof base64OrFilePath === 'string' && (
+      base64OrFilePath.startsWith('wxfile://') ||
+      base64OrFilePath.startsWith('http://usr/') ||
+      base64OrFilePath.startsWith('https://usr/') ||
+      base64OrFilePath.startsWith('/') ||
+      base64OrFilePath.includes('temp') ||
+      base64OrFilePath.includes('watermarked')
+    );
+
+    if (isLocalPath) {
+      Taro.showLoading({ title: '正在保存...' });
+      Taro.saveImageToPhotosAlbum({
+        filePath: base64OrFilePath,
+        success: () => {
+          Taro.hideLoading();
+          Taro.showToast({ title: '已保存至系统相册', icon: 'success' });
+        },
+        fail: (err) => {
+          Taro.hideLoading();
+          console.error('Save to album failed:', err);
+          Taro.showModal({
+            title: '保存失败',
+            content: '需要您授权保存图片到相册权限，是否去开启？',
+            success: (res) => {
+              if (res.confirm) {
+                Taro.openSetting();
+              }
+            }
+          });
+        }
+      });
+      return;
+    }
+
+    const matches = /data:image\/(\w+);base64,(.*)/.exec(base64OrFilePath);
     if (!matches) {
       Taro.showToast({ title: '数据格式错误', icon: 'none' });
       return;
@@ -256,48 +291,132 @@ const drawWatermarkOnCanvas = (canvas, ctx, img, styleName, modelName, exif, res
     const rightSubtitle = `${dateStr}  ${locStr}`.trim() || 'AI 智能创作';
     ctx.fillText(rightSubtitle, canvas.width - paddingX, img.height + watermarkHeight * 0.72);
     
-    const watermarkedDataUri = canvas.toDataURL('image/jpeg', 0.95);
-    
-    try {
-      const exifObj = { "0th": {}, "Exif": {}, "GPS": {}, "Interop": {}, "1st": {}, "thumbnail": null };
-      exifObj["0th"][piexif.ImageIFD.Software] = "Shantie AI";
-      
-      if (exif) {
-        if (exif.dateTime) {
-          exifObj["0th"][piexif.ImageIFD.DateTime] = exif.dateTime;
-          exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal] = exif.dateTime;
-          exifObj["Exif"][piexif.ExifIFD.DateTimeDigitized] = exif.dateTime;
-        }
-        if (exif.device) {
-          exifObj["0th"][piexif.ImageIFD.Model] = exif.device;
-        }
-        if (exif.gps) {
-          const latVal = parseFloat(exif.gps.lat);
-          const lonVal = parseFloat(exif.gps.lon);
-          if (!isNaN(latVal) && !isNaN(lonVal)) {
-            const latAbs = Math.abs(latVal);
-            const lonAbs = Math.abs(lonVal);
-            const latDeg = Math.floor(latAbs);
-            const latMin = Math.floor((latAbs - latDeg) * 60);
-            const latSec = Math.round(((latAbs - latDeg) * 60 - latMin) * 60 * 100);
-            const lonDeg = Math.floor(lonAbs);
-            const lonMin = Math.floor((lonAbs - lonDeg) * 60);
-            const lonSec = Math.round(((lonAbs - lonDeg) * 60 - lonMin) * 60 * 100);
-            
-            exifObj["GPS"][piexif.GPSIFD.GPSLatitude] = [[latDeg, 1], [latMin, 1], [latSec, 100]];
-            exifObj["GPS"][piexif.GPSIFD.GPSLatitudeRef] = exif.gps.latRef || (latVal >= 0 ? "N" : "S");
-            exifObj["GPS"][piexif.GPSIFD.GPSLongitude] = [[lonDeg, 1], [lonMin, 1], [lonSec, 100]];
-            exifObj["GPS"][piexif.GPSIFD.GPSLongitudeRef] = exif.gps.lonRef || (lonVal >= 0 ? "E" : "W");
+    if (isWeb) {
+      const watermarkedDataUri = canvas.toDataURL('image/jpeg', 0.95);
+      try {
+        const exifObj = { "0th": {}, "Exif": {}, "GPS": {}, "Interop": {}, "1st": {}, "thumbnail": null };
+        exifObj["0th"][piexif.ImageIFD.Software] = "Shantie AI";
+        
+        if (exif) {
+          if (exif.dateTime) {
+            exifObj["0th"][piexif.ImageIFD.DateTime] = exif.dateTime;
+            exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal] = exif.dateTime;
+            exifObj["Exif"][piexif.ExifIFD.DateTimeDigitized] = exif.dateTime;
+          }
+          if (exif.device) {
+            exifObj["0th"][piexif.ImageIFD.Model] = exif.device;
+          }
+          if (exif.gps) {
+            const latVal = parseFloat(exif.gps.lat);
+            const lonVal = parseFloat(exif.gps.lon);
+            if (!isNaN(latVal) && !isNaN(lonVal)) {
+              const latAbs = Math.abs(latVal);
+              const lonAbs = Math.abs(lonVal);
+              const latDeg = Math.floor(latAbs);
+              const latMin = Math.floor((latAbs - latDeg) * 60);
+              const latSec = Math.round(((latAbs - latDeg) * 60 - latMin) * 60 * 100);
+              const lonDeg = Math.floor(lonAbs);
+              const lonMin = Math.floor((lonAbs - lonDeg) * 60);
+              const lonSec = Math.round(((lonAbs - lonDeg) * 60 - lonMin) * 60 * 100);
+              
+              exifObj["GPS"][piexif.GPSIFD.GPSLatitude] = [[latDeg, 1], [latMin, 1], [latSec, 100]];
+              exifObj["GPS"][piexif.GPSIFD.GPSLatitudeRef] = exif.gps.latRef || (latVal >= 0 ? "N" : "S");
+              exifObj["GPS"][piexif.GPSIFD.GPSLongitude] = [[lonDeg, 1], [lonMin, 1], [lonSec, 100]];
+              exifObj["GPS"][piexif.GPSIFD.GPSLongitudeRef] = exif.gps.lonRef || (lonVal >= 0 ? "E" : "W");
+            }
           }
         }
+        
+        const exifBytes = piexif.dump(exifObj);
+        const finalDataUri = piexif.insert(exifBytes, watermarkedDataUri);
+        resolve(finalDataUri);
+      } catch (exifErr) {
+        console.warn('[Watermark EXIF] Failed to inject EXIF:', exifErr);
+        resolve(watermarkedDataUri);
       }
-      
-      const exifBytes = piexif.dump(exifObj);
-      const finalDataUri = piexif.insert(exifBytes, watermarkedDataUri);
-      resolve(finalDataUri);
-    } catch (exifErr) {
-      console.warn('[Watermark EXIF] Failed to inject EXIF:', exifErr);
-      resolve(watermarkedDataUri);
+    } else {
+      // Mini Program: OffscreenCanvas does NOT support canvasToTempFilePath,
+      // so we use toDataURL() and then write the result to a local temp file.
+      let watermarkedDataUri;
+      try {
+        watermarkedDataUri = canvas.toDataURL('image/jpeg', 0.95);
+      } catch (e) {
+        console.error('[Watermark] toDataURL failed:', e);
+        resolve(fallbackBase64);
+        return;
+      }
+
+      // Verify it's actually JPEG (some engines silently return PNG)
+      const isJpeg = watermarkedDataUri && watermarkedDataUri.startsWith('data:image/jpeg');
+      if (!isJpeg) {
+        console.warn('[Watermark] toDataURL returned non-JPEG, trying to use as-is');
+      }
+
+      // Build EXIF and inject it into the JPEG
+      let finalDataUri = watermarkedDataUri;
+      if (isJpeg && exif) {
+        try {
+          const exifObj = { "0th": {}, "Exif": {}, "GPS": {}, "Interop": {}, "1st": {}, "thumbnail": null };
+          exifObj["0th"][piexif.ImageIFD.Software] = "Shantie AI";
+
+          if (exif.dateTime) {
+            exifObj["0th"][piexif.ImageIFD.DateTime] = exif.dateTime;
+            exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal] = exif.dateTime;
+            exifObj["Exif"][piexif.ExifIFD.DateTimeDigitized] = exif.dateTime;
+          }
+          if (exif.device) {
+            exifObj["0th"][piexif.ImageIFD.Model] = exif.device;
+          }
+          if (exif.gps) {
+            const latVal = parseFloat(exif.gps.lat);
+            const lonVal = parseFloat(exif.gps.lon);
+            if (!isNaN(latVal) && !isNaN(lonVal)) {
+              const latAbs = Math.abs(latVal);
+              const lonAbs = Math.abs(lonVal);
+              const latDeg = Math.floor(latAbs);
+              const latMin = Math.floor((latAbs - latDeg) * 60);
+              const latSec = Math.round(((latAbs - latDeg) * 60 - latMin) * 60 * 100);
+              const lonDeg = Math.floor(lonAbs);
+              const lonMin = Math.floor((lonAbs - lonDeg) * 60);
+              const lonSec = Math.round(((lonAbs - lonDeg) * 60 - lonMin) * 60 * 100);
+
+              exifObj["GPS"][piexif.GPSIFD.GPSLatitude] = [[latDeg, 1], [latMin, 1], [latSec, 100]];
+              exifObj["GPS"][piexif.GPSIFD.GPSLatitudeRef] = exif.gps.latRef || (latVal >= 0 ? "N" : "S");
+              exifObj["GPS"][piexif.GPSIFD.GPSLongitude] = [[lonDeg, 1], [lonMin, 1], [lonSec, 100]];
+              exifObj["GPS"][piexif.GPSIFD.GPSLongitudeRef] = exif.gps.lonRef || (lonVal >= 0 ? "E" : "W");
+            }
+          }
+
+          const exifBytes = piexif.dump(exifObj);
+          finalDataUri = piexif.insert(exifBytes, watermarkedDataUri);
+          console.log('[Watermark EXIF] Successfully injected EXIF into JPEG');
+        } catch (exifErr) {
+          console.warn('[Watermark EXIF] Failed to inject EXIF:', exifErr);
+          // finalDataUri remains as watermarkedDataUri without EXIF
+        }
+      }
+
+      // Write the final image (with EXIF) to a local temp file instead of
+      // returning base64. This is critical because WeChat strips EXIF from
+      // base64 Data URIs when saving via long-press or saveImageToPhotosAlbum.
+      try {
+        const matches = /data:image\/(jpeg|jpg|png);base64,(.*)/.exec(finalDataUri);
+        if (matches) {
+          const ext = (matches[1] === 'png') ? 'png' : 'jpg';
+          const bodyData = matches[2];
+          const localFilePath = `${Taro.env.USER_DATA_PATH}/watermarked_${Date.now()}.${ext}`;
+          const fs = Taro.getFileSystemManager();
+          fs.writeFileSync(localFilePath, bodyData, 'base64');
+          console.log('[Watermark] Wrote EXIF-injected image to local file:', localFilePath);
+          resolve(localFilePath);
+        } else {
+          console.warn('[Watermark] Could not parse data URI, returning base64 as fallback');
+          resolve(finalDataUri);
+        }
+      } catch (writeErr) {
+        console.error('[Watermark] Failed to write local temp file:', writeErr);
+        resolve(finalDataUri);
+      }
     }
   } catch (err) {
     console.error('Error drawing watermark:', err);
