@@ -194,8 +194,6 @@ const applyVisualWatermark = (base64Image, styleName, modelName, exif) => {
           const watermarkHeight = Math.round(h * 0.08);
           
           canvas = Taro.createOffscreenCanvas({ type: '2d', width: w, height: h + watermarkHeight });
-          canvas.width = w;
-          canvas.height = h + watermarkHeight;
           ctx = canvas.getContext('2d');
           drawWatermarkOnCanvas(canvas, ctx, img, styleName, modelName, exif, resolve, base64Image);
         };
@@ -357,12 +355,6 @@ const drawWatermarkOnCanvas = (canvas, ctx, img, styleName, modelName, exif, res
         // Attempt 1: wx.canvasToTempFilePath directly converts to true JPEG
         wx.canvasToTempFilePath({
           canvas: canvas,
-          x: 0,
-          y: 0,
-          width: canvas.width,
-          height: canvas.height,
-          destWidth: canvas.width,
-          destHeight: canvas.height,
           fileType: 'jpg',
           quality: 0.95,
           success: (res) => {
@@ -461,7 +453,8 @@ const extractExifClient = (base64Image) => {
     let rawBytes = null;
     try {
       if (typeof Taro.base64ToArrayBuffer === 'function') {
-        const buffer = Taro.base64ToArrayBuffer(base64Image);
+        const pureBase64 = base64Image.replace(/^data:image\/\w+;base64,/, '');
+        const buffer = Taro.base64ToArrayBuffer(pureBase64);
         const view = new Uint8Array(buffer);
         if (view[0] === 0xFF && view[1] === 0xD8) {
           let offset = 2;
