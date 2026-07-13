@@ -170,6 +170,8 @@ const applyVisualWatermark = (base64Image, styleName, modelName, exif) => {
           const watermarkHeight = Math.round(h * 0.08);
           
           canvas = Taro.createOffscreenCanvas({ type: '2d', width: w, height: h + watermarkHeight });
+          canvas.width = w;
+          canvas.height = h + watermarkHeight;
           ctx = canvas.getContext('2d');
           drawWatermarkOnCanvas(canvas, ctx, img, styleName, modelName, exif, resolve, base64Image);
         };
@@ -425,7 +427,11 @@ export default function Index() {
           try {
             const id = Math.random().toString(36).substring(2, 9);
             
-            // Native compress for WeChat Mini Program to avoid oversized payload and API failure
+            // 1. Read original file as base64 to extract EXIF data before compression (since compression strips EXIF metadata)
+            const originalBase64 = await readImageAsBase64(tempFile);
+            const exif = extractExifClient(originalBase64);
+
+            // 2. Native compress for WeChat Mini Program to avoid oversized payload and API failure
             let finalPath = tempFile.tempFilePath;
             if (Taro.getEnv() !== Taro.ENV_TYPE.WEB) {
               finalPath = await new Promise((resolve) => {
@@ -442,7 +448,6 @@ export default function Index() {
             }
 
             const base64Src = await readImageAsBase64({ tempFilePath: finalPath });
-            const exif = extractExifClient(base64Src);
             newImages.push({
               id,
               src: base64Src,
