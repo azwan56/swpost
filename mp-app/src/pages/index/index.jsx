@@ -636,7 +636,9 @@ export default function Index() {
     setErrorMsg('');
 
     try {
-      const inputSrc = activeImage.styledSrc || activeImage.src;
+      // Always use the original base64 src for style transfer input.
+      // styledSrc may be a local file path (wxfile://...) which cannot be sent to the backend.
+      const inputSrc = activeImage.src;
       // Compress if on Web platform
       const compressedImage = await resizeImageBase64(inputSrc, 1600, 0.85);
 
