@@ -267,7 +267,24 @@ export default function Index() {
         for (const tempFile of res.tempFiles) {
           try {
             const id = Math.random().toString(36).substring(2, 9);
-            const base64Src = await readImageAsBase64(tempFile);
+            
+            // Native compress for WeChat Mini Program to avoid oversized payload and API failure
+            let finalPath = tempFile.tempFilePath;
+            if (Taro.getEnv() !== Taro.ENV_TYPE.WEB) {
+              finalPath = await new Promise((resolve) => {
+                Taro.compressImage({
+                  src: tempFile.tempFilePath,
+                  quality: 80,
+                  success: (cRes) => resolve(cRes.tempFilePath),
+                  fail: (err) => {
+                    console.warn('Taro.compressImage failed, fallback to original:', err);
+                    resolve(tempFile.tempFilePath);
+                  }
+                });
+              });
+            }
+
+            const base64Src = await readImageAsBase64({ tempFilePath: finalPath });
             const exif = extractExifClient(base64Src);
             newImages.push({
               id,
