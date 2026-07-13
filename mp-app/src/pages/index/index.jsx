@@ -168,6 +168,57 @@ const saveOrDownloadImage = async (base64OrFilePath, activeIdx, activeStyle) => 
   }
 };
 
+// Helper: Decode Base64 to ArrayBuffer (Unified, fallback for both H5 and Mini Program)
+const decodeBase64ToArrayBuffer = (base64String) => {
+  try {
+    if (typeof Taro !== 'undefined' && typeof Taro.base64ToArrayBuffer === 'function') {
+      return Taro.base64ToArrayBuffer(base64String);
+    }
+    if (typeof wx !== 'undefined' && typeof wx.base64ToArrayBuffer === 'function') {
+      return wx.base64ToArrayBuffer(base64String);
+    }
+  } catch (e) {}
+  
+  try {
+    if (typeof atob === 'function') {
+      const binary = atob(base64String);
+      const len = binary.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return bytes.buffer;
+    }
+  } catch (e) {}
+
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const lookup = new Uint8Array(256);
+  for (let i = 0; i < chars.length; i++) {
+    lookup[chars.charCodeAt(i)] = i;
+  }
+  let bufferLength = base64String.length * 0.75;
+  const len = base64String.length;
+  let i, p = 0;
+  if (base64String[base64String.length - 1] === '=') {
+    bufferLength--;
+    if (base64String[base64String.length - 2] === '=') {
+      bufferLength--;
+    }
+  }
+  const arrayBuffer = new ArrayBuffer(bufferLength);
+  const bytes = new Uint8Array(arrayBuffer);
+  for (i = 0; i < len; i += 4) {
+    const encoded1 = lookup[base64String.charCodeAt(i)];
+    const encoded2 = lookup[base64String.charCodeAt(i + 1)];
+    const encoded3 = lookup[base64String.charCodeAt(i + 2)];
+    const encoded4 = lookup[base64String.charCodeAt(i + 3)];
+    bytes[p++] = (encoded1 << 2) | (encoded2 >> 4);
+    bytes[p++] = ((encoded2 & 15) << 4) | (encoded3 >> 2);
+    bytes[p++] = ((encoded3 & 3) << 6) | (encoded4 & 63);
+  }
+  return arrayBuffer;
+};
+
 // Helper: Draw visual photography watermark (Leica-style white border at bottom)
 const applyVisualWatermark = (base64Image, styleName, modelName, exif) => {
   return new Promise((resolve) => {
@@ -178,34 +229,62 @@ const applyVisualWatermark = (base64Image, styleName, modelName, exif) => {
       const img = new global.Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => {
+        const w = img.width || 1024;
+        const h = img.height || 1024;
+        const watermarkHeight = Math.round(h * 0.08);
         canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h + watermarkHeight;
         ctx = canvas.getContext('2d');
         drawWatermarkOnCanvas(canvas, ctx, img, styleName, modelName, exif, resolve, base64Image);
       };
       img.onerror = () => resolve(base64Image);
       img.src = base64Image;
     } else {
-      try {
-        const tempCanvas = Taro.createOffscreenCanvas({ type: '2d', width: 100, height: 100 });
-        const img = tempCanvas.createImage();
-        img.onload = () => {
-          const w = img.width;
-          const h = img.height;
-          const watermarkHeight = Math.round(h * 0.08);
+      // WeChat Mini Program: Use getImageInfo first to get exact physical dimensions and avoid 0px / scale deformation bugs
+      const runWithDimensions = (w, h) => {
+        const watermarkHeight = Math.round(h * 0.08);
+        try {
+          const offscreenCanvas = Taro.createOffscreenCanvas({ type: '2d', width: w, height: h + watermarkHeight });
+          offscreenCanvas.width = w;
+          offscreenCanvas.height = h + watermarkHeight;
+          const context = offscreenCanvas.getContext('2d');
           
-          canvas = Taro.createOffscreenCanvas({ type: '2d', width: w, height: h + watermarkHeight });
-          ctx = canvas.getContext('2d');
-          drawWatermarkOnCanvas(canvas, ctx, img, styleName, modelName, exif, resolve, base64Image);
-        };
-        img.onerror = (err) => {
-          console.error('Image load failed in Mini Program offscreen canvas:', err);
+          const img = offscreenCanvas.createImage();
+          img.onload = () => {
+            drawWatermarkOnCanvas(offscreenCanvas, context, img, styleName, modelName, exif, resolve, base64Image);
+          };
+          img.onerror = (err) => {
+            console.error('Image load failed inside offscreen canvas:', err);
+            resolve(base64Image);
+          };
+          img.src = base64Image;
+        } catch (e) {
+          console.error('Offscreen canvas creation/draw failed:', e);
           resolve(base64Image);
-        };
-        img.src = base64Image;
-      } catch (err) {
-        console.error('Failed to create offscreen canvas:', err);
-        resolve(base64Image);
-      }
+        }
+      };
+
+      Taro.getImageInfo({
+        src: base64Image,
+        success: (info) => {
+          runWithDimensions(info.width || 1024, info.height || 1024);
+        },
+        fail: (err) => {
+          console.warn('getImageInfo failed, fallback to tempCanvas:', err);
+          try {
+            const tempCanvas = Taro.createOffscreenCanvas({ type: '2d', width: 100, height: 100 });
+            const img = tempCanvas.createImage();
+            img.onload = () => {
+              runWithDimensions(img.width || 1024, img.height || 1024);
+            };
+            img.onerror = () => resolve(base64Image);
+            img.src = base64Image;
+          } catch (e) {
+            resolve(base64Image);
+          }
+        }
+      });
     }
   });
 };
@@ -452,9 +531,9 @@ const extractExifClient = (base64Image) => {
     // Extract raw EXIF bytes for lossless injection by parsing the APP1 segment directly
     let rawBytes = null;
     try {
-      if (typeof Taro.base64ToArrayBuffer === 'function') {
-        const pureBase64 = base64Image.replace(/^data:image\/\w+;base64,/, '');
-        const buffer = Taro.base64ToArrayBuffer(pureBase64);
+      const pureBase64 = base64Image.replace(/^data:image\/\w+;base64,/, '');
+      const buffer = decodeBase64ToArrayBuffer(pureBase64);
+      if (buffer) {
         const view = new Uint8Array(buffer);
         if (view[0] === 0xFF && view[1] === 0xD8) {
           let offset = 2;
