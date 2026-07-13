@@ -103,7 +103,8 @@ const saveOrDownloadImage = async (base64, activeIdx, activeStyle) => {
       Taro.showToast({ title: '数据格式错误', icon: 'none' });
       return;
     }
-    const format = matches[1] || 'jpg';
+    let format = matches[1] || 'jpg';
+    if (format === 'jpeg') format = 'jpg';
     const bodyData = matches[2];
     const filePath = `${Taro.env.USER_DATA_PATH}/temp_styled_${activeIdx}_${Date.now()}.${format}`;
     const fs = Taro.getFileSystemManager();
@@ -817,6 +818,7 @@ export default function Index() {
                   className="preview-image"
                   src={activeImage.styledSrc || activeImage.src}
                   mode="widthFix"
+                  showMenuByLongpress
                 />
                 <View className="preview-actions-overlay">
                   {activeImage.styledSrc ? (
@@ -834,6 +836,14 @@ export default function Index() {
                   </Button>
                 </View>
               </View>
+
+              {Taro.getEnv() !== Taro.ENV_TYPE.WEB && (
+                <View className="exif-tip-box">
+                  <Text className="exif-tip-text">
+                    💡 提示：微信系统“保存相册”按钮会过滤图片 EXIF 拍照参数。如需 100% 写入并保留 EXIF 信息，请【长按上方预览图】并选择【保存图片】。
+                  </Text>
+                </View>
+              )}
 
               {/* Styled Picker Cards */}
               <View className="style-picker-grid">
