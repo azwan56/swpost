@@ -109,25 +109,18 @@ const saveOrDownloadImage = async (base64OrFilePath, activeIdx, activeStyle) => 
     );
 
     if (isLocalPath) {
-      Taro.showLoading({ title: '正在保存...' });
-      Taro.saveImageToPhotosAlbum({
-        filePath: base64OrFilePath,
-        success: () => {
-          Taro.hideLoading();
-          Taro.showToast({ title: '已保存至系统相册', icon: 'success' });
-        },
-        fail: (err) => {
-          Taro.hideLoading();
-          console.error('Save to album failed:', err);
-          Taro.showModal({
-            title: '保存失败',
-            content: '需要您授权保存图片到相册权限，是否去开启？',
-            success: (res) => {
-              if (res.confirm) {
-                Taro.openSetting();
-              }
-            }
-          });
+      Taro.showModal({
+        title: '保存包含 EXIF 原图',
+        content: '直接保存会导致微信自动抹除照片的时间、地点等 EXIF 信息。为了完整保留，将为您打开预览大图，请【长按图片】保存到相册。',
+        confirmText: '去保存',
+        showCancel: false,
+        success: (res) => {
+          if (res.confirm) {
+            Taro.previewImage({
+              current: base64OrFilePath,
+              urls: [base64OrFilePath]
+            });
+          }
         }
       });
       return;
@@ -144,38 +137,32 @@ const saveOrDownloadImage = async (base64OrFilePath, activeIdx, activeStyle) => 
     const filePath = `${Taro.env.USER_DATA_PATH}/temp_styled_${activeIdx}_${Date.now()}.${format}`;
     const fs = Taro.getFileSystemManager();
     
-    Taro.showLoading({ title: '正在保存...' });
-    fs.writeFile({
-      filePath,
-      data: bodyData,
-      encoding: 'base64',
-      success: () => {
-        Taro.saveImageToPhotosAlbum({
-          filePath,
-          success: () => {
-            Taro.hideLoading();
-            Taro.showToast({ title: '已保存至系统相册', icon: 'success' });
-          },
-          fail: (err) => {
-            Taro.hideLoading();
-            console.error('Save to album failed:', err);
-            // Request setting permission if denied
-            Taro.showModal({
-              title: '保存失败',
-              content: '需要您授权保存图片到相册权限，是否去开启？',
-              success: (res) => {
-                if (res.confirm) {
-                  Taro.openSetting();
-                }
-              }
-            });
-          }
-        });
-      },
-      fail: (err) => {
-        Taro.hideLoading();
-        console.error('Write file failed:', err);
-        Taro.showToast({ title: '保存图片失败', icon: 'none' });
+    Taro.showModal({
+      title: '保存包含 EXIF 原图',
+      content: '直接保存会导致微信自动抹除照片的时间、地点等 EXIF 信息。为了完整保留，将为您打开预览大图，请【长按图片】保存到相册。',
+      confirmText: '去保存',
+      showCancel: false,
+      success: (res) => {
+        if (res.confirm) {
+          Taro.showLoading({ title: '准备预览...' });
+          fs.writeFile({
+            filePath,
+            data: bodyData,
+            encoding: 'base64',
+            success: () => {
+              Taro.hideLoading();
+              Taro.previewImage({
+                current: filePath,
+                urls: [filePath]
+              });
+            },
+            fail: (err) => {
+              Taro.hideLoading();
+              console.error('Write file failed:', err);
+              Taro.showToast({ title: '文件写入失败', icon: 'none' });
+            }
+          });
+        }
       }
     });
   }
@@ -336,138 +323,81 @@ const drawWatermarkOnCanvas = (canvas, ctx, img, styleName, modelName, exif, res
       }
     } else {
       // === Mini Program EXIF-safe export pipeline ===
-      // Problem: WeChat OffscreenCanvas.toDataURL('image/jpeg') often returns PNG
-      // silently, and piexif can ONLY inject EXIF into JPEG format.
-      // Solution: Write canvas output to temp file → force-convert to JPEG via
-      // Taro.compressImage → read JPEG → inject EXIF → write final file.
+      // WeChat OffscreenCanvas.toDataURL('image/jpeg') sometimes returns PNG silently.
+      // piexif ONLY works with valid JPEGs (starting with /9j/).
+      
+      const injectExifAndSave = (jpegBase64, fallbackPath) => {
+        const jpegDataUri = `data:image/jpeg;base64,${jpegBase64}`;
+        let finalDataUri = jpegDataUri;
+        
+        if (exif && exif.rawBytes && jpegBase64.startsWith('/9j/')) {
+          try {
+            finalDataUri = piexif.insert(exif.rawBytes, jpegDataUri);
+            console.log('[Watermark EXIF] ✅ Successfully injected RAW EXIF into JPEG');
+          } catch (exifErr) {
+            console.warn('[Watermark EXIF] Failed to inject EXIF:', exifErr);
+          }
+        } else if (exif) {
+           console.warn('[Watermark EXIF] Skip EXIF inject: Data is not a valid JPEG format.');
+        }
 
-      let rawDataUri;
+        const finalMatch = /data:image\/jpeg;base64,(.+)/.exec(finalDataUri);
+        if (finalMatch) {
+          const fs = Taro.getFileSystemManager();
+          const finalPath = `${Taro.env.USER_DATA_PATH}/watermarked_${Date.now()}.jpg`;
+          fs.writeFileSync(finalPath, finalMatch[1], 'base64');
+          console.log('[Watermark] ✅ Final EXIF image written to:', finalPath);
+          resolve(finalPath);
+        } else {
+          resolve(fallbackPath || fallbackBase64);
+        }
+      };
+
       try {
-        rawDataUri = canvas.toDataURL('image/jpeg', 0.95);
-      } catch (e) {
-        console.error('[Watermark] toDataURL failed:', e);
-        resolve(fallbackBase64);
-        return;
-      }
-
-      const rawMatch = /data:image\/([\w+]+);base64,(.+)/.exec(rawDataUri);
-      if (!rawMatch) {
-        console.error('[Watermark] Could not parse toDataURL output');
-        resolve(fallbackBase64);
-        return;
-      }
-
-      const rawFormat = rawMatch[1]; // 'jpeg' or 'png'
-      const rawBody = rawMatch[2];
-      const rawExt = (rawFormat === 'png') ? 'png' : 'jpg';
-      const rawTempPath = `${Taro.env.USER_DATA_PATH}/raw_canvas_${Date.now()}.${rawExt}`;
-
-      console.log(`[Watermark] toDataURL returned format: ${rawFormat}, writing to ${rawTempPath}`);
-
-      try {
-        const fs = Taro.getFileSystemManager();
-        fs.writeFileSync(rawTempPath, rawBody, 'base64');
-
-        // Force convert to JPEG using Taro.compressImage (works regardless of input format)
-        Taro.compressImage({
-          src: rawTempPath,
-          quality: 95,
-          success: (compRes) => {
-            try {
-              const jpegTempPath = compRes.tempFilePath;
-              console.log('[Watermark] compressImage produced JPEG at:', jpegTempPath);
-
-              // Read the guaranteed-JPEG file as base64
-              const jpegBase64 = fs.readFileSync(jpegTempPath, 'base64');
-              const jpegDataUri = `data:image/jpeg;base64,${jpegBase64}`;
-
-              // Build and inject EXIF metadata
-              let finalDataUri = jpegDataUri;
-              if (exif) {
-                try {
-                  const exifObj = { "0th": {}, "Exif": {}, "GPS": {}, "Interop": {}, "1st": {}, "thumbnail": null };
-                  exifObj["0th"][piexif.ImageIFD.Software] = "Shantie AI";
-
-                  if (exif.dateTime) {
-                    exifObj["0th"][piexif.ImageIFD.DateTime] = exif.dateTime;
-                    exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal] = exif.dateTime;
-                    exifObj["Exif"][piexif.ExifIFD.DateTimeDigitized] = exif.dateTime;
-                  }
-                  if (exif.device) {
-                    exifObj["0th"][piexif.ImageIFD.Model] = exif.device;
-                  }
-                  if (exif.gps) {
-                    const latVal = parseFloat(exif.gps.lat);
-                    const lonVal = parseFloat(exif.gps.lon);
-                    if (!isNaN(latVal) && !isNaN(lonVal)) {
-                      const latAbs = Math.abs(latVal);
-                      const lonAbs = Math.abs(lonVal);
-                      const latDeg = Math.floor(latAbs);
-                      const latMin = Math.floor((latAbs - latDeg) * 60);
-                      const latSec = Math.round(((latAbs - latDeg) * 60 - latMin) * 60 * 100);
-                      const lonDeg = Math.floor(lonAbs);
-                      const lonMin = Math.floor((lonAbs - lonDeg) * 60);
-                      const lonSec = Math.round(((lonAbs - lonDeg) * 60 - lonMin) * 60 * 100);
-
-                      exifObj["GPS"][piexif.GPSIFD.GPSLatitude] = [[latDeg, 1], [latMin, 1], [latSec, 100]];
-                      exifObj["GPS"][piexif.GPSIFD.GPSLatitudeRef] = exif.gps.latRef || (latVal >= 0 ? "N" : "S");
-                      exifObj["GPS"][piexif.GPSIFD.GPSLongitude] = [[lonDeg, 1], [lonMin, 1], [lonSec, 100]];
-                      exifObj["GPS"][piexif.GPSIFD.GPSLongitudeRef] = exif.gps.lonRef || (lonVal >= 0 ? "E" : "W");
-                    }
-                  }
-
-                  const exifBytes = piexif.dump(exifObj);
-                  finalDataUri = piexif.insert(exifBytes, jpegDataUri);
-                  console.log('[Watermark EXIF] ✅ Successfully injected EXIF into JPEG');
-                } catch (exifErr) {
-                  console.warn('[Watermark EXIF] Failed to inject EXIF:', exifErr);
-                }
-              }
-
-              // Write the EXIF-injected JPEG to a final local file
-              const finalMatch = /data:image\/jpeg;base64,(.+)/.exec(finalDataUri);
-              if (finalMatch) {
-                const finalPath = `${Taro.env.USER_DATA_PATH}/watermarked_${Date.now()}.jpg`;
-                fs.writeFileSync(finalPath, finalMatch[1], 'base64');
-                console.log('[Watermark] ✅ Final EXIF image written to:', finalPath);
-                resolve(finalPath);
-              } else {
-                console.warn('[Watermark] Final data URI parse failed, using compressImage output');
-                resolve(jpegTempPath);
-              }
-            } catch (innerErr) {
-              console.error('[Watermark] Post-compress processing failed:', innerErr);
-              resolve(compRes.tempFilePath);
-            }
+        // Attempt 1: wx.canvasToTempFilePath directly converts to true JPEG
+        wx.canvasToTempFilePath({
+          canvas: canvas,
+          x: 0,
+          y: 0,
+          width: canvas.width,
+          height: canvas.height,
+          destWidth: canvas.width,
+          destHeight: canvas.height,
+          fileType: 'jpg',
+          quality: 0.95,
+          success: (res) => {
+            const fs = Taro.getFileSystemManager();
+            const jpegBase64 = fs.readFileSync(res.tempFilePath, 'base64');
+            injectExifAndSave(jpegBase64, res.tempFilePath);
           },
-          fail: (compErr) => {
-            console.warn('[Watermark] compressImage failed, using raw canvas output:', compErr);
-            // Fallback: try direct EXIF injection if the raw output happens to be JPEG
-            if (rawFormat === 'jpeg' && exif) {
-              try {
-                const exifObj = { "0th": {}, "Exif": {}, "GPS": {}, "Interop": {}, "1st": {}, "thumbnail": null };
-                exifObj["0th"][piexif.ImageIFD.Software] = "Shantie AI";
-                if (exif.dateTime) {
-                  exifObj["0th"][piexif.ImageIFD.DateTime] = exif.dateTime;
-                  exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal] = exif.dateTime;
-                }
-                if (exif.device) exifObj["0th"][piexif.ImageIFD.Model] = exif.device;
-                const exifBytes = piexif.dump(exifObj);
-                const finalUri = piexif.insert(exifBytes, rawDataUri);
-                const m = /data:image\/jpeg;base64,(.+)/.exec(finalUri);
-                if (m) {
-                  const fallbackPath = `${Taro.env.USER_DATA_PATH}/watermarked_fb_${Date.now()}.jpg`;
-                  fs.writeFileSync(fallbackPath, m[1], 'base64');
-                  resolve(fallbackPath);
-                  return;
-                }
-              } catch (e) { /* ignore */ }
+          fail: (err) => {
+            console.warn('[Watermark] canvasToTempFilePath failed, fallback to toDataURL:', err);
+            
+            // Attempt 2: canvas.toDataURL fallback
+            let rawDataUri = canvas.toDataURL('image/jpeg', 0.95);
+            const rawMatch = /data:image\/([\w+]+);base64,(.+)/.exec(rawDataUri);
+            if (rawMatch && rawMatch[2].startsWith('/9j/')) {
+               injectExifAndSave(rawMatch[2], rawDataUri);
+            } else {
+               // Attempt 3: compressImage to force JPEG conversion from PNG base64
+               const rawTempPath = `${Taro.env.USER_DATA_PATH}/raw_canvas_${Date.now()}.png`;
+               const fs = Taro.getFileSystemManager();
+               fs.writeFileSync(rawTempPath, rawMatch ? rawMatch[2] : '', 'base64');
+               
+               Taro.compressImage({
+                 src: rawTempPath,
+                 quality: 95,
+                 success: (compRes) => {
+                   const jpegBase64 = fs.readFileSync(compRes.tempFilePath, 'base64');
+                   injectExifAndSave(jpegBase64, compRes.tempFilePath);
+                 },
+                 fail: () => resolve(fallbackBase64)
+               });
             }
-            resolve(rawTempPath);
           }
         });
-      } catch (writeErr) {
-        console.error('[Watermark] Failed to write raw canvas temp file:', writeErr);
+      } catch (e) {
+        console.error('[Watermark] Export pipeline error:', e);
         resolve(fallbackBase64);
       }
     }
@@ -527,10 +457,22 @@ const extractExifClient = (base64Image) => {
       }
     }
     
+    // Extract raw EXIF bytes for lossless injection
+    let rawBytes = null;
+    try {
+      // Modify software tag for watermark credit, then dump whole object
+      exifObj["0th"] = exifObj["0th"] || {};
+      exifObj["0th"][piexif.ImageIFD.Software] = "Shantie AI";
+      rawBytes = piexif.dump(exifObj);
+    } catch (e) {
+      console.warn('[EXIF Client Extract] Failed to dump raw EXIF bytes:', e);
+    }
+
     return {
       dateTime,
       gps,
-      device
+      device,
+      rawBytes
     };
   } catch (err) {
     console.log('[EXIF Client Extract] No EXIF found or failed to parse:', err.message);
@@ -580,7 +522,7 @@ export default function Index() {
     console.log('Taro Page loaded. API Base set to:', API_BASE);
   });
 
-  // Handle photos upload using Taro chooseImage API (Forces original selection to preserve EXIF)
+  // Handle photos upload using Taro chooseMedia API (Forces original selection to preserve EXIF)
   const handlePhotosUpload = () => {
     const availableSlots = 4 - uploadedImages.length;
     if (availableSlots <= 0) {
@@ -588,8 +530,10 @@ export default function Index() {
       return;
     }
 
-    Taro.chooseImage({
+    const chooseFn = Taro.chooseMedia ? Taro.chooseMedia : Taro.chooseImage;
+    chooseFn({
       count: availableSlots,
+      mediaType: ['image'], // Specific to chooseMedia
       sizeType: ['original'], // Forced to original, otherwise WeChat strips EXIF
       sourceType: ['album', 'camera'],
       success: async (res) => {
@@ -599,7 +543,7 @@ export default function Index() {
         for (const tempFile of res.tempFiles) {
           try {
             const id = Math.random().toString(36).substring(2, 9);
-            const path = tempFile.path;
+            const path = tempFile.tempFilePath || tempFile.path;
             
             // 1. Read original file as base64 to extract EXIF data before compression (since compression strips EXIF metadata)
             const originalBase64 = await readImageAsBase64(tempFile);
