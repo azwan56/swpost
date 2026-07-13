@@ -898,7 +898,7 @@ export default function Index() {
           <Text className="welcome-subtitle">AI 智能画风转换与爆款文案助手</Text>
           
           <View className="welcome-workflow">
-            <Text className="workflow-title" style={{ textAlign: 'center', width: '100%', display: 'block' }}>✨ 三步体验：拍、变、生！</Text>
+            <Text className="workflow-title" style={{ textAlign: 'center', width: '100%', display: 'block' }}>✨ 三步体验：拍、生、变！</Text>
             <View className="workflow-steps">
               <View className="workflow-step">
                 <Text className="step-num">1</Text>
@@ -910,15 +910,15 @@ export default function Index() {
               <View className="workflow-step">
                 <Text className="step-num">2</Text>
                 <View className="step-content">
-                  <Text className="step-content-title">🎨 艺术重绘（变）</Text>
-                  <Text className="step-content-desc">一键转换为治愈吉卜力、软萌泥塑或复古日式胶片风，并可保存高清原图。</Text>
+                  <Text className="step-content-title">✍️ 一键生成（生）</Text>
+                  <Text className="step-content-desc">AI 结合画面时空撰写 3 款不同风格的爆款文案，复制即可去朋友圈、小红书、Ins 发文！</Text>
                 </View>
               </View>
               <View className="workflow-step">
                 <Text className="step-num">3</Text>
                 <View className="step-content">
-                  <Text className="step-content-title">✍️ 一键生成（生）</Text>
-                  <Text className="step-content-desc">AI 结合画面时空撰写 3 款不同风格的爆款文案，复制即可去朋友圈、小红书、Ins 发文！</Text>
+                  <Text className="step-content-title">🎨 艺术重绘（变）</Text>
+                  <Text className="step-content-desc">一键转换为治愈吉卜力、软萌泥塑或复古日式胶片风，并可保存高清原图。</Text>
                 </View>
               </View>
             </View>
@@ -1016,10 +1016,84 @@ export default function Index() {
             )}
           </View>
 
-          {/* Step 2: Preview & Style Selection */}
+          {/* Step 2: AI Copywriting Generator */}
+          {uploadedImages.length > 0 && (
+            <View className="card">
+              <Text className="card-title">✍️ 第二步：生成爆款文案</Text>
+              
+              <View className="segmented-control">
+                {['探店', '旅行心情', '运动'].map((style) => (
+                  <View
+                    key={style}
+                    className={`segmented-item ${copyStyle === style ? 'active' : ''}`}
+                    onClick={() => setCopyStyle(style)}
+                  >
+                    {style === '探店' && '🛍️ 探店'}
+                    {style === '旅行心情' && '✈️ 旅行'}
+                    {style === '运动' && '🏃 运动'}
+                  </View>
+                ))}
+              </View>
+
+              <Textarea
+                className="modern-textarea"
+                style={{ height: '80px', minHeight: '80px' }}
+                placeholder="添加亮点描述（选填，如拍摄主题、天气或特定亮点）..."
+                value={copyKeywords}
+                onInput={(e) => setCopyKeywords(e.detail.value)}
+              />
+
+              <Button
+                className="btn-pill"
+                onClick={handleGenerateAICopy}
+                disabled={isGeneratingCopy}
+              >
+                {isGeneratingCopy ? '🤖 智能撰写中...' : '一键生成爆款小红书文案'}
+              </Button>
+            </View>
+          )}
+
+          {/* Copywriting Result Showcase */}
+          {uploadedImages.length > 0 && generatedCopyOptions.length > 0 && (
+            <View className="card">
+              <Text className="card-title">✨ AI 生成结果</Text>
+              
+              <View className="result-tabs">
+                {generatedCopyOptions.map((opt, idx) => (
+                  <View
+                    key={idx}
+                    className={`result-tab-item ${activeCopyOptionIdx === idx ? 'active' : ''}`}
+                    onClick={() => applyCopyOption(idx)}
+                  >
+                    方案 {idx + 1}
+                  </View>
+                ))}
+              </View>
+
+              <View className="paper-card">
+                <View className="paper-header">
+                  <Text className="paper-title">小红书格式预览</Text>
+                  <Button className="btn-copy-action" onClick={handleCopyClipboard}>
+                    📋 复制文案
+                  </Button>
+                </View>
+                
+                <View className="paper-content">
+                  <Text style={{ fontWeight: 'bold', display: 'block', marginBottom: '0.4rem', borderBottom: '1px dotted var(--border-color)', paddingBottom: '0.3rem' }}>
+                    标题：{aiTitle}
+                  </Text>
+                  <Text style={{ whiteSpace: 'pre-wrap', display: 'block' }}>
+                    {aiBody}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {/* Step 3: Preview & Style Selection */}
           {uploadedImages.length > 0 && activeImage && (
             <View className="card">
-              <Text className="card-title">🖼️ 第二步：画面预览与风格化</Text>
+              <Text className="card-title">🎨 第三步：画面预览与风格化</Text>
               
               {/* Image preview */}
               <View className="preview-card">
@@ -1083,83 +1157,6 @@ export default function Index() {
                   <Text className="style-picker-desc">复古胶片颗粒</Text>
                 </View>
               </View>
-            </View>
-          )}
-
-          {/* Step 3: AI Copywriting Generator */}
-          {uploadedImages.length > 0 && (
-            <View className="card">
-              <Text className="card-title">✍️ 第三步：生成爆款文案</Text>
-              
-              <View className="segmented-control">
-                {['探店', '旅行心情', '运动'].map((style) => (
-                  <View
-                    key={style}
-                    className={`segmented-item ${copyStyle === style ? 'active' : ''}`}
-                    onClick={() => setCopyStyle(style)}
-                  >
-                    {style === '探店' && '🛍️ 探店'}
-                    {style === '旅行心情' && '✈️ 旅行'}
-                    {style === '运动' && '🏃 运动'}
-                  </View>
-                ))}
-              </View>
-
-              <Textarea
-                className="modern-textarea"
-                style={{ height: '80px', minHeight: '80px' }}
-                placeholder="添加亮点描述（选填，如拍摄主题、天气或特定亮点）..."
-                value={copyKeywords}
-                onInput={(e) => setCopyKeywords(e.detail.value)}
-              />
-
-              <Button
-                className="btn-pill"
-                onClick={handleGenerateAICopy}
-                disabled={isGeneratingCopy}
-              >
-                {isGeneratingCopy ? '🤖 智能撰写中...' : '一键生成爆款小红书文案'}
-              </Button>
-            </View>
-          )}
-
-          {/* Step 4: Copywriting Result Showcase */}
-          {uploadedImages.length > 0 && generatedCopyOptions.length > 0 && (
-            <View className="card">
-              <Text className="card-title">✨ AI 生成结果</Text>
-              
-              <View className="result-tabs">
-                {generatedCopyOptions.map((opt, idx) => (
-                  <View
-                    key={idx}
-                    className={`result-tab-item ${activeCopyOptionIdx === idx ? 'active' : ''}`}
-                    onClick={() => applyCopyOption(idx)}
-                  >
-                    方案 {idx + 1}
-                  </View>
-                ))}
-              </View>
-
-              <View className="paper-card">
-                <View className="paper-header">
-                  <Text className="paper-title">小红书格式预览</Text>
-                  <Button className="btn-copy-action" onClick={handleCopyClipboard}>
-                    📋 复制文案
-                  </Button>
-                </View>
-                
-                <View className="paper-content">
-                  <Text style={{ fontWeight: 'bold', display: 'block', marginBottom: '0.4rem', borderBottom: '1px dotted var(--border-color)', paddingBottom: '0.3rem' }}>
-                    标题：{aiTitle}
-                  </Text>
-                  <Text style={{ whiteSpace: 'pre-wrap', display: 'block' }}>
-                    {aiBody}
-                  </Text>
-                </View>
-              </View>
-
-
-
             </View>
           )}
 
