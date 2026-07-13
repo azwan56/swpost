@@ -418,7 +418,7 @@ export default function Index() {
       count: availableSlots,
       mediaType: ['image'],
       sourceType: ['album', 'camera'],
-      sizeType: ['compressed'],
+      sizeType: ['original'],
       success: async (res) => {
         Taro.showLoading({ title: '加载图片中...' });
         setErrorMsg('');
