@@ -171,9 +171,15 @@ async function copyAndModifyExif(originalBase64, styledBase64, styleName, modelN
 
     if (rawApp1) {
       try {
-        const newBinary = piexif.insert(rawApp1, styledBinary);
+        let rawObj = piexif.load(rawApp1);
+        rawObj["0th"] = rawObj["0th"] || {};
+        rawObj["0th"][piexif.ImageIFD.Orientation] = 1; // CRITICAL: Reset orientation to normal (1) so viewers do not rotate AI generated image upside down
+        rawObj["0th"][piexif.ImageIFD.Software] = "Shantie AI - Photo to Copywriter";
+        delete rawObj["thumbnail"];
+        const dumped = piexif.dump(rawObj);
+        const newBinary = piexif.insert(dumped, styledBinary);
         const newBase64 = Buffer.from(newBinary, 'binary').toString('base64');
-        console.log('[EXIF] ✅ Successfully injected RAW EXIF into styled JPEG');
+        console.log('[EXIF] ✅ Successfully injected RAW EXIF (Orientation: 1) into styled JPEG');
         return `data:image/jpeg;base64,${newBase64}`;
       } catch (insertErr) {
         console.warn('[EXIF Server] Raw insert failed, trying piexif.load/dump fallback:', insertErr.message);
@@ -194,9 +200,13 @@ async function copyAndModifyExif(originalBase64, styledBase64, styleName, modelN
     const styleLabelEn = styleName === 'clay' ? 'Claymation' : styleName === 'japanese-film' ? 'Japanese Retro Film' : styleName === 'polaroid' ? 'Polaroid' : 'Ghibli Anime';
 
     // Write custom tags/markers in English ASCII
+    exifObj["0th"] = exifObj["0th"] || {};
+    exifObj["0th"][piexif.ImageIFD.Orientation] = 1; // CRITICAL: Reset orientation to 1
     exifObj["0th"][piexif.ImageIFD.Software] = "Shantie AI - Photo to Copywriter";
+    delete exifObj["thumbnail"];
     
     const commentText = `Style: ${styleLabelEn}, Model: ${modelName}, Software: ShantieAI`;
+    exifObj["Exif"] = exifObj["Exif"] || {};
     exifObj["Exif"][piexif.ExifIFD.UserComment] = commentText;
 
     // Dump and insert into styled image

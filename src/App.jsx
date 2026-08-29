@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import piexif from 'piexifjs';
+import ExifReader from 'exifreader';
 
 const getPiexif = () => (piexif?.load ? piexif : (piexif?.default || piexif));
 
@@ -74,77 +75,120 @@ const resizeImageBase64 = (dataUrl, maxDim = 1600, quality = 0.85) => {
   });
 };
 
-// Helper: Extract Date, Time, Location, Device from EXIF data on client side using piexifjs
+// Helper: Extract Date, Time, Location, Device from EXIF data on client side using ExifReader & piexifjs
 const extractExifClient = (base64Image) => {
   if (!base64Image) return null;
   const piexifLib = getPiexif();
   const rawBytes = extractRawExifClient(base64Image);
 
+  let dateTime = null;
+  let device = null;
+  let make = null;
+  let gps = null;
+
+  // 1. Try ExifReader (industry-standard, handles all image formats & complex MakerNotes)
   try {
-    const exifObj = piexifLib.load(base64Image);
-    
-    // Extract DateTime
-    let dateTime = null;
-    if (exifObj["Exif"] && exifObj["Exif"][piexifLib.ExifIFD.DateTimeOriginal]) {
-      dateTime = exifObj["Exif"][piexifLib.ExifIFD.DateTimeOriginal];
-    } else if (exifObj["0th"] && exifObj["0th"][piexifLib.ImageIFD.DateTime]) {
-      dateTime = exifObj["0th"][piexifLib.ImageIFD.DateTime];
+    const clean = base64Image.replace(/^data:image\/\w+;base64,/, '');
+    const binary = atob(clean);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binary.charCodeAt(i);
     }
-    
-    // Extract Device
-    let device = null;
-    const make = exifObj["0th"] && exifObj["0th"][piexifLib.ImageIFD.Make];
-    const model = exifObj["0th"] && exifObj["0th"][piexifLib.ImageIFD.Model];
-    if (model) {
-      device = model;
-    } else if (make) {
-      device = make;
+    const tags = ExifReader.load(bytes.buffer);
+
+    if (tags['DateTimeOriginal']?.description) {
+      dateTime = tags['DateTimeOriginal'].description;
+    } else if (tags['DateTime']?.description) {
+      dateTime = tags['DateTime'].description;
     }
-    
-    // Extract GPS Coordinates
-    let gps = null;
-    if (exifObj["GPS"]) {
-      const lat = exifObj["GPS"][piexifLib.GPSIFD.GPSLatitude];
-      const latRef = exifObj["GPS"][piexifLib.GPSIFD.GPSLatitudeRef];
-      const lon = exifObj["GPS"][piexifLib.GPSIFD.GPSLongitude];
-      const lonRef = exifObj["GPS"][piexifLib.GPSIFD.GPSLongitudeRef];
-      
-      if (lat && lon && lat.length >= 3 && lon.length >= 3) {
-        const convertDMS = (dms) => {
-          const d = dms[0][0] / dms[0][1];
-          const m = dms[1][0] / dms[1][1];
-          const s = dms[2][0] / dms[2][1];
-          return d + m / 60 + s / 3600;
-        };
-        const latVal = convertDMS(lat);
-        const lonVal = convertDMS(lon);
+
+    if (tags['Model']?.description) {
+      device = tags['Model'].description;
+    }
+    if (tags['Make']?.description) {
+      make = tags['Make'].description;
+      if (!device) device = make;
+    }
+
+    if (tags['GPSLatitude'] && tags['GPSLongitude']) {
+      const latVal = typeof tags['GPSLatitude'].description === 'number' 
+        ? tags['GPSLatitude'].description 
+        : parseFloat(tags['GPSLatitude'].description);
+      const lonVal = typeof tags['GPSLongitude'].description === 'number' 
+        ? tags['GPSLongitude'].description 
+        : parseFloat(tags['GPSLongitude'].description);
+      const latRef = tags['GPSLatitudeRef']?.value?.[0] || tags['GPSLatitudeRef']?.description || (latVal >= 0 ? 'N' : 'S');
+      const lonRef = tags['GPSLongitudeRef']?.value?.[0] || tags['GPSLongitudeRef']?.description || (lonVal >= 0 ? 'E' : 'W');
+
+      if (!isNaN(latVal) && !isNaN(lonVal)) {
         gps = {
           lat: latVal.toString(),
           lon: lonVal.toString(),
-          latRef: latRef || (latVal >= 0 ? 'N' : 'S'),
-          lonRef: lonRef || (lonVal >= 0 ? 'E' : 'W')
+          latRef: String(latRef),
+          lonRef: String(lonRef)
         };
       }
     }
-    
+  } catch (exifReaderErr) {
+    console.warn('[ExifReader] Error parsing EXIF:', exifReaderErr);
+  }
+
+  // 2. Fallback to piexif.load if anything is missing
+  if (!dateTime || !gps || !device) {
+    try {
+      const exifObj = piexifLib.load(base64Image);
+      if (!dateTime) {
+        if (exifObj["Exif"] && exifObj["Exif"][piexifLib.ExifIFD.DateTimeOriginal]) {
+          dateTime = exifObj["Exif"][piexifLib.ExifIFD.DateTimeOriginal];
+        } else if (exifObj["0th"] && exifObj["0th"][piexifLib.ImageIFD.DateTime]) {
+          dateTime = exifObj["0th"][piexifLib.ImageIFD.DateTime];
+        }
+      }
+      if (!device) {
+        const m = exifObj["0th"] && exifObj["0th"][piexifLib.ImageIFD.Make];
+        const md = exifObj["0th"] && exifObj["0th"][piexifLib.ImageIFD.Model];
+        device = md || m || null;
+        make = m || null;
+      }
+      if (!gps && exifObj["GPS"]) {
+        const lat = exifObj["GPS"][piexifLib.GPSIFD.GPSLatitude];
+        const latRef = exifObj["GPS"][piexifLib.GPSIFD.GPSLatitudeRef];
+        const lon = exifObj["GPS"][piexifLib.GPSIFD.GPSLongitude];
+        const lonRef = exifObj["GPS"][piexifLib.GPSIFD.GPSLongitudeRef];
+        
+        if (lat && lon && lat.length >= 3 && lon.length >= 3) {
+          const convertDMS = (dms) => {
+            const d = dms[0][0] / dms[0][1];
+            const m = dms[1][0] / dms[1][1];
+            const s = dms[2][0] / dms[2][1];
+            return d + m / 60 + s / 3600;
+          };
+          const latVal = convertDMS(lat);
+          const lonVal = convertDMS(lon);
+          gps = {
+            lat: latVal.toString(),
+            lon: lonVal.toString(),
+            latRef: latRef || (latVal >= 0 ? 'N' : 'S'),
+            lonRef: lonRef || (lonVal >= 0 ? 'E' : 'W')
+          };
+        }
+      }
+    } catch (piexifErr) {
+      // ignore
+    }
+  }
+
+  if (dateTime || gps || device || rawBytes) {
     return {
       dateTime,
       gps,
       device,
+      make,
       rawBytes
     };
-  } catch (err) {
-    console.log('[EXIF Client Extract] No EXIF found or failed to parse:', err.message);
-    if (rawBytes) {
-      return {
-        dateTime: null,
-        gps: null,
-        device: null,
-        rawBytes
-      };
-    }
-    return null;
   }
+  return null;
 };
 
 function App() {
@@ -769,33 +813,75 @@ function App() {
         const watermarkedDataUri = canvas.toDataURL('image/jpeg', 0.95);
         try {
           const piexifLib = getPiexif();
+          let exifObj = null;
 
+          // 1. Try loading raw bytes if available and reset Orientation to 1
           if (exif && exif.rawBytes) {
             try {
-              const finalDataUri = piexifLib.insert(exif.rawBytes, watermarkedDataUri);
-              console.log('[Watermark EXIF] ✅ Successfully injected raw EXIF into web image');
-              resolve(finalDataUri);
-              return;
+              exifObj = piexifLib.load(exif.rawBytes);
+              exifObj["0th"] = exifObj["0th"] || {};
+              exifObj["0th"][piexifLib.ImageIFD.Orientation] = 1; // CRITICAL: Reset orientation to 1 (upright) since canvas already oriented the pixels
+              exifObj["0th"][piexifLib.ImageIFD.Software] = "Shantie AI";
+              delete exifObj["thumbnail"];
             } catch (rawErr) {
-              console.warn('[Watermark EXIF] Raw EXIF insert failed, fallback to structured EXIF:', rawErr);
+              console.warn('[Watermark EXIF] Failed to modify raw EXIF, fallback to structured EXIF:', rawErr);
+              exifObj = null;
             }
           }
 
-          const exifObj = { "0th": {}, "Exif": {}, "GPS": {}, "Interop": {}, "1st": {}, "thumbnail": null };
-          exifObj["0th"][piexifLib.ImageIFD.Software] = "Shantie AI";
-          
-          if (exif) {
-            if (exif.dateTime) {
-              exifObj["0th"][piexifLib.ImageIFD.DateTime] = String(exif.dateTime);
-              exifObj["Exif"][piexifLib.ExifIFD.DateTimeOriginal] = String(exif.dateTime);
-              exifObj["Exif"][piexifLib.ExifIFD.DateTimeDigitized] = String(exif.dateTime);
-            }
+          // 2. Build structured EXIF object if raw EXIF wasn't usable
+          if (!exifObj) {
+            exifObj = { 
+              "0th": {
+                [piexifLib.ImageIFD.Orientation]: 1, // CRITICAL: Reset to normal orientation
+                [piexifLib.ImageIFD.Software]: "Shantie AI"
+              }, 
+              "Exif": {}, 
+              "GPS": {}, 
+              "Interop": {}, 
+              "1st": {}, 
+              "thumbnail": null 
+            };
             
-            if (exif.device) {
-              exifObj["0th"][piexifLib.ImageIFD.Model] = String(exif.device);
+            if (exif) {
+              if (exif.dateTime) {
+                exifObj["0th"][piexifLib.ImageIFD.DateTime] = String(exif.dateTime);
+                exifObj["Exif"][piexifLib.ExifIFD.DateTimeOriginal] = String(exif.dateTime);
+                exifObj["Exif"][piexifLib.ExifIFD.DateTimeDigitized] = String(exif.dateTime);
+              }
+              
+              if (exif.device) {
+                exifObj["0th"][piexifLib.ImageIFD.Model] = String(exif.device);
+              }
+              if (exif.make) {
+                exifObj["0th"][piexifLib.ImageIFD.Make] = String(exif.make);
+              }
+              
+              if (exif.gps) {
+                const latVal = parseFloat(exif.gps.lat);
+                const lonVal = parseFloat(exif.gps.lon);
+                if (!isNaN(latVal) && !isNaN(lonVal)) {
+                  const latAbs = Math.abs(latVal);
+                  const lonAbs = Math.abs(lonVal);
+                  const latDeg = Math.floor(latAbs);
+                  const latMin = Math.floor((latAbs - latDeg) * 60);
+                  const latSec = Math.round(((latAbs - latDeg) * 60 - latMin) * 60 * 100);
+                  const lonDeg = Math.floor(lonAbs);
+                  const lonMin = Math.floor((lonAbs - lonDeg) * 60);
+                  const lonSec = Math.round(((lonAbs - lonDeg) * 60 - lonMin) * 60 * 100);
+                  
+                  exifObj["GPS"][piexifLib.GPSIFD.GPSVersionID] = [2, 2, 0, 0];
+                  exifObj["GPS"][piexifLib.GPSIFD.GPSLatitude] = [[latDeg, 1], [latMin, 1], [latSec, 100]];
+                  exifObj["GPS"][piexifLib.GPSIFD.GPSLatitudeRef] = exif.gps.latRef || (latVal >= 0 ? "N" : "S");
+                  exifObj["GPS"][piexifLib.GPSIFD.GPSLongitude] = [[lonDeg, 1], [lonMin, 1], [lonSec, 100]];
+                  exifObj["GPS"][piexifLib.GPSIFD.GPSLongitudeRef] = exif.gps.lonRef || (lonVal >= 0 ? "E" : "W");
+                }
+              }
             }
-            
-            if (exif.gps) {
+          } else {
+            // Ensure GPS is populated if raw EXIF lacked it but ExifReader found it
+            if (exif && exif.gps && (!exifObj["GPS"] || !exifObj["GPS"][piexifLib.GPSIFD.GPSLatitude])) {
+              exifObj["GPS"] = exifObj["GPS"] || {};
               const latVal = parseFloat(exif.gps.lat);
               const lonVal = parseFloat(exif.gps.lon);
               if (!isNaN(latVal) && !isNaN(lonVal)) {
@@ -819,6 +905,7 @@ function App() {
           
           const exifBytes = piexifLib.dump(exifObj);
           const finalDataUri = piexifLib.insert(exifBytes, watermarkedDataUri);
+          console.log('[Watermark EXIF] ✅ Successfully injected clean EXIF (Orientation: 1, GPS included)');
           resolve(finalDataUri);
         } catch (exifErr) {
           console.warn('[Watermark EXIF] Failed to inject EXIF into watermarked image:', exifErr);

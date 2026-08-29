@@ -358,53 +358,86 @@ const drawWatermarkOnCanvas = (canvas, ctx, img, styleName, modelName, exif, res
     if (isWeb) {
       const watermarkedDataUri = canvas.toDataURL('image/jpeg', 0.95);
       try {
+        let exifObj = null;
         if (exif && exif.rawBytes) {
           try {
-            const finalDataUri = piexif.insert(exif.rawBytes, watermarkedDataUri);
-            console.log('[Watermark EXIF] ✅ Successfully injected RAW EXIF into web image');
-            resolve(finalDataUri);
-            return;
+            exifObj = piexif.load(exif.rawBytes);
+            exifObj["0th"] = exifObj["0th"] || {};
+            exifObj["0th"][piexif.ImageIFD.Orientation] = 1; // CRITICAL: Reset orientation to 1
+            exifObj["0th"][piexif.ImageIFD.Software] = "Shantie AI";
+            delete exifObj["thumbnail"];
           } catch (rawErr) {
-            console.warn('[Watermark EXIF] Raw EXIF insert failed, fallback to structured EXIF:', rawErr);
+            exifObj = null;
           }
         }
 
-        const exifObj = { "0th": {}, "Exif": {}, "GPS": {}, "Interop": {}, "1st": {}, "thumbnail": null };
-        exifObj["0th"][piexif.ImageIFD.Software] = "Shantie AI";
-        
-        if (exif) {
-          if (exif.dateTime) {
-            exifObj["0th"][piexif.ImageIFD.DateTime] = String(exif.dateTime);
-            exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal] = String(exif.dateTime);
-            exifObj["Exif"][piexif.ExifIFD.DateTimeDigitized] = String(exif.dateTime);
-          }
-          if (exif.device) {
-            exifObj["0th"][piexif.ImageIFD.Model] = String(exif.device);
-          }
-          if (exif.gps) {
-            const latVal = parseFloat(exif.gps.lat);
-            const lonVal = parseFloat(exif.gps.lon);
-            if (!isNaN(latVal) && !isNaN(lonVal)) {
-              const latAbs = Math.abs(latVal);
-              const lonAbs = Math.abs(lonVal);
-              const latDeg = Math.floor(latAbs);
-              const latMin = Math.floor((latAbs - latDeg) * 60);
-              const latSec = Math.round(((latAbs - latDeg) * 60 - latMin) * 60 * 100);
-              const lonDeg = Math.floor(lonAbs);
-              const lonMin = Math.floor((lonAbs - lonDeg) * 60);
-              const lonSec = Math.round(((lonAbs - lonDeg) * 60 - lonMin) * 60 * 100);
-              
-              exifObj["GPS"][piexif.GPSIFD.GPSVersionID] = [2, 2, 0, 0];
-              exifObj["GPS"][piexif.GPSIFD.GPSLatitude] = [[latDeg, 1], [latMin, 1], [latSec, 100]];
-              exifObj["GPS"][piexif.GPSIFD.GPSLatitudeRef] = exif.gps.latRef || (latVal >= 0 ? "N" : "S");
-              exifObj["GPS"][piexif.GPSIFD.GPSLongitude] = [[lonDeg, 1], [lonMin, 1], [lonSec, 100]];
-              exifObj["GPS"][piexif.GPSIFD.GPSLongitudeRef] = exif.gps.lonRef || (lonVal >= 0 ? "E" : "W");
+        if (!exifObj) {
+          exifObj = {
+            "0th": {
+              [piexif.ImageIFD.Orientation]: 1,
+              [piexif.ImageIFD.Software]: "Shantie AI"
+            },
+            "Exif": {},
+            "GPS": {},
+            "Interop": {},
+            "1st": {},
+            "thumbnail": null
+          };
+          if (exif) {
+            if (exif.dateTime) {
+              exifObj["0th"][piexif.ImageIFD.DateTime] = String(exif.dateTime);
+              exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal] = String(exif.dateTime);
+              exifObj["Exif"][piexif.ExifIFD.DateTimeDigitized] = String(exif.dateTime);
             }
+            if (exif.device) {
+              exifObj["0th"][piexif.ImageIFD.Model] = String(exif.device);
+            }
+            if (exif.gps) {
+              const latVal = parseFloat(exif.gps.lat);
+              const lonVal = parseFloat(exif.gps.lon);
+              if (!isNaN(latVal) && !isNaN(lonVal)) {
+                const latAbs = Math.abs(latVal);
+                const lonAbs = Math.abs(lonVal);
+                const latDeg = Math.floor(latAbs);
+                const latMin = Math.floor((latAbs - latDeg) * 60);
+                const latSec = Math.round(((latAbs - latDeg) * 60 - latMin) * 60 * 100);
+                const lonDeg = Math.floor(lonAbs);
+                const lonMin = Math.floor((lonAbs - lonDeg) * 60);
+                const lonSec = Math.round(((lonAbs - lonDeg) * 60 - lonMin) * 60 * 100);
+                
+                exifObj["GPS"][piexif.GPSIFD.GPSVersionID] = [2, 2, 0, 0];
+                exifObj["GPS"][piexif.GPSIFD.GPSLatitude] = [[latDeg, 1], [latMin, 1], [latSec, 100]];
+                exifObj["GPS"][piexif.GPSIFD.GPSLatitudeRef] = exif.gps.latRef || (latVal >= 0 ? "N" : "S");
+                exifObj["GPS"][piexif.GPSIFD.GPSLongitude] = [[lonDeg, 1], [lonMin, 1], [lonSec, 100]];
+                exifObj["GPS"][piexif.GPSIFD.GPSLongitudeRef] = exif.gps.lonRef || (lonVal >= 0 ? "E" : "W");
+              }
+            }
+          }
+        } else if (exif && exif.gps && (!exifObj["GPS"] || !exifObj["GPS"][piexif.GPSIFD.GPSLatitude])) {
+          exifObj["GPS"] = exifObj["GPS"] || {};
+          const latVal = parseFloat(exif.gps.lat);
+          const lonVal = parseFloat(exif.gps.lon);
+          if (!isNaN(latVal) && !isNaN(lonVal)) {
+            const latAbs = Math.abs(latVal);
+            const lonAbs = Math.abs(lonVal);
+            const latDeg = Math.floor(latAbs);
+            const latMin = Math.floor((latAbs - latDeg) * 60);
+            const latSec = Math.round(((latAbs - latDeg) * 60 - latMin) * 60 * 100);
+            const lonDeg = Math.floor(lonAbs);
+            const lonMin = Math.floor((lonAbs - lonDeg) * 60);
+            const lonSec = Math.round(((lonAbs - lonDeg) * 60 - lonMin) * 60 * 100);
+            
+            exifObj["GPS"][piexif.GPSIFD.GPSVersionID] = [2, 2, 0, 0];
+            exifObj["GPS"][piexif.GPSIFD.GPSLatitude] = [[latDeg, 1], [latMin, 1], [latSec, 100]];
+            exifObj["GPS"][piexif.GPSIFD.GPSLatitudeRef] = exif.gps.latRef || (latVal >= 0 ? "N" : "S");
+            exifObj["GPS"][piexif.GPSIFD.GPSLongitude] = [[lonDeg, 1], [lonMin, 1], [lonSec, 100]];
+            exifObj["GPS"][piexif.GPSIFD.GPSLongitudeRef] = exif.gps.lonRef || (lonVal >= 0 ? "E" : "W");
           }
         }
         
         const exifBytes = piexif.dump(exifObj);
         const finalDataUri = piexif.insert(exifBytes, watermarkedDataUri);
+        console.log('[Watermark EXIF] ✅ Successfully injected clean EXIF (Orientation: 1)');
         resolve(finalDataUri);
       } catch (exifErr) {
         console.warn('[Watermark EXIF] Failed to inject EXIF:', exifErr);
@@ -419,10 +452,86 @@ const drawWatermarkOnCanvas = (canvas, ctx, img, styleName, modelName, exif, res
         const jpegDataUri = `data:image/jpeg;base64,${jpegBase64}`;
         let finalDataUri = jpegDataUri;
         
-        if (exif && exif.rawBytes && jpegBase64.startsWith('/9j/')) {
+        if (exif && jpegBase64.startsWith('/9j/')) {
           try {
-            finalDataUri = piexif.insert(exif.rawBytes, jpegDataUri);
-            console.log('[Watermark EXIF] ✅ Successfully injected RAW EXIF into JPEG');
+            let exifObj = null;
+            if (exif.rawBytes) {
+              try {
+                exifObj = piexif.load(exif.rawBytes);
+                exifObj["0th"] = exifObj["0th"] || {};
+                exifObj["0th"][piexif.ImageIFD.Orientation] = 1; // CRITICAL: Reset orientation to 1
+                exifObj["0th"][piexif.ImageIFD.Software] = "Shantie AI";
+                delete exifObj["thumbnail"];
+              } catch (e) {
+                exifObj = null;
+              }
+            }
+
+            if (!exifObj) {
+              exifObj = {
+                "0th": {
+                  [piexif.ImageIFD.Orientation]: 1,
+                  [piexif.ImageIFD.Software]: "Shantie AI"
+                },
+                "Exif": {},
+                "GPS": {},
+                "Interop": {},
+                "1st": {},
+                "thumbnail": null
+              };
+              if (exif.dateTime) {
+                exifObj["0th"][piexif.ImageIFD.DateTime] = String(exif.dateTime);
+                exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal] = String(exif.dateTime);
+                exifObj["Exif"][piexif.ExifIFD.DateTimeDigitized] = String(exif.dateTime);
+              }
+              if (exif.device) {
+                exifObj["0th"][piexif.ImageIFD.Model] = String(exif.device);
+              }
+              if (exif.gps) {
+                const latVal = parseFloat(exif.gps.lat);
+                const lonVal = parseFloat(exif.gps.lon);
+                if (!isNaN(latVal) && !isNaN(lonVal)) {
+                  const latAbs = Math.abs(latVal);
+                  const lonAbs = Math.abs(lonVal);
+                  const latDeg = Math.floor(latAbs);
+                  const latMin = Math.floor((latAbs - latDeg) * 60);
+                  const latSec = Math.round(((latAbs - latDeg) * 60 - latMin) * 60 * 100);
+                  const lonDeg = Math.floor(lonAbs);
+                  const lonMin = Math.floor((lonAbs - lonDeg) * 60);
+                  const lonSec = Math.round(((lonAbs - lonDeg) * 60 - lonMin) * 60 * 100);
+                  
+                  exifObj["GPS"][piexif.GPSIFD.GPSVersionID] = [2, 2, 0, 0];
+                  exifObj["GPS"][piexif.GPSIFD.GPSLatitude] = [[latDeg, 1], [latMin, 1], [latSec, 100]];
+                  exifObj["GPS"][piexif.GPSIFD.GPSLatitudeRef] = exif.gps.latRef || (latVal >= 0 ? "N" : "S");
+                  exifObj["GPS"][piexif.GPSIFD.GPSLongitude] = [[lonDeg, 1], [lonMin, 1], [lonSec, 100]];
+                  exifObj["GPS"][piexif.GPSIFD.GPSLongitudeRef] = exif.gps.lonRef || (lonVal >= 0 ? "E" : "W");
+                }
+              }
+            } else if (exif.gps && (!exifObj["GPS"] || !exifObj["GPS"][piexif.GPSIFD.GPSLatitude])) {
+              exifObj["GPS"] = exifObj["GPS"] || {};
+              const latVal = parseFloat(exif.gps.lat);
+              const lonVal = parseFloat(exif.gps.lon);
+              if (!isNaN(latVal) && !isNaN(lonVal)) {
+                const latAbs = Math.abs(latVal);
+                const lonAbs = Math.abs(lonVal);
+                const latDeg = Math.floor(latAbs);
+                const latMin = Math.floor((latAbs - latDeg) * 60);
+                const latSec = Math.round(((latAbs - latDeg) * 60 - latMin) * 60 * 100);
+                const lonDeg = Math.floor(lonAbs);
+                const lonMin = Math.floor((lonAbs - lonDeg) * 60);
+                const lonSec = Math.round(((lonAbs - lonDeg) * 60 - lonMin) * 60 * 100);
+                
+                exifObj["GPS"][piexif.GPSIFD.GPSVersionID] = [2, 2, 0, 0];
+                exifObj["GPS"][piexif.GPSIFD.GPSLatitude] = [[latDeg, 1], [latMin, 1], [latSec, 100]];
+                exifObj["GPS"][piexif.GPSIFD.GPSLatitudeRef] = exif.gps.latRef || (latVal >= 0 ? "N" : "S");
+                exifObj["GPS"][piexif.GPSIFD.GPSLongitude] = [[lonDeg, 1], [lonMin, 1], [lonSec, 100]];
+                exifObj["GPS"][piexif.GPSIFD.GPSLongitudeRef] = exif.gps.lonRef || (lonVal >= 0 ? "E" : "W");
+              }
+            }
+
+            const exifBytes = piexif.dump(exifObj);
+            finalDataUri = piexif.insert(exifBytes, jpegDataUri);
+            console.log('[Watermark EXIF] ✅ Successfully injected clean EXIF (Orientation: 1) into mini program JPEG');
           } catch (exifErr) {
             console.warn('[Watermark EXIF] Failed to inject EXIF:', exifErr);
           }
