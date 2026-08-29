@@ -358,17 +358,28 @@ const drawWatermarkOnCanvas = (canvas, ctx, img, styleName, modelName, exif, res
     if (isWeb) {
       const watermarkedDataUri = canvas.toDataURL('image/jpeg', 0.95);
       try {
+        if (exif && exif.rawBytes) {
+          try {
+            const finalDataUri = piexif.insert(exif.rawBytes, watermarkedDataUri);
+            console.log('[Watermark EXIF] ✅ Successfully injected RAW EXIF into web image');
+            resolve(finalDataUri);
+            return;
+          } catch (rawErr) {
+            console.warn('[Watermark EXIF] Raw EXIF insert failed, fallback to structured EXIF:', rawErr);
+          }
+        }
+
         const exifObj = { "0th": {}, "Exif": {}, "GPS": {}, "Interop": {}, "1st": {}, "thumbnail": null };
         exifObj["0th"][piexif.ImageIFD.Software] = "Shantie AI";
         
         if (exif) {
           if (exif.dateTime) {
-            exifObj["0th"][piexif.ImageIFD.DateTime] = exif.dateTime;
-            exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal] = exif.dateTime;
-            exifObj["Exif"][piexif.ExifIFD.DateTimeDigitized] = exif.dateTime;
+            exifObj["0th"][piexif.ImageIFD.DateTime] = String(exif.dateTime);
+            exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal] = String(exif.dateTime);
+            exifObj["Exif"][piexif.ExifIFD.DateTimeDigitized] = String(exif.dateTime);
           }
           if (exif.device) {
-            exifObj["0th"][piexif.ImageIFD.Model] = exif.device;
+            exifObj["0th"][piexif.ImageIFD.Model] = String(exif.device);
           }
           if (exif.gps) {
             const latVal = parseFloat(exif.gps.lat);
@@ -383,6 +394,7 @@ const drawWatermarkOnCanvas = (canvas, ctx, img, styleName, modelName, exif, res
               const lonMin = Math.floor((lonAbs - lonDeg) * 60);
               const lonSec = Math.round(((lonAbs - lonDeg) * 60 - lonMin) * 60 * 100);
               
+              exifObj["GPS"][piexif.GPSIFD.GPSVersionID] = [2, 2, 0, 0];
               exifObj["GPS"][piexif.GPSIFD.GPSLatitude] = [[latDeg, 1], [latMin, 1], [latSec, 100]];
               exifObj["GPS"][piexif.GPSIFD.GPSLatitudeRef] = exif.gps.latRef || (latVal >= 0 ? "N" : "S");
               exifObj["GPS"][piexif.GPSIFD.GPSLongitude] = [[lonDeg, 1], [lonMin, 1], [lonSec, 100]];

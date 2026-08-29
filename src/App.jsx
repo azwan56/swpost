@@ -1,5 +1,32 @@
 import React, { useState, useRef } from 'react';
-import * as piexif from 'piexifjs';
+import piexif from 'piexifjs';
+
+const getPiexif = () => (piexif?.load ? piexif : (piexif?.default || piexif));
+
+// Helper: Extract raw APP1 segment from JPEG base64 for lossless EXIF preservation
+const extractRawExifClient = (base64) => {
+  try {
+    const clean = base64.replace(/^data:image\/\w+;base64,/, '');
+    const binary = atob(clean);
+    if (binary.charCodeAt(0) !== 0xFF || binary.charCodeAt(1) !== 0xD8) return null;
+    
+    let offset = 2;
+    while (offset < binary.length) {
+      const marker = (binary.charCodeAt(offset) << 8) | binary.charCodeAt(offset + 1);
+      if ((marker & 0xFF00) !== 0xFF00) break;
+      const length = (binary.charCodeAt(offset + 2) << 8) | binary.charCodeAt(offset + 3);
+      if (marker === 0xFFE1) {
+        if (binary.slice(offset + 4, offset + 10) === 'Exif\x00\x00') {
+          return binary.slice(offset + 4, offset + 2 + length);
+        }
+      }
+      offset += 2 + length;
+    }
+  } catch (e) {
+    console.warn('[EXIF] Failed to extract raw APP1 segment:', e);
+  }
+  return null;
+};
 
 // Helper: Resize and compress base64 image if it exceeds maxDim or is too large to prevent backend payload issues
 const resizeImageBase64 = (dataUrl, maxDim = 1600, quality = 0.85) => {
@@ -50,21 +77,24 @@ const resizeImageBase64 = (dataUrl, maxDim = 1600, quality = 0.85) => {
 // Helper: Extract Date, Time, Location, Device from EXIF data on client side using piexifjs
 const extractExifClient = (base64Image) => {
   if (!base64Image) return null;
+  const piexifLib = getPiexif();
+  const rawBytes = extractRawExifClient(base64Image);
+
   try {
-    const exifObj = piexif.load(base64Image);
+    const exifObj = piexifLib.load(base64Image);
     
     // Extract DateTime
     let dateTime = null;
-    if (exifObj["Exif"] && exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal]) {
-      dateTime = exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal];
-    } else if (exifObj["0th"] && exifObj["0th"][piexif.ImageIFD.DateTime]) {
-      dateTime = exifObj["0th"][piexif.ImageIFD.DateTime];
+    if (exifObj["Exif"] && exifObj["Exif"][piexifLib.ExifIFD.DateTimeOriginal]) {
+      dateTime = exifObj["Exif"][piexifLib.ExifIFD.DateTimeOriginal];
+    } else if (exifObj["0th"] && exifObj["0th"][piexifLib.ImageIFD.DateTime]) {
+      dateTime = exifObj["0th"][piexifLib.ImageIFD.DateTime];
     }
     
     // Extract Device
     let device = null;
-    const make = exifObj["0th"] && exifObj["0th"][piexif.ImageIFD.Make];
-    const model = exifObj["0th"] && exifObj["0th"][piexif.ImageIFD.Model];
+    const make = exifObj["0th"] && exifObj["0th"][piexifLib.ImageIFD.Make];
+    const model = exifObj["0th"] && exifObj["0th"][piexifLib.ImageIFD.Model];
     if (model) {
       device = model;
     } else if (make) {
@@ -74,10 +104,10 @@ const extractExifClient = (base64Image) => {
     // Extract GPS Coordinates
     let gps = null;
     if (exifObj["GPS"]) {
-      const lat = exifObj["GPS"][piexif.GPSIFD.GPSLatitude];
-      const latRef = exifObj["GPS"][piexif.GPSIFD.GPSLatitudeRef];
-      const lon = exifObj["GPS"][piexif.GPSIFD.GPSLongitude];
-      const lonRef = exifObj["GPS"][piexif.GPSIFD.GPSLongitudeRef];
+      const lat = exifObj["GPS"][piexifLib.GPSIFD.GPSLatitude];
+      const latRef = exifObj["GPS"][piexifLib.GPSIFD.GPSLatitudeRef];
+      const lon = exifObj["GPS"][piexifLib.GPSIFD.GPSLongitude];
+      const lonRef = exifObj["GPS"][piexifLib.GPSIFD.GPSLongitudeRef];
       
       if (lat && lon && lat.length >= 3 && lon.length >= 3) {
         const convertDMS = (dms) => {
@@ -91,8 +121,8 @@ const extractExifClient = (base64Image) => {
         gps = {
           lat: latVal.toString(),
           lon: lonVal.toString(),
-          latRef: latRef || 'N',
-          lonRef: lonRef || 'E'
+          latRef: latRef || (latVal >= 0 ? 'N' : 'S'),
+          lonRef: lonRef || (lonVal >= 0 ? 'E' : 'W')
         };
       }
     }
@@ -100,10 +130,19 @@ const extractExifClient = (base64Image) => {
     return {
       dateTime,
       gps,
-      device
+      device,
+      rawBytes
     };
   } catch (err) {
     console.log('[EXIF Client Extract] No EXIF found or failed to parse:', err.message);
+    if (rawBytes) {
+      return {
+        dateTime: null,
+        gps: null,
+        device: null,
+        rawBytes
+      };
+    }
     return null;
   }
 };
@@ -729,27 +768,33 @@ function App() {
         
         const watermarkedDataUri = canvas.toDataURL('image/jpeg', 0.95);
         try {
-          // Build EXIF object from the structured exif data passed by the server
-          // (We cannot piexif.load() from the styled image because AI models return PNG, not JPEG)
+          const piexifLib = getPiexif();
+
+          if (exif && exif.rawBytes) {
+            try {
+              const finalDataUri = piexifLib.insert(exif.rawBytes, watermarkedDataUri);
+              console.log('[Watermark EXIF] ✅ Successfully injected raw EXIF into web image');
+              resolve(finalDataUri);
+              return;
+            } catch (rawErr) {
+              console.warn('[Watermark EXIF] Raw EXIF insert failed, fallback to structured EXIF:', rawErr);
+            }
+          }
+
           const exifObj = { "0th": {}, "Exif": {}, "GPS": {}, "Interop": {}, "1st": {}, "thumbnail": null };
-          
-          // Software tag (ASCII only)
-          exifObj["0th"][piexif.ImageIFD.Software] = "Shantie AI";
+          exifObj["0th"][piexifLib.ImageIFD.Software] = "Shantie AI";
           
           if (exif) {
-            // Write DateTime
             if (exif.dateTime) {
-              exifObj["0th"][piexif.ImageIFD.DateTime] = exif.dateTime;
-              exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal] = exif.dateTime;
-              exifObj["Exif"][piexif.ExifIFD.DateTimeDigitized] = exif.dateTime;
+              exifObj["0th"][piexifLib.ImageIFD.DateTime] = String(exif.dateTime);
+              exifObj["Exif"][piexifLib.ExifIFD.DateTimeOriginal] = String(exif.dateTime);
+              exifObj["Exif"][piexifLib.ExifIFD.DateTimeDigitized] = String(exif.dateTime);
             }
             
-            // Write Device/Camera
             if (exif.device) {
-              exifObj["0th"][piexif.ImageIFD.Model] = exif.device;
+              exifObj["0th"][piexifLib.ImageIFD.Model] = String(exif.device);
             }
             
-            // Write GPS coordinates
             if (exif.gps) {
               const latVal = parseFloat(exif.gps.lat);
               const lonVal = parseFloat(exif.gps.lon);
@@ -763,17 +808,17 @@ function App() {
                 const lonMin = Math.floor((lonAbs - lonDeg) * 60);
                 const lonSec = Math.round(((lonAbs - lonDeg) * 60 - lonMin) * 60 * 100);
                 
-                exifObj["GPS"][piexif.GPSIFD.GPSLatitude] = [[latDeg, 1], [latMin, 1], [latSec, 100]];
-                exifObj["GPS"][piexif.GPSIFD.GPSLatitudeRef] = exif.gps.latRef || (latVal >= 0 ? "N" : "S");
-                exifObj["GPS"][piexif.GPSIFD.GPSLongitude] = [[lonDeg, 1], [lonMin, 1], [lonSec, 100]];
-                exifObj["GPS"][piexif.GPSIFD.GPSLongitudeRef] = exif.gps.lonRef || (lonVal >= 0 ? "E" : "W");
+                exifObj["GPS"][piexifLib.GPSIFD.GPSVersionID] = [2, 2, 0, 0];
+                exifObj["GPS"][piexifLib.GPSIFD.GPSLatitude] = [[latDeg, 1], [latMin, 1], [latSec, 100]];
+                exifObj["GPS"][piexifLib.GPSIFD.GPSLatitudeRef] = exif.gps.latRef || (latVal >= 0 ? "N" : "S");
+                exifObj["GPS"][piexifLib.GPSIFD.GPSLongitude] = [[lonDeg, 1], [lonMin, 1], [lonSec, 100]];
+                exifObj["GPS"][piexifLib.GPSIFD.GPSLongitudeRef] = exif.gps.lonRef || (lonVal >= 0 ? "E" : "W");
               }
             }
           }
           
-          const exifBytes = piexif.dump(exifObj);
-          // watermarkedDataUri is 'data:image/jpeg;base64,...' from canvas — valid input for piexif.insert
-          const finalDataUri = piexif.insert(exifBytes, watermarkedDataUri);
+          const exifBytes = piexifLib.dump(exifObj);
+          const finalDataUri = piexifLib.insert(exifBytes, watermarkedDataUri);
           resolve(finalDataUri);
         } catch (exifErr) {
           console.warn('[Watermark EXIF] Failed to inject EXIF into watermarked image:', exifErr);
@@ -814,7 +859,7 @@ function App() {
           <p className="welcome-subtitle">AI 智能画风转换与爆款文案助手</p>
           
           <div className="welcome-workflow">
-            <h3 className="workflow-title" style={{ textAlign: 'center', justifyContent: 'center' }}>✨ 三步体验：拍、变、生！</h3>
+            <h3 className="workflow-title" style={{ textAlign: 'center', justifyContent: 'center' }}>✨ 三步体验：拍、生、变！</h3>
             <div className="workflow-steps">
               <div className="workflow-step">
                 <span className="step-num">1</span>
@@ -826,15 +871,15 @@ function App() {
               <div className="workflow-step">
                 <span className="step-num">2</span>
                 <div className="step-content">
-                  <strong>🎨 艺术重绘（变）</strong>
-                  <span>一键转换为治愈吉卜力、软萌泥塑或复古日式胶片风，并可保存高清原图。</span>
+                  <strong>✍️ 一键生成（生）</strong>
+                  <span>AI 结合画面时空智能撰写 3 款不同风格的社交爆款文案，复制即可去朋友圈、小红书、Ins 发文！</span>
                 </div>
               </div>
               <div className="workflow-step">
                 <span className="step-num">3</span>
                 <div className="step-content">
-                  <strong>✍️ 一键生成（生）</strong>
-                  <span>AI 结合画面时空智能撰写 3 款不同风格的社交爆款文案，复制即可去朋友圈、小红书、Ins 发文！</span>
+                  <strong>🎨 艺术重绘（变）</strong>
+                  <span>一键转换为治愈吉卜力、软萌泥塑或复古日式胶片风，并可保存高清原图。</span>
                 </div>
               </div>
             </div>
@@ -962,54 +1007,10 @@ function App() {
             </div>
           </div>
 
-          {/* 2. Image Style Control Tab */}
-          {uploadedImages.length > 0 && activeImage && (
-            <div className="card">
-              <h2 className="card-title">🎨 豆包 AI 画风重绘</h2>
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-                选择一种艺术画风，同时重绘所勾选的 **{uploadedImages.filter(img => img.selected !== false).length}** 张图片：
-              </p>
-              
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', marginBottom: '1rem' }}>
-                <button 
-                  className="btn btn-primary" 
-                  style={{ padding: '0.6rem 0.25rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #4f46e5, #6366f1)', border: 'none' }}
-                  onClick={() => handleAIStyleTransfer('cartoon')}
-                >
-                  🎨 治愈吉卜力
-                </button>
-                <button 
-                  className="btn btn-primary" 
-                  style={{ padding: '0.6rem 0.25rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #ec4899, #d946ef)', border: 'none' }}
-                  onClick={() => handleAIStyleTransfer('clay')}
-                >
-                  🧸 软萌泥塑风
-                </button>
-                <button 
-                  className="btn btn-primary" 
-                  style={{ padding: '0.6rem 0.25rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #d97706, #92400e)', border: 'none' }}
-                  onClick={() => handleAIStyleTransfer('japanese-film')}
-                >
-                  🎞️ 日式胶片风
-                </button>
-              </div>
-
-              {activeImage.styledSrc && (
-                <button
-                  className="btn btn-secondary"
-                  style={{ width: '100%', fontSize: '0.8rem', padding: '0.5rem' }}
-                  onClick={restoreToOriginal}
-                >
-                  ↩️ 恢复原图
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* 3. AI Copy Generator Tab */}
+          {/* 2. AI Copy Generator Tab */}
           {uploadedImages.length > 0 && (
             <div className="card">
-              <h2 className="card-title">✍️ 小红书爆款文案生成</h2>
+              <h2 className="card-title">✍️ 第二步：小红书爆款文案生成</h2>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
                 让 AI 智能识别内容风格，撰写文案与热门标签：
               </p>
@@ -1061,6 +1062,50 @@ function App() {
               >
                 {isGeneratingCopy ? '🤖 智能撰写中...' : '一键生成小红书文案'}
               </button>
+            </div>
+          )}
+
+          {/* 3. Image Style Control Tab */}
+          {uploadedImages.length > 0 && activeImage && (
+            <div className="card">
+              <h2 className="card-title">🎨 第三步：豆包 AI 画风重绘</h2>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+                选择一种艺术画风，同时重绘所勾选的 **{uploadedImages.filter(img => img.selected !== false).length}** 张图片：
+              </p>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', marginBottom: '1rem' }}>
+                <button 
+                  className="btn btn-primary" 
+                  style={{ padding: '0.6rem 0.25rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #4f46e5, #6366f1)', border: 'none' }}
+                  onClick={() => handleAIStyleTransfer('cartoon')}
+                >
+                  🎨 治愈吉卜力
+                </button>
+                <button 
+                  className="btn btn-primary" 
+                  style={{ padding: '0.6rem 0.25rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #ec4899, #d946ef)', border: 'none' }}
+                  onClick={() => handleAIStyleTransfer('clay')}
+                >
+                  🧸 软萌泥塑风
+                </button>
+                <button 
+                  className="btn btn-primary" 
+                  style={{ padding: '0.6rem 0.25rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #d97706, #92400e)', border: 'none' }}
+                  onClick={() => handleAIStyleTransfer('japanese-film')}
+                >
+                  🎞️ 日式胶片风
+                </button>
+              </div>
+
+              {activeImage.styledSrc && (
+                <button
+                  className="btn btn-secondary"
+                  style={{ width: '100%', fontSize: '0.8rem', padding: '0.5rem' }}
+                  onClick={restoreToOriginal}
+                >
+                  ↩️ 恢复原图
+                </button>
+              )}
             </div>
           )}
         </section>

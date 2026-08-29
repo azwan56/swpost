@@ -145,7 +145,42 @@ async function copyAndModifyExif(originalBase64, styledBase64, styleName, modelN
       return `data:image/jpeg;base64,${styledBuffer.toString('base64')}`;
     }
 
-    // Load EXIF from original
+    // 1. Try raw APP1 segment extraction first (100% lossless copy of GPS, camera, dates)
+    let rawApp1 = null;
+    try {
+      const originalClean = originalBase64.replace(/^data:image\/\w+;base64,/, "");
+      const originalBinary = Buffer.from(originalClean, 'base64').toString('binary');
+      if (originalBinary.charCodeAt(0) === 0xFF && originalBinary.charCodeAt(1) === 0xD8) {
+        let offset = 2;
+        while (offset < originalBinary.length) {
+          const marker = (originalBinary.charCodeAt(offset) << 8) | originalBinary.charCodeAt(offset + 1);
+          if ((marker & 0xFF00) !== 0xFF00) break;
+          const length = (originalBinary.charCodeAt(offset + 2) << 8) | originalBinary.charCodeAt(offset + 3);
+          if (marker === 0xFFE1) {
+            if (originalBinary.slice(offset + 4, offset + 10) === 'Exif\x00\x00') {
+              rawApp1 = originalBinary.slice(offset + 4, offset + 2 + length);
+              break;
+            }
+          }
+          offset += 2 + length;
+        }
+      }
+    } catch (e) {
+      console.warn('[EXIF Server] Raw APP1 extract error:', e.message);
+    }
+
+    if (rawApp1) {
+      try {
+        const newBinary = piexif.insert(rawApp1, styledBinary);
+        const newBase64 = Buffer.from(newBinary, 'binary').toString('base64');
+        console.log('[EXIF] ✅ Successfully injected RAW EXIF into styled JPEG');
+        return `data:image/jpeg;base64,${newBase64}`;
+      } catch (insertErr) {
+        console.warn('[EXIF Server] Raw insert failed, trying piexif.load/dump fallback:', insertErr.message);
+      }
+    }
+
+    // 2. Fallback: Load and dump EXIF via piexif
     let exifObj = { "0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": null };
     try {
       const originalClean = originalBase64.replace(/^data:image\/\w+;base64,/, "");
