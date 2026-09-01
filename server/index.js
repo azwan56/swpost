@@ -224,6 +224,55 @@ async function copyAndModifyExif(originalBase64, styledBase64, styleName, modelN
   }
 }
 
+// Helper: Reverse geocode GPS coordinates to a friendly Chinese location/address string
+async function reverseGeocodeLocation(lat, lon) {
+  if (!lat || !lon) return null;
+  const latNum = parseFloat(lat);
+  const lonNum = parseFloat(lon);
+  if (isNaN(latNum) || isNaN(lonNum)) return null;
+
+  try {
+    const bdcPromise = fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latNum}&longitude=${lonNum}&localityLanguage=zh`, { signal: AbortSignal.timeout(2500) })
+      .then(r => r.ok ? r.json() : null).catch(() => null);
+    const osmPromise = fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latNum}&lon=${lonNum}&zoom=18&addressdetails=1&accept-language=zh-CN,zh;q=0.9`, { 
+      headers: { 'User-Agent': 'ShantieAI/1.0' },
+      signal: AbortSignal.timeout(2500)
+    }).then(r => r.ok ? r.json() : null).catch(() => null);
+
+    const [bdcData, osmData] = await Promise.all([bdcPromise, osmPromise]);
+
+    let province = '';
+    let city = '';
+    let district = '';
+    let detail = '';
+
+    if (bdcData) {
+      province = bdcData.principalSubdivision || '';
+      city = bdcData.city || '';
+      district = bdcData.locality || '';
+    }
+
+    if (osmData && osmData.address) {
+      const a = osmData.address;
+      if (!province) province = a.province || a.state || '';
+      if (!city) city = a.city || a.county || '';
+      if (!district || district === city) district = a.district || a.suburb || a.county || a.town || a.village || '';
+      detail = a.attraction || a.tourism || a.leisure || a.road || '';
+    }
+
+    const parts = [];
+    if (province) parts.push(province);
+    if (city && !parts.includes(city)) parts.push(city);
+    if (district && !parts.includes(district) && district !== city) parts.push(district);
+    if (detail && !parts.includes(detail) && detail !== district && detail !== city) parts.push(detail);
+
+    const full = parts.join('');
+    return full || (osmData ? osmData.display_name : null);
+  } catch (e) {
+    return null;
+  }
+}
+
 // Helper: Analyze image content, text, people, and atmosphere using Qwen-VL-Plus
 async function analyzeImageMultimodal(imageBase64, apiKey) {
   if (!imageBase64 || !apiKey) return null;
@@ -495,12 +544,49 @@ app.post('/api/ai/style-transfer', async (req, res) => {
 // AI Copywriting Generator
 app.post('/api/ai/generate-copy', async (req, res) => {
   try {
-    const { style = '探店', keywords = '', images = [], originalImages = [] } = req.body;
+    const { style = '探店', keywords = '', images = [], originalImages = [], exifList = [] } = req.body;
 
     const volcKey = process.env.VOLC_API_KEY;
     const dashscopeApiKey = process.env.DASHSCOPE_API_KEY;
     if (!volcKey) {
       return res.status(500).json({ error: 'Volcano Ark Key is not configured on the server.' });
+    }
+
+    // 1. Parse EXIF information (prioritize frontend pre-extracted exifList, then parse originalImages/images)
+    let parsedExifs = [];
+    if (Array.isArray(exifList) && exifList.length > 0) {
+      parsedExifs = exifList.filter(item => item && (item.dateTime || item.gps || item.device));
+    }
+    if (parsedExifs.length === 0) {
+      const exifSource = originalImages.length > 0 ? originalImages : images;
+      if (exifSource && exifSource.length > 0) {
+        for (const img of exifSource) {
+          const info = extractExif(img);
+          if (info && (info.dateTime || info.gps || info.device)) {
+            parsedExifs.push(info);
+          }
+        }
+      }
+    }
+
+    // 2. Reverse geocode all GPS coordinates to readable Chinese addresses
+    let primaryLocation = '';
+    let primaryDateTime = '';
+    let primaryDevice = '';
+
+    if (parsedExifs.length > 0) {
+      for (const item of parsedExifs) {
+        if (!primaryDateTime && item.dateTime) primaryDateTime = item.dateTime;
+        if (!primaryDevice && item.device) primaryDevice = item.device;
+        if (!primaryLocation && item.gps) {
+          const addr = await reverseGeocodeLocation(item.gps.lat, item.gps.lon);
+          if (addr) {
+            primaryLocation = addr;
+          } else {
+            primaryLocation = `纬度 ${item.gps.lat} (${item.gps.latRef || 'N'}), 经度 ${item.gps.lon} (${item.gps.lonRef || 'E'})`;
+          }
+        }
+      }
     }
 
     let promptStyleGuidance = '';
@@ -510,10 +596,10 @@ app.post('/api/ai/generate-copy', async (req, res) => {
 - 选项二的 styleName 为 “真实体验”：客观细致，从消费者的第一视角，介绍店内的环境、氛围、服务品质和性价比。
 - 选项三的 styleName 为 “避坑与打卡”：精简吸睛，告诉读者哪里拍照最出片，有哪些拍照姿势和探店避坑小建议。
 
-特别要求：为了规范探店格式，每一款文案的【笔记正文】（body 字段）最开头，必须强制加入以下规范的结构化店铺基本信息占位排版（空一行后再接后续详细推荐）：
-📍 店名：[在此输入店名]
-📍 地址：[在此输入地址]
-💰 人均：[在此输入人均消费]
+特别要求：为了规范探店格式，每一款文案的【笔记正文】（body 字段）最开头，必须加入以下规范的结构化店铺基本信息排版（空一行后再接后续详细推荐）：
+📍 店名：${keywords ? keywords.trim() : '【根据画面视觉或氛围填写真实/合适的店名，若完全未知才写“[在此输入店名]”】'}
+📍 地址：${primaryLocation ? primaryLocation : '【若提供GPS则直接填写真实地址/商圈，未检测到时才写“[在此输入地址]”】'}
+💰 人均：【根据风格/场景给出一个合理的人均预估价，如“¥50-80”或“[在此输入人均消费]”】
 `;
     } else if (style === '旅行心情') {
       promptStyleGuidance = `这三款文案均应围绕【旅行心情】风格进行创作，但侧重点不同：
@@ -521,10 +607,10 @@ app.post('/api/ai/generate-copy', async (req, res) => {
 - 选项二的 styleName 为 “碎碎念记录”：活泼轻快，记录旅途中的趣味瞬间、突发小状况或真实的旅行状态。
 - 选项三的 styleName 为 “金句共鸣”：文笔简练高级，探讨旅行的意义，产出容易引起小红书读者互动和收藏的金句。
 
-特别要求：为了规范【旅行心情】格式，文案正文中绝对不允许出现任何类似于“📍 店名”、“📍 地址”、“💰 人均”等探店类的商户占位排版！取而代之，请在每一款文案的【笔记正文】（body 字段）最开头，加入以下符合旅行心情的干净目的地与时间基本信息（空一行后再接后续游记正文）：
-📍 旅行目的地：[在此输入旅行地点/城市]
-📅 出行时间：[在此输入出行时间/季节]
-📷 记录设备：[在此输入拍摄相机/手机]
+特别要求：为了规范【旅行心情】格式，文案正文中绝对不允许出现任何类似于“📍 店名”、“📍 地址”、“💰 人均”等探店类的商户占位排版！取而代之，请在每一款文案的【笔记正文】（body 字段）最开头，加入以下符合旅行心情的目的地与时间基本信息（空一行后再接后续游记正文）：
+📍 旅行目的地：${primaryLocation ? primaryLocation : '【填写真实目的地或“[在此输入旅行地点/城市]”】'}
+📅 出行时间：${primaryDateTime ? primaryDateTime : '【填写真实时间或“[在此输入出行时间/季节]”】'}
+📷 记录设备：${primaryDevice ? primaryDevice : '【填写拍摄设备或“[在此输入拍摄相机/手机]”】'}
 `;
     } else if (style === '运动') {
       promptStyleGuidance = `这三款文案均应围绕【运动】风格（如健身、户外、跑步、球类运动等）进行创作，但侧重点不同：
@@ -545,31 +631,30 @@ app.post('/api/ai/generate-copy', async (req, res) => {
       keywordsPrompt = `用户未提供具体的关键词，请基于该风格的特点创作一个通用的、具有代表性的小红书爆款模板内容。`;
     }
 
-    // Extract EXIF from ORIGINAL un-compressed images (canvas-compressed ones have no EXIF)
+    // Format EXIF & Location Guidance
     let exifGuidance = '';
-    const exifSource = originalImages.length > 0 ? originalImages : images;
-    if (exifSource && exifSource.length > 0) {
+    if (parsedExifs.length > 0) {
       let exifInfos = [];
-      for (let i = 0; i < exifSource.length; i++) {
-        const img = exifSource[i];
-        const info = extractExif(img);
-        if (info && (info.dateTime || info.gps || info.device)) {
-          exifInfos.push(`图片 ${i + 1} EXIF 元数据：
+      for (let i = 0; i < parsedExifs.length; i++) {
+        const info = parsedExifs[i];
+        exifInfos.push(`图片 ${i + 1} EXIF 元数据：
   - 拍摄日期时间: ${info.dateTime || '未知'}
-  - 拍摄位置(GPS坐标): ${info.gps ? `纬度 ${info.gps.lat} (${info.gps.latRef}), 经度 ${info.gps.lon} (${info.gps.lonRef})` : '未知'}
+  - 拍摄位置: ${info.gps ? (primaryLocation || `纬度 ${info.gps.lat}, 经度 ${info.gps.lon}`) : '未知'}
   - 拍摄设备: ${info.device || '未知'}`);
-        }
       }
-      if (exifInfos.length > 0) {
-        exifGuidance = `
-⚠️ 极其重要（结合真实图片EXIF拍摄信息进行创作）：
-检测到这组照片中包含以下真实的 EXIF 拍摄元数据。请利用你的知识合理地将拍摄时间、日期、以及拍摄地点（如果有GPS坐标，请利用你的地理知识推算出它对应哪个真实的城市、商业区、街道或附近的地标，例如：纬度 31.218 经度 121.488 对应的是上海徐汇区/衡山路附近）自然地融入文案中。
-不要机械呆板地罗列参数，而是把它们写进故事里或作为场景背景铺垫（例如：“在这个惬意的周末午后”、“在上海衡山路街头”、“拿起我的XX手机随手一拍”等），使文案显得更具现场感、真实可信和日常化。
+      exifGuidance = `
+⚠️ 极其重要（结合真实图片EXIF拍摄信息与反查地址进行创作）：
+检测到这组照片中包含以下真实的 EXIF 拍摄元数据与地理位置：
+- 真实拍摄地点（GPS精准反查）：${primaryLocation || '未知'}
+- 真实拍摄时间：${primaryDateTime || '未知'}
+- 拍摄设备：${primaryDevice || '未知'}
 
-以下是提取出的 EXIF 元数据信息：
+请将上述真实地理位置（如城市、区县、商圈、湖泊、景点名）、拍摄时间季节与相机设备自然融入文案故事与正文字里行间，增强真实感和现场感！
+在结构化基本信息中的 📍 地址 / 📍 旅行目的地 中，若有检测到的真实地点必须直接填入具体真实地名，绝对不要输出 “[在此输入地址]”！
+
+以下是提取出的详细元数据：
 ${exifInfos.join('\n')}
 `;
-      }
     }
 
     // Analyze image content using Qwen-VL-Plus (multimodal analysis for atmosphere, people, text, objects)
