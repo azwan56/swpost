@@ -287,11 +287,11 @@ async function reverseGeocodeLocation(lat, lon) {
   if (isNaN(latNum) || isNaN(lonNum)) return null;
 
   try {
-    const bdcPromise = fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latNum}&longitude=${lonNum}&localityLanguage=zh`, { signal: AbortSignal.timeout(2500) })
+    const bdcPromise = fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latNum}&longitude=${lonNum}&localityLanguage=zh`, { signal: AbortSignal.timeout(3000) })
       .then(r => r.ok ? r.json() : null).catch(() => null);
     const osmPromise = fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latNum}&lon=${lonNum}&zoom=18&addressdetails=1&accept-language=zh-CN,zh;q=0.9`, { 
       headers: { 'User-Agent': 'ShantieAI/1.0' },
-      signal: AbortSignal.timeout(2500)
+      signal: AbortSignal.timeout(3000)
     }).then(r => r.ok ? r.json() : null).catch(() => null);
 
     const [bdcData, osmData] = await Promise.all([bdcPromise, osmPromise]);
@@ -638,8 +638,6 @@ app.post('/api/ai/generate-copy', async (req, res) => {
           const addr = await reverseGeocodeLocation(item.gps.lat, item.gps.lon);
           if (addr) {
             primaryLocation = addr;
-          } else {
-            primaryLocation = `纬度 ${item.gps.lat} (${item.gps.latRef || 'N'}), 经度 ${item.gps.lon} (${item.gps.lonRef || 'E'})`;
           }
           if (nearbyPOIs.length === 0) {
             nearbyPOIs = await fetchNearbyPOIs(item.gps.lat, item.gps.lon);
@@ -657,7 +655,7 @@ app.post('/api/ai/generate-copy', async (req, res) => {
 
 特别要求：为了规范探店/打卡格式，每一款文案的【笔记正文】（body 字段）最开头，必须加入以下规范的结构化基本信息排版（空一行后再接后续详细推荐）：
 📍 店名/打卡点：${keywords ? keywords.trim() : '【若有真实周边商家/驿站/地标则填写真实名称（如“千岛湖千汾线·红叶湾骑行驿站”），户外自然风光切勿虚构假咖啡店，未知才写“[在此输入店名]”】'}
-📍 地址：${primaryLocation ? primaryLocation : '【若提供GPS则直接填写真实地址/商圈，未检测到时才写“[在此输入地址]”】'}
+📍 地址：${primaryLocation ? primaryLocation : '【根据拍摄坐标与地貌推算出的真实具体城市区县/商圈/景点名称，如“浙江省杭州市淳安县千岛湖千汾线红叶湾”，严禁输出数字经纬度坐标】'}
 💰 人均：【根据风格/场景给出一个合理的人均预估价（如“免费打卡/租车¥30-50”或“¥50-80”或“[在此输入人均消费]”）】
 `;
     } else if (style === '旅行心情') {
@@ -667,7 +665,7 @@ app.post('/api/ai/generate-copy', async (req, res) => {
 - 选项三的 styleName 为 “金句共鸣”：文笔简练高级，探讨旅行的意义，产出容易引起小红书读者互动和收藏的金句。
 
 特别要求：为了规范【旅行心情】格式，文案正文中绝对不允许出现任何类似于“📍 店名”、“📍 地址”、“💰 人均”等探店类的商户占位排版！取而代之，请在每一款文案的【笔记正文】（body 字段）最开头，加入以下符合旅行心情的目的地与时间基本信息（空一行后再接后续游记正文）：
-📍 旅行目的地：${primaryLocation ? primaryLocation : '【填写真实目的地或“[在此输入旅行地点/城市]”】'}
+📍 旅行目的地：${primaryLocation ? primaryLocation : '【根据拍摄坐标推算出的真实目的地/城市/地标，如“浙江杭州 · 千岛湖”，严禁输出数字经纬度坐标】'}
 📅 出行时间：${primaryDateTime ? primaryDateTime : '【填写真实时间或“[在此输入出行时间/季节]”】'}
 📷 记录设备：${primaryDevice ? primaryDevice : '【填写拍摄设备或“[在此输入拍摄相机/手机]”】'}
 `;
@@ -698,7 +696,7 @@ app.post('/api/ai/generate-copy', async (req, res) => {
         const info = parsedExifs[i];
         exifInfos.push(`图片 ${i + 1} EXIF 元数据：
   - 拍摄日期时间: ${info.dateTime || '未知'}
-  - 拍摄位置: ${info.gps ? (primaryLocation || `纬度 ${info.gps.lat}, 经度 ${info.gps.lon}`) : '未知'}
+  - 拍摄位置: ${primaryLocation || (info.gps ? '已提供GPS坐标（请推算为真实中文地名）' : '未知')}
   - 拍摄设备: ${info.device || '未知'}`);
       }
 
@@ -708,18 +706,17 @@ app.post('/api/ai/generate-copy', async (req, res) => {
       }
 
       exifGuidance = `
-⚠️ 极其重要（结合真实图片EXIF拍摄信息与真实地理位置进行创作，严禁编造虚假商家）：
+⚠️ 极其重要（结合真实图片EXIF拍摄信息与真实地理位置进行创作，绝对严禁输出数字经纬度坐标）：
 检测到这组照片中包含以下真实的 EXIF 拍摄元数据与地理位置：
-- 真实拍摄地点（GPS精准反查）：${primaryLocation || '未知'}
+- 真实拍摄地点（中文地名）：${primaryLocation || '请根据GPS推算真实中文城市区县与地标'}
 - 真实拍摄时间：${primaryDateTime || '未知'}
 - 拍摄设备：${primaryDevice || '未知'}${poiText}
 
-⚠️ 严格真实性准则（严禁凭空捏造不存在的店铺）：
-1. 绝对严禁凭空捏造不存在的虚假独立咖啡店或餐厅名称！
-2. 若上方提供了周边真实POI列表，请优先选用最契合照片画面与主题的真实商家；
-3. 若用户拍摄的是户外湖景、公路、山林、骑行绿道、观景台等自然/户外场景且未指定具体店名，请直接以该地真实存在的自然地标、公路线路、骑行绿道驿站、观景台或景区为打卡主体（例如：“千岛湖千汾线·红叶湾骑行驿站”、“金峰乡千岛湖观景台”、“千汾线最美公路打卡点”），人均写“免费打卡 / 租车¥30-50”；
-4. 若用户在关键词中主动提供了店名，以用户输入的店名为主；
-5. 在结构化基本信息中的 📍 地址 / 📍 旅行目的地 中，必须直接填入具体真实地名（例如：“${primaryLocation}”），绝对不要输出 “[在此输入地址]”！
+⚠️ 严格规范与禁令：
+1. 绝对不要在标题、笔记正文、话题标签或任何结构化信息（如 📍 地址、📍 旅行目的地）中输出任何形式的数字经纬度（如“纬度 xx, 经度 xx”）！读者需要的是真实存在的中文地名、商圈、骑行路线或标志性景点！
+2. 绝对严禁凭空捏造不存在的虚假独立咖啡店或餐厅名称！若用户拍摄的是户外湖景、公路、山林、骑行绿道、观景台等自然/户外场景且未指定具体店名，请直接以该地真实存在的自然地标、公路线路、骑行绿道驿站、观景台或景区为打卡主体（例如：“千岛湖千汾线·红叶湾骑行驿站”、“金峰乡千岛湖观景台”、“千汾线最美公路打卡点”），人均写“免费打卡 / 租车¥30-50”；
+3. 若用户在关键词中主动提供了店名，以用户输入的店名为主；
+4. 在结构化基本信息中的 📍 地址 / 📍 旅行目的地 中，必须直接填入具体真实中文地名（例如：“${primaryLocation || '浙江省杭州市淳安县千岛湖千汾线红叶湾'}”），绝对不要输出数字坐标，也绝对不要输出 “[在此输入地址]”！
 
 以下是提取出的详细元数据：
 ${exifInfos.join('\n')}
