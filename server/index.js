@@ -224,6 +224,61 @@ async function copyAndModifyExif(originalBase64, styledBase64, styleName, modelN
   }
 }
 
+// Helper: Fetch real nearby POIs (stores, cafes, restaurants, scenic spots, stations) via Map APIs
+async function fetchNearbyPOIs(lat, lon) {
+  if (!lat || !lon) return [];
+  const latNum = parseFloat(lat);
+  const lonNum = parseFloat(lon);
+  if (isNaN(latNum) || isNaN(lonNum)) return [];
+
+  const amapKey = process.env.AMAP_KEY;
+  const tencentKey = process.env.TENCENT_MAP_KEY;
+
+  // 1. Try Amap (高德地图) if key configured
+  if (amapKey) {
+    try {
+      const url = `https://restapi.amap.com/v3/geocode/regeo?key=${amapKey}&location=${lonNum},${latNum}&extensions=all&radius=2000&poitype=050000|060000|100000|110000|190000`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === '1' && data.regeocode?.pois?.length > 0) {
+          return data.regeocode.pois.slice(0, 8).map(p => ({
+            name: p.name,
+            type: p.type,
+            address: p.address || p.name,
+            distance: p.distance ? `${p.distance}米` : ''
+          }));
+        }
+      }
+    } catch (e) {
+      console.warn('[POI Amap] Failed:', e.message);
+    }
+  }
+
+  // 2. Try Tencent Map (腾讯地图) if key configured
+  if (tencentKey) {
+    try {
+      const url = `https://apis.map.qq.com/ws/geocoder/v1/?location=${latNum},${lonNum}&get_poi=1&poi_options=radius=2000;policy=2&key=${tencentKey}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === 0 && data.result?.pois?.length > 0) {
+          return data.result.pois.slice(0, 8).map(p => ({
+            name: p.title,
+            type: p.category,
+            address: p.address || p.title,
+            distance: p._distance ? `${p._distance}米` : ''
+          }));
+        }
+      }
+    } catch (e) {
+      console.warn('[POI Tencent] Failed:', e.message);
+    }
+  }
+
+  return [];
+}
+
 // Helper: Reverse geocode GPS coordinates to a friendly Chinese location/address string
 async function reverseGeocodeLocation(lat, lon) {
   if (!lat || !lon) return null;
@@ -569,10 +624,11 @@ app.post('/api/ai/generate-copy', async (req, res) => {
       }
     }
 
-    // 2. Reverse geocode all GPS coordinates to readable Chinese addresses
+    // 2. Reverse geocode all GPS coordinates to readable Chinese addresses & query nearby POIs
     let primaryLocation = '';
     let primaryDateTime = '';
     let primaryDevice = '';
+    let nearbyPOIs = [];
 
     if (parsedExifs.length > 0) {
       for (const item of parsedExifs) {
@@ -585,21 +641,24 @@ app.post('/api/ai/generate-copy', async (req, res) => {
           } else {
             primaryLocation = `纬度 ${item.gps.lat} (${item.gps.latRef || 'N'}), 经度 ${item.gps.lon} (${item.gps.lonRef || 'E'})`;
           }
+          if (nearbyPOIs.length === 0) {
+            nearbyPOIs = await fetchNearbyPOIs(item.gps.lat, item.gps.lon);
+          }
         }
       }
     }
 
     let promptStyleGuidance = '';
     if (style === '探店') {
-      promptStyleGuidance = `这三款文案均应围绕【探店】风格进行创作，但侧重点不同：
-- 选项一的 styleName 为 “强力种草”：语气兴奋、极具煽动性，突出探店的特色亮点、招牌特色及消费体验。
+      promptStyleGuidance = `这三款文案均应围绕【探店/打卡】风格进行创作，但侧重点不同：
+- 选项一的 styleName 为 “强力种草”：语气兴奋、极具煽动性，突出探店/打卡的特色亮点、招牌特色及消费体验。
 - 选项二的 styleName 为 “真实体验”：客观细致，从消费者的第一视角，介绍店内的环境、氛围、服务品质和性价比。
 - 选项三的 styleName 为 “避坑与打卡”：精简吸睛，告诉读者哪里拍照最出片，有哪些拍照姿势和探店避坑小建议。
 
-特别要求：为了规范探店格式，每一款文案的【笔记正文】（body 字段）最开头，必须加入以下规范的结构化店铺基本信息排版（空一行后再接后续详细推荐）：
-📍 店名：${keywords ? keywords.trim() : '【根据画面视觉或氛围填写真实/合适的店名，若完全未知才写“[在此输入店名]”】'}
+特别要求：为了规范探店/打卡格式，每一款文案的【笔记正文】（body 字段）最开头，必须加入以下规范的结构化基本信息排版（空一行后再接后续详细推荐）：
+📍 店名/打卡点：${keywords ? keywords.trim() : '【若有真实周边商家/驿站/地标则填写真实名称（如“千岛湖千汾线·红叶湾骑行驿站”），户外自然风光切勿虚构假咖啡店，未知才写“[在此输入店名]”】'}
 📍 地址：${primaryLocation ? primaryLocation : '【若提供GPS则直接填写真实地址/商圈，未检测到时才写“[在此输入地址]”】'}
-💰 人均：【根据风格/场景给出一个合理的人均预估价，如“¥50-80”或“[在此输入人均消费]”】
+💰 人均：【根据风格/场景给出一个合理的人均预估价（如“免费打卡/租车¥30-50”或“¥50-80”或“[在此输入人均消费]”）】
 `;
     } else if (style === '旅行心情') {
       promptStyleGuidance = `这三款文案均应围绕【旅行心情】风格进行创作，但侧重点不同：
@@ -613,7 +672,7 @@ app.post('/api/ai/generate-copy', async (req, res) => {
 📷 记录设备：${primaryDevice ? primaryDevice : '【填写拍摄设备或“[在此输入拍摄相机/手机]”】'}
 `;
     } else if (style === '运动') {
-      promptStyleGuidance = `这三款文案均应围绕【运动】风格（如健身、户外、跑步、球类运动等）进行创作，但侧重点不同：
+      promptStyleGuidance = `这三款文案均应围绕【运动】风格（如健身、户外、跑步、骑行、球类运动等）进行创作，但侧重点不同：
 - 选项一的 styleName 为 “热血打卡”：语气高昂兴奋，极具感染力，突出运动带来的多巴胺快乐、突破自我的痛快体验。
 - 选项二的 styleName 为 “经验技巧”：客观专业，介绍运动穿搭、动作要领、装备推荐、拉伸建议等实用干货。
 - 选项三的 styleName 为 “运动记录”：真实接地气，记录日常运动的心路历程、碎碎念、挥洒汗水的瞬间，突出坚持的意义。`;
@@ -642,15 +701,25 @@ app.post('/api/ai/generate-copy', async (req, res) => {
   - 拍摄位置: ${info.gps ? (primaryLocation || `纬度 ${info.gps.lat}, 经度 ${info.gps.lon}`) : '未知'}
   - 拍摄设备: ${info.device || '未知'}`);
       }
+
+      let poiText = '';
+      if (nearbyPOIs && nearbyPOIs.length > 0) {
+        poiText = `\n- 周边真实存在的商家/POI参考：\n${nearbyPOIs.map((p, idx) => `  ${idx + 1}. 【${p.name}】(${p.type || '地点'}, 距离约${p.distance}) 地址: ${p.address}`).join('\n')}`;
+      }
+
       exifGuidance = `
-⚠️ 极其重要（结合真实图片EXIF拍摄信息与反查地址进行创作）：
+⚠️ 极其重要（结合真实图片EXIF拍摄信息与真实地理位置进行创作，严禁编造虚假商家）：
 检测到这组照片中包含以下真实的 EXIF 拍摄元数据与地理位置：
 - 真实拍摄地点（GPS精准反查）：${primaryLocation || '未知'}
 - 真实拍摄时间：${primaryDateTime || '未知'}
-- 拍摄设备：${primaryDevice || '未知'}
+- 拍摄设备：${primaryDevice || '未知'}${poiText}
 
-请将上述真实地理位置（如城市、区县、商圈、湖泊、景点名）、拍摄时间季节与相机设备自然融入文案故事与正文字里行间，增强真实感和现场感！
-在结构化基本信息中的 📍 地址 / 📍 旅行目的地 中，若有检测到的真实地点必须直接填入具体真实地名，绝对不要输出 “[在此输入地址]”！
+⚠️ 严格真实性准则（严禁凭空捏造不存在的店铺）：
+1. 绝对严禁凭空捏造不存在的虚假独立咖啡店或餐厅名称！
+2. 若上方提供了周边真实POI列表，请优先选用最契合照片画面与主题的真实商家；
+3. 若用户拍摄的是户外湖景、公路、山林、骑行绿道、观景台等自然/户外场景且未指定具体店名，请直接以该地真实存在的自然地标、公路线路、骑行绿道驿站、观景台或景区为打卡主体（例如：“千岛湖千汾线·红叶湾骑行驿站”、“金峰乡千岛湖观景台”、“千汾线最美公路打卡点”），人均写“免费打卡 / 租车¥30-50”；
+4. 若用户在关键词中主动提供了店名，以用户输入的店名为主；
+5. 在结构化基本信息中的 📍 地址 / 📍 旅行目的地 中，必须直接填入具体真实地名（例如：“${primaryLocation}”），绝对不要输出 “[在此输入地址]”！
 
 以下是提取出的详细元数据：
 ${exifInfos.join('\n')}
