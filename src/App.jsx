@@ -84,13 +84,17 @@ const extractExifClient = async (fileOrBase64) => {
   let device = null;
   let make = null;
   let gps = null;
+  let rawBytes = null;
+  let arrayBuffer = null;
+  let base64String = null;
 
-  // 1. Try ExifReader (industry-standard, handles File, Blob, ArrayBuffer, Base64, HEIC, PNG, TIFF, JPEG)
   try {
-    let tags = null;
-    if (typeof fileOrBase64 === 'object' && (fileOrBase64 instanceof File || fileOrBase64 instanceof Blob)) {
-      tags = await ExifReader.load(fileOrBase64);
+    if (typeof fileOrBase64 === 'object' && (fileOrBase64 instanceof File || fileOrBase64 instanceof Blob || typeof fileOrBase64.arrayBuffer === 'function')) {
+      arrayBuffer = await fileOrBase64.arrayBuffer();
+    } else if (fileOrBase64 instanceof ArrayBuffer) {
+      arrayBuffer = fileOrBase64;
     } else if (typeof fileOrBase64 === 'string') {
+      base64String = fileOrBase64;
       const clean = fileOrBase64.replace(/^data:image\/\w+;base64,/, '');
       const binary = atob(clean);
       const len = binary.length;
@@ -98,99 +102,137 @@ const extractExifClient = async (fileOrBase64) => {
       for (let i = 0; i < len; i++) {
         bytes[i] = binary.charCodeAt(i);
       }
-      tags = ExifReader.load(bytes);
+      arrayBuffer = bytes.buffer;
     }
-
-    if (tags) {
-      if (tags['DateTimeOriginal']?.description) {
-        dateTime = tags['DateTimeOriginal'].description;
-      } else if (tags['DateTime']?.description) {
-        dateTime = tags['DateTime'].description;
-      }
-
-      if (tags['Model']?.description) {
-        device = tags['Model'].description;
-      }
-      if (tags['Make']?.description) {
-        make = tags['Make'].description;
-        if (!device) device = make;
-      }
-
-      if (tags['GPSLatitude'] && tags['GPSLongitude']) {
-        let latVal = typeof tags['GPSLatitude'].description === 'number' 
-          ? tags['GPSLatitude'].description 
-          : parseFloat(tags['GPSLatitude'].description);
-        let lonVal = typeof tags['GPSLongitude'].description === 'number' 
-          ? tags['GPSLongitude'].description 
-          : parseFloat(tags['GPSLongitude'].description);
-
-        // Fallback for rational DMS arrays if description is not a direct number
-        if (isNaN(latVal) && Array.isArray(tags['GPSLatitude'].value) && tags['GPSLatitude'].value.length >= 3) {
-          const v = tags['GPSLatitude'].value;
-          latVal = (v[0][0]/v[0][1]) + (v[1][0]/v[1][1])/60 + (v[2][0]/v[2][1])/3600;
-        }
-        if (isNaN(lonVal) && Array.isArray(tags['GPSLongitude'].value) && tags['GPSLongitude'].value.length >= 3) {
-          const v = tags['GPSLongitude'].value;
-          lonVal = (v[0][0]/v[0][1]) + (v[1][0]/v[1][1])/60 + (v[2][0]/v[2][1])/3600;
-        }
-
-        const latRefVal = tags['GPSLatitudeRef']?.value?.[0] || tags['GPSLatitudeRef']?.description || (latVal >= 0 ? 'N' : 'S');
-        const lonRefVal = tags['GPSLongitudeRef']?.value?.[0] || tags['GPSLongitudeRef']?.description || (lonVal >= 0 ? 'E' : 'W');
-        const latRef = String(latRefVal).toUpperCase().startsWith('S') ? 'S' : 'N';
-        const lonRef = String(lonRefVal).toUpperCase().startsWith('W') ? 'W' : 'E';
-
-        if (!isNaN(latVal) && !isNaN(lonVal)) {
-          gps = {
-            lat: latVal.toString(),
-            lon: lonVal.toString(),
-            latRef,
-            lonRef
-          };
-        }
-      }
-    }
-  } catch (exifReaderErr) {
-    console.warn('[ExifReader] Error parsing EXIF:', exifReaderErr);
+  } catch (convErr) {
+    console.warn('[extractExifClient] Failed to obtain ArrayBuffer:', convErr);
   }
 
-  // 2. Fallback to piexif.load if anything is missing
-  if (!dateTime || !gps || !device) {
+  // 1. Try ExifReader on ArrayBuffer (industry standard, handles File/Blob ArrayBuffer, Base64, HEIC, PNG, TIFF, JPEG)
+  if (arrayBuffer) {
     try {
-      const exifObj = piexifLib.load(base64Image);
-      if (!dateTime) {
-        if (exifObj["Exif"] && exifObj["Exif"][piexifLib.ExifIFD.DateTimeOriginal]) {
-          dateTime = exifObj["Exif"][piexifLib.ExifIFD.DateTimeOriginal];
-        } else if (exifObj["0th"] && exifObj["0th"][piexifLib.ImageIFD.DateTime]) {
-          dateTime = exifObj["0th"][piexifLib.ImageIFD.DateTime];
+      const tags = ExifReader.load(arrayBuffer);
+      if (tags) {
+        if (tags['DateTimeOriginal']?.description) {
+          dateTime = tags['DateTimeOriginal'].description;
+        } else if (tags['DateTime']?.description) {
+          dateTime = tags['DateTime'].description;
+        }
+
+        if (tags['Model']?.description) {
+          device = tags['Model'].description;
+        }
+        if (tags['Make']?.description) {
+          make = tags['Make'].description;
+          if (!device) device = make;
+        }
+
+        if (tags['GPSLatitude'] && tags['GPSLongitude']) {
+          let latVal = typeof tags['GPSLatitude'].description === 'number' 
+            ? tags['GPSLatitude'].description 
+            : parseFloat(tags['GPSLatitude'].description);
+          let lonVal = typeof tags['GPSLongitude'].description === 'number' 
+            ? tags['GPSLongitude'].description 
+            : parseFloat(tags['GPSLongitude'].description);
+
+          // Fallback for rational DMS arrays if description is not a direct number
+          if (isNaN(latVal) && Array.isArray(tags['GPSLatitude'].value) && tags['GPSLatitude'].value.length >= 3) {
+            const v = tags['GPSLatitude'].value;
+            latVal = (v[0][0]/v[0][1]) + (v[1][0]/v[1][1])/60 + (v[2][0]/v[2][1])/3600;
+          }
+          if (isNaN(lonVal) && Array.isArray(tags['GPSLongitude'].value) && tags['GPSLongitude'].value.length >= 3) {
+            const v = tags['GPSLongitude'].value;
+            lonVal = (v[0][0]/v[0][1]) + (v[1][0]/v[1][1])/60 + (v[2][0]/v[2][1])/3600;
+          }
+
+          const latRefVal = tags['GPSLatitudeRef']?.value?.[0] || tags['GPSLatitudeRef']?.description || (latVal >= 0 ? 'N' : 'S');
+          const lonRefVal = tags['GPSLongitudeRef']?.value?.[0] || tags['GPSLongitudeRef']?.description || (lonVal >= 0 ? 'E' : 'W');
+          const latRef = String(latRefVal).toUpperCase().startsWith('S') ? 'S' : 'N';
+          const lonRef = String(lonRefVal).toUpperCase().startsWith('W') ? 'W' : 'E';
+
+          if (!isNaN(latVal) && !isNaN(lonVal)) {
+            gps = {
+              lat: latVal.toString(),
+              lon: lonVal.toString(),
+              latRef,
+              lonRef
+            };
+          }
         }
       }
-      if (!device) {
-        const m = exifObj["0th"] && exifObj["0th"][piexifLib.ImageIFD.Make];
-        const md = exifObj["0th"] && exifObj["0th"][piexifLib.ImageIFD.Model];
-        device = md || m || null;
-        make = m || null;
+    } catch (exifReaderErr) {
+      console.warn('[ExifReader] Error parsing EXIF:', exifReaderErr);
+    }
+
+    // Extract raw APP1 segment for JPEG lossless preservation
+    try {
+      const view = new Uint8Array(arrayBuffer);
+      if (view.length > 4 && view[0] === 0xFF && view[1] === 0xD8) {
+        let offset = 2;
+        while (offset < view.length) {
+          const marker = (view[offset] << 8) | view[offset + 1];
+          const length = (view[offset + 2] << 8) | view[offset + 3];
+          if (marker === 0xFFE1) {
+            if (view[offset + 4] === 69 && view[offset + 5] === 120 && view[offset + 6] === 105 && view[offset + 7] === 102 && view[offset + 8] === 0 && view[offset + 9] === 0) {
+              let exifStr = '';
+              for (let i = offset + 4; i < offset + 2 + length; i++) {
+                exifStr += String.fromCharCode(view[i]);
+              }
+              rawBytes = exifStr;
+              break;
+            }
+          }
+          if ((marker & 0xFF00) !== 0xFF00) break;
+          offset += 2 + length;
+        }
       }
-      if (!gps && exifObj["GPS"]) {
-        const lat = exifObj["GPS"][piexifLib.GPSIFD.GPSLatitude];
-        const latRef = exifObj["GPS"][piexifLib.GPSIFD.GPSLatitudeRef];
-        const lon = exifObj["GPS"][piexifLib.GPSIFD.GPSLongitude];
-        const lonRef = exifObj["GPS"][piexifLib.GPSIFD.GPSLongitudeRef];
-        
-        if (lat && lon && lat.length >= 3 && lon.length >= 3) {
-          const convertDMS = (dms) => {
-            const d = dms[0][0] / dms[0][1];
-            const m = dms[1][0] / dms[1][1];
-            const s = dms[2][0] / dms[2][1];
-            return d + m / 60 + s / 3600;
-          };
-          const latVal = convertDMS(lat);
-          const lonVal = convertDMS(lon);
-          gps = {
-            lat: latVal.toString(),
-            lon: lonVal.toString(),
-            latRef: latRef || (latVal >= 0 ? 'N' : 'S'),
-            lonRef: lonRef || (lonVal >= 0 ? 'E' : 'W')
-          };
+    } catch (rawErr) {
+      console.warn('[extractExifClient] Error extracting rawBytes:', rawErr);
+    }
+  }
+
+  // 2. Fallback to piexif.load if anything is missing and rawBytes or JPEG base64 is available
+  if ((!dateTime || !gps || !device) && piexifLib?.load) {
+    try {
+      const exifObj = rawBytes 
+        ? piexifLib.load(rawBytes) 
+        : (base64String && base64String.startsWith('data:image/jpeg') ? piexifLib.load(base64String) : null);
+      if (exifObj) {
+        if (!dateTime) {
+          if (exifObj["Exif"] && exifObj["Exif"][piexifLib.ExifIFD.DateTimeOriginal]) {
+            dateTime = exifObj["Exif"][piexifLib.ExifIFD.DateTimeOriginal];
+          } else if (exifObj["0th"] && exifObj["0th"][piexifLib.ImageIFD.DateTime]) {
+            dateTime = exifObj["0th"][piexifLib.ImageIFD.DateTime];
+          }
+        }
+        if (!device) {
+          const m = exifObj["0th"] && exifObj["0th"][piexifLib.ImageIFD.Make];
+          const md = exifObj["0th"] && exifObj["0th"][piexifLib.ImageIFD.Model];
+          device = md || m || null;
+          make = m || null;
+        }
+        if (!gps && exifObj["GPS"]) {
+          const lat = exifObj["GPS"][piexifLib.GPSIFD.GPSLatitude];
+          const latRef = exifObj["GPS"][piexifLib.GPSIFD.GPSLatitudeRef];
+          const lon = exifObj["GPS"][piexifLib.GPSIFD.GPSLongitude];
+          const lonRef = exifObj["GPS"][piexifLib.GPSIFD.GPSLongitudeRef];
+          
+          if (lat && lon && lat.length >= 3 && lon.length >= 3) {
+            const convertDMS = (dms) => {
+              const d = dms[0][0] / dms[0][1];
+              const m = dms[1][0] / dms[1][1];
+              const s = dms[2][0] / dms[2][1];
+              return d + m / 60 + s / 3600;
+            };
+            const latVal = convertDMS(lat);
+            const lonVal = convertDMS(lon);
+            gps = {
+              lat: latVal.toString(),
+              lon: lonVal.toString(),
+              latRef: latRef || (latVal >= 0 ? 'N' : 'S'),
+              lonRef: lonRef || (lonVal >= 0 ? 'E' : 'W')
+            };
+          }
         }
       }
     } catch (piexifErr) {
@@ -249,44 +291,65 @@ function App() {
     const availableSlots = 4 - uploadedImages.length;
     if (availableSlots <= 0) {
       setErrorMsg('最多支持上传 4 张图片！');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (e.target) e.target.value = '';
       return;
     }
     const filesToProcess = files.slice(0, availableSlots);
     const newImages = [];
     
     for (const file of filesToProcess) {
-      const id = Math.random().toString(36).substring(2, 9);
-      const src = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (event) => resolve(event.target.result);
-        reader.readAsDataURL(file);
-      });
+      try {
+        const id = Math.random().toString(36).substring(2, 9);
+        const src = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (event) => resolve(event.target.result);
+          reader.onerror = (err) => reject(err);
+          reader.readAsDataURL(file);
+        });
 
-      const dimensions = await new Promise((resolve) => {
-        const tempImg = new Image();
-        tempImg.onload = () => resolve({ w: tempImg.width, h: tempImg.height });
-        tempImg.onerror = () => resolve({ w: 1024, h: 1024 });
-        tempImg.src = src;
-      });
+        const dimensions = await new Promise((resolve) => {
+          const tempImg = new Image();
+          tempImg.onload = () => resolve({ w: tempImg.width, h: tempImg.height });
+          tempImg.onerror = () => resolve({ w: 1024, h: 1024 });
+          tempImg.src = src;
+        });
 
-      // Extract EXIF directly from the File object (supports HEIC, JPEG, PNG, TIFF)
-      const exif = (await extractExifClient(file)) || (await extractExifClient(src));
+        // Extract EXIF directly from the File object (supports HEIC, JPEG, PNG, TIFF)
+        let exif = null;
+        try {
+          exif = (await extractExifClient(file)) || (await extractExifClient(src));
+        } catch (exifErr) {
+          console.warn('[Upload] Failed to parse EXIF for image:', exifErr);
+        }
 
-      newImages.push({
-        id,
-        file,
-        src,
-        styledSrc: null,
-        activeStyle: null,
-        width: dimensions.w,
-        height: dimensions.h,
-        exif
-      });
+        newImages.push({
+          id,
+          file,
+          src,
+          styledSrc: null,
+          activeStyle: null,
+          width: dimensions.w,
+          height: dimensions.h,
+          exif
+        });
+      } catch (fileErr) {
+        console.error('[Upload] Error processing file:', file?.name, fileErr);
+        setErrorMsg('部分图片处理失败，请重试');
+      }
     }
 
-    const updatedImages = [...uploadedImages, ...newImages];
-    setUploadedImages(updatedImages);
-    setActiveIdx(uploadedImages.length);
+    if (newImages.length > 0) {
+      setUploadedImages(prev => [...prev, ...newImages]);
+      setActiveIdx(uploadedImages.length);
+    }
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    if (e.target) {
+      e.target.value = '';
+    }
   };
 
   // Remove uploaded image
@@ -433,7 +496,15 @@ function App() {
       );
 
       // Send the pre-extracted EXIF data directly to the server (lightweight JSON list)
-      const exifDataList = orderedImages.map(img => img.exif);
+      const exifDataList = orderedImages.map(img => {
+        if (!img.exif) return null;
+        return {
+          dateTime: img.exif.dateTime,
+          gps: img.exif.gps,
+          device: img.exif.device,
+          make: img.exif.make
+        };
+      });
 
       const res = await fetch(`${API_BASE}/api/ai/generate-copy`, {
         method: 'POST',
@@ -1337,7 +1408,6 @@ function App() {
                         rows={10}
                         style={{
                           width: '100%',
-                          border: 'none',
                           outline: 'none',
                           background: 'transparent',
                           fontFamily: 'inherit',

@@ -961,7 +961,11 @@ export default function Index() {
         style: selectedStyle,
         keywords: copyKeywords,
         images: orderedImages.map(img => img.src),
-        exifList: orderedImages.map(img => img.exif),
+        exifList: orderedImages.map(img => img.exif ? {
+          dateTime: img.exif.dateTime,
+          gps: img.exif.gps,
+          device: img.exif.device
+        } : null),
         visualDescriptions: cachedVisualDescriptions
       },
       success: (res) => {
