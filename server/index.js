@@ -352,7 +352,7 @@ async function analyzeImageMultimodal(imageBase64, apiKey) {
             content: [
               {
                 type: 'text',
-                text: '请仔细观察这张图片，提取并用一段话概括以下信息用于撰写社交媒体文案：\n1. 画面内容与具体场景（如物品、食物、背景等）\n2. 画面中能够识别出的所有文字或牌匾招牌信息\n3. 画面中的人物（如有，描述其数量、着装、神态或动作）\n4. 画面整体营造出的情感氛围与色彩色调（如温馨、热烈、孤独、复古、冷色调等）。\n请直接用150字以内输出描述，不要输出任何引言或解释。'
+                text: '请仔细观察这张图片，提取以下信息用于撰写小红书探店/生活文案：\n1. 重点识别画面中的任何文字（门头招牌、店名logo、菜单品名、包装纸袋或路牌，请准确列出识别到的店名或品牌字样）\n2. 画面中呈现的具体菜品、饮品、甜品或商品特色与摆盘细节\n3. 店铺/餐厅的装潢风格与环境氛围（如复古法式、日式原木、工业风、庭院露营、市井老店等）\n4. 画面中的人物神态动作（如有）以及整体营造的情感氛围与打卡亮点。\n请直接用150字以内概括输出，不要输出任何解释性引言。'
               },
               {
                 type: 'image_url',
@@ -628,13 +628,15 @@ app.post('/api/ai/generate-copy', async (req, res) => {
     let primaryLocation = '';
     let primaryDateTime = '';
     let primaryDevice = '';
+    let primaryGPS = null;
     let nearbyPOIs = [];
 
     if (parsedExifs.length > 0) {
       for (const item of parsedExifs) {
         if (!primaryDateTime && item.dateTime) primaryDateTime = item.dateTime;
         if (!primaryDevice && item.device) primaryDevice = item.device;
-        if (!primaryLocation && item.gps) {
+        if (!primaryGPS && item.gps) {
+          primaryGPS = item.gps;
           const addr = await reverseGeocodeLocation(item.gps.lat, item.gps.lon);
           if (addr) {
             primaryLocation = addr;
@@ -646,15 +648,17 @@ app.post('/api/ai/generate-copy', async (req, res) => {
       }
     }
 
+    const hasLocationData = Boolean(primaryGPS || primaryLocation);
+
     let promptStyleGuidance = '';
     if (style === '探店') {
       let storeLine = '';
       if (keywords) {
         storeLine = `📍 店名/打卡点：${keywords.trim()}`;
       } else if (nearbyPOIs.length > 0) {
-        storeLine = `📍 店名/打卡点：【优先从检测到的周边真实商家/地标（如：${nearbyPOIs[0].name}）中选取，若不符合画面才写“[在此输入店名或地标]”】`;
-      } else if (primaryLocation) {
-        storeLine = `📍 店名/打卡点：【可结合该地真实地标填写真实名称，若未知写“[在此输入店名或打卡点]”】`;
+        storeLine = `📍 店名/打卡点：【优先从检测到的周边真实商家/地标（如：${nearbyPOIs[0].name}）中选取真实店名】`;
+      } else if (hasLocationData) {
+        storeLine = `📍 店名/打卡点：【必须填写真实存在的店铺名称！请结合画面视觉（门头招牌文字/菜品特质）与真实GPS坐标，推算或匹配该位置真实存在的一家知名高口碑餐厅、特色咖啡馆或网红打卡店，绝对不允许输出“[在此输入店名]”】`;
       } else {
         storeLine = `📍 店名/打卡点：[在此输入店名或打卡点]`;
       }
@@ -662,6 +666,8 @@ app.post('/api/ai/generate-copy', async (req, res) => {
       let addressLine = '';
       if (primaryLocation) {
         addressLine = `📍 地址：${primaryLocation}`;
+      } else if (primaryGPS) {
+        addressLine = `📍 地址：【必须根据GPS坐标推算出真实中文城市、区县和具体街道路名（例如“XX市XX区XX路”），严禁输出经纬度数字，严禁输出“[在此输入地址]”】`;
       } else {
         addressLine = `📍 地址：[在此输入具体地址或商圈]`;
       }
@@ -674,12 +680,14 @@ app.post('/api/ai/generate-copy', async (req, res) => {
 特别要求：为了规范探店/打卡格式，每一款文案的【笔记正文】（body 字段）最开头，必须加入以下规范的结构化基本信息排版（空一行后再接后续详细推荐）：
 ${storeLine}
 ${addressLine}
-💰 人均：【根据实际消费类型给出合理的人均预估价（如“¥50-80”或“免费打卡”或“[在此输入人均消费]”）】
+💰 人均：【根据真实店铺消费水平合理预估（如“¥50-80”或“¥120左右”或“[在此输入人均消费]”）】
 `;
     } else if (style === '旅行心情') {
       let destLine = '';
       if (primaryLocation) {
         destLine = `📍 旅行目的地：${primaryLocation}`;
+      } else if (primaryGPS) {
+        destLine = `📍 旅行目的地：【根据GPS坐标推算出真实城市/景区/地标，严禁输出经纬度数字，严禁输出占位符】`;
       } else {
         destLine = `📍 旅行目的地：[在此输入旅行地点/城市]`;
       }
@@ -715,13 +723,14 @@ ${destLine}
 
     // Format EXIF & Location Guidance
     let exifGuidance = '';
-    if (parsedExifs.length > 0 && (primaryLocation || primaryDateTime || primaryDevice)) {
+    if (parsedExifs.length > 0 && (primaryGPS || primaryLocation || primaryDateTime || primaryDevice)) {
       let exifInfos = [];
       for (let i = 0; i < parsedExifs.length; i++) {
         const info = parsedExifs[i];
+        const gpsStr = info.gps ? `纬度 ${info.gps.lat}° (${info.gps.latRef || 'N'}), 经度 ${info.gps.lon}° (${info.gps.lonRef || 'E'})` : '无';
         exifInfos.push(`图片 ${i + 1} EXIF 元数据：
   - 拍摄日期时间: ${info.dateTime || '未知'}
-  - 拍摄位置: ${primaryLocation || (info.gps ? '已提供GPS坐标（请结合画面推算真实地名）' : '未知')}
+  - 拍摄GPS坐标: ${gpsStr}
   - 拍摄设备: ${info.device || '未知'}`);
       }
 
@@ -730,20 +739,23 @@ ${destLine}
         poiText = `\n- 周边真实存在的商家/POI参考：\n${nearbyPOIs.map((p, idx) => `  ${idx + 1}. 【${p.name}】(${p.type || '地点'}, 距离约${p.distance}) 地址: ${p.address}`).join('\n')}`;
       }
 
-      let locationDetail = primaryLocation ? `- 真实拍摄地点（中文地名）：${primaryLocation}` : '';
+      let gpsDetail = primaryGPS ? `- 真实照片GPS坐标：纬度 ${primaryGPS.lat}° (${primaryGPS.latRef || 'N'}), 经度 ${primaryGPS.lon}° (${primaryGPS.lonRef || 'E'})` : '';
+      let locationDetail = primaryLocation ? `- 拍摄地反查中文参考：${primaryLocation}` : (primaryGPS ? '- 拍摄地：请根据上述GPS坐标精准推算真实城市、区县、街道与商圈' : '');
       let timeDetail = primaryDateTime ? `- 真实拍摄时间：${primaryDateTime}` : '';
       let deviceDetail = primaryDevice ? `- 拍摄设备：${primaryDevice}` : '';
 
       exifGuidance = `
-⚠️ 极其重要（结合真实图片EXIF拍摄信息与真实地理位置进行创作，绝对严禁输出数字经纬度坐标）：
+⚠️ 极其重要（照片包含真实EXIF元数据与真实GPS定位，必须精准识别真实城市、街道与店铺）：
 检测到这组照片中包含以下真实的 EXIF 拍摄元数据与地理位置：
-${[locationDetail, timeDetail, deviceDetail].filter(Boolean).join('\n')}${poiText}
+${[gpsDetail, locationDetail, timeDetail, deviceDetail].filter(Boolean).join('\n')}${poiText}
 
 ⚠️ 严格规范与真实性准则：
-1. 绝对不要在标题、笔记正文、话题标签或任何结构化信息中输出任何形式的数字经纬度（如“纬度 xx, 经度 xx”）！读者需要的是人类可读的真实中文地名、商圈、路线或标志性景点！
-2. 绝对严禁编造未在图片中或检测数据中出现的虚构独立店铺名称或假想特定城市；若用户拍摄的是自然景观、街景或户外日常，以实际所处场景为主题；
-3. 若用户在主题/关键词中提供了具体的店名或主题，以用户指定的关键词为最高优先级；
-4. 结构化信息中的地址或目的地，必须如实填入上方检测到的真实地名（如已检测到：“${primaryLocation}”），未检测到时使用规范占位符。
+1. 城市与街道定位：必须根据上述 GPS 坐标与反查信息，准确推算其所处的真实国家、城市、行政区、具体街道路名与所在商圈；
+2. 真实餐厅/店铺匹配：
+   - 若照片画面（视觉分析中）包含门头招牌文字、菜单、包装或商标，必须优先以画面中识别出的真实店名为主；
+   - 若未提供关键词，必须结合画面中呈现的具体餐食饮品特色（如咖啡、拉花、甜点、中餐、日料、火锅等）与该GPS坐标所在街区商圈，推算或匹配该位置真实存在的一家知名高口碑餐厅、特色咖啡店或打卡地标，绝对不允许输出“[在此输入店名]”！
+3. 严禁经纬度数字：绝对不要在标题、正文、话题标签或任何结构化信息中输出任何形式的数字经纬度坐标（如“纬度 31.23..., 经度 121.47...”），必须转化为人类可读的真实中文城市与街道地址！
+4. 严禁残留占位符：检测到真实GPS坐标时，必须推算并直接填入真实的店名和详细中文地址，绝对不允许输出“[在此输入店名]”或“[在此输入地址]”！
 
 以下是提取出的详细元数据：
 ${exifInfos.join('\n')}

@@ -603,7 +603,10 @@ const drawWatermarkOnCanvas = (canvas, ctx, img, styleName, modelName, exif, res
 const extractExifClient = (base64Image) => {
   if (!base64Image) return null;
   try {
-    const exifObj = piexif.load(base64Image);
+    const formattedBase64 = base64Image.startsWith('data:image/jpeg;base64,') 
+      ? base64Image 
+      : (base64Image.startsWith('data:') ? base64Image : `data:image/jpeg;base64,${base64Image}`);
+    const exifObj = piexif.load(formattedBase64);
     
     // Extract DateTime
     let dateTime = null;
@@ -631,21 +634,28 @@ const extractExifClient = (base64Image) => {
       const lon = exifObj["GPS"][piexif.GPSIFD.GPSLongitude];
       const lonRef = exifObj["GPS"][piexif.GPSIFD.GPSLongitudeRef];
       
-      if (lat && lon && lat.length >= 3 && lon.length >= 3) {
+      if (lat && lon) {
         const convertDMS = (dms) => {
-          const d = dms[0][0] / dms[0][1];
-          const m = dms[1][0] / dms[1][1];
-          const s = dms[2][0] / dms[2][1];
-          return d + m / 60 + s / 3600;
+          if (typeof dms === 'number') return dms;
+          if (typeof dms === 'string') return parseFloat(dms);
+          if (Array.isArray(dms) && dms.length >= 3) {
+            const d = dms[0][0] / dms[0][1];
+            const m = dms[1][0] / dms[1][1];
+            const s = dms[2][0] / dms[2][1];
+            return d + m / 60 + s / 3600;
+          }
+          return NaN;
         };
         const latVal = convertDMS(lat);
         const lonVal = convertDMS(lon);
-        gps = {
-          lat: latVal.toString(),
-          lon: lonVal.toString(),
-          latRef: latRef || 'N',
-          lonRef: lonRef || 'E'
-        };
+        if (!isNaN(latVal) && !isNaN(lonVal)) {
+          gps = {
+            lat: latVal.toString(),
+            lon: lonVal.toString(),
+            latRef: latRef || 'N',
+            lonRef: lonRef || 'E'
+          };
+        }
       }
     }
     

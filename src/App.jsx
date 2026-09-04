@@ -76,58 +76,77 @@ const resizeImageBase64 = (dataUrl, maxDim = 1600, quality = 0.85) => {
 };
 
 // Helper: Extract Date, Time, Location, Device from EXIF data on client side using ExifReader & piexifjs
-const extractExifClient = (base64Image) => {
-  if (!base64Image) return null;
+const extractExifClient = async (fileOrBase64) => {
+  if (!fileOrBase64) return null;
   const piexifLib = getPiexif();
-  const rawBytes = extractRawExifClient(base64Image);
 
   let dateTime = null;
   let device = null;
   let make = null;
   let gps = null;
 
-  // 1. Try ExifReader (industry-standard, handles all image formats & complex MakerNotes)
+  // 1. Try ExifReader (industry-standard, handles File, Blob, ArrayBuffer, Base64, HEIC, PNG, TIFF, JPEG)
   try {
-    const clean = base64Image.replace(/^data:image\/\w+;base64,/, '');
-    const binary = atob(clean);
-    const len = binary.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    const tags = ExifReader.load(bytes.buffer);
-
-    if (tags['DateTimeOriginal']?.description) {
-      dateTime = tags['DateTimeOriginal'].description;
-    } else if (tags['DateTime']?.description) {
-      dateTime = tags['DateTime'].description;
-    }
-
-    if (tags['Model']?.description) {
-      device = tags['Model'].description;
-    }
-    if (tags['Make']?.description) {
-      make = tags['Make'].description;
-      if (!device) device = make;
+    let tags = null;
+    if (typeof fileOrBase64 === 'object' && (fileOrBase64 instanceof File || fileOrBase64 instanceof Blob)) {
+      tags = await ExifReader.load(fileOrBase64);
+    } else if (typeof fileOrBase64 === 'string') {
+      const clean = fileOrBase64.replace(/^data:image\/\w+;base64,/, '');
+      const binary = atob(clean);
+      const len = binary.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      tags = ExifReader.load(bytes);
     }
 
-    if (tags['GPSLatitude'] && tags['GPSLongitude']) {
-      const latVal = typeof tags['GPSLatitude'].description === 'number' 
-        ? tags['GPSLatitude'].description 
-        : parseFloat(tags['GPSLatitude'].description);
-      const lonVal = typeof tags['GPSLongitude'].description === 'number' 
-        ? tags['GPSLongitude'].description 
-        : parseFloat(tags['GPSLongitude'].description);
-      const latRef = tags['GPSLatitudeRef']?.value?.[0] || tags['GPSLatitudeRef']?.description || (latVal >= 0 ? 'N' : 'S');
-      const lonRef = tags['GPSLongitudeRef']?.value?.[0] || tags['GPSLongitudeRef']?.description || (lonVal >= 0 ? 'E' : 'W');
+    if (tags) {
+      if (tags['DateTimeOriginal']?.description) {
+        dateTime = tags['DateTimeOriginal'].description;
+      } else if (tags['DateTime']?.description) {
+        dateTime = tags['DateTime'].description;
+      }
 
-      if (!isNaN(latVal) && !isNaN(lonVal)) {
-        gps = {
-          lat: latVal.toString(),
-          lon: lonVal.toString(),
-          latRef: String(latRef),
-          lonRef: String(lonRef)
-        };
+      if (tags['Model']?.description) {
+        device = tags['Model'].description;
+      }
+      if (tags['Make']?.description) {
+        make = tags['Make'].description;
+        if (!device) device = make;
+      }
+
+      if (tags['GPSLatitude'] && tags['GPSLongitude']) {
+        let latVal = typeof tags['GPSLatitude'].description === 'number' 
+          ? tags['GPSLatitude'].description 
+          : parseFloat(tags['GPSLatitude'].description);
+        let lonVal = typeof tags['GPSLongitude'].description === 'number' 
+          ? tags['GPSLongitude'].description 
+          : parseFloat(tags['GPSLongitude'].description);
+
+        // Fallback for rational DMS arrays if description is not a direct number
+        if (isNaN(latVal) && Array.isArray(tags['GPSLatitude'].value) && tags['GPSLatitude'].value.length >= 3) {
+          const v = tags['GPSLatitude'].value;
+          latVal = (v[0][0]/v[0][1]) + (v[1][0]/v[1][1])/60 + (v[2][0]/v[2][1])/3600;
+        }
+        if (isNaN(lonVal) && Array.isArray(tags['GPSLongitude'].value) && tags['GPSLongitude'].value.length >= 3) {
+          const v = tags['GPSLongitude'].value;
+          lonVal = (v[0][0]/v[0][1]) + (v[1][0]/v[1][1])/60 + (v[2][0]/v[2][1])/3600;
+        }
+
+        const latRefVal = tags['GPSLatitudeRef']?.value?.[0] || tags['GPSLatitudeRef']?.description || (latVal >= 0 ? 'N' : 'S');
+        const lonRefVal = tags['GPSLongitudeRef']?.value?.[0] || tags['GPSLongitudeRef']?.description || (lonVal >= 0 ? 'E' : 'W');
+        const latRef = String(latRefVal).toUpperCase().startsWith('S') ? 'S' : 'N';
+        const lonRef = String(lonRefVal).toUpperCase().startsWith('W') ? 'W' : 'E';
+
+        if (!isNaN(latVal) && !isNaN(lonVal)) {
+          gps = {
+            lat: latVal.toString(),
+            lon: lonVal.toString(),
+            latRef,
+            lonRef
+          };
+        }
       }
     }
   } catch (exifReaderErr) {
@@ -250,7 +269,8 @@ function App() {
         tempImg.src = src;
       });
 
-      const exif = extractExifClient(src);
+      // Extract EXIF directly from the File object (supports HEIC, JPEG, PNG, TIFF)
+      const exif = (await extractExifClient(file)) || (await extractExifClient(src));
 
       newImages.push({
         id,
