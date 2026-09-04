@@ -648,26 +648,51 @@ app.post('/api/ai/generate-copy', async (req, res) => {
 
     let promptStyleGuidance = '';
     if (style === '探店') {
+      let storeLine = '';
+      if (keywords) {
+        storeLine = `📍 店名/打卡点：${keywords.trim()}`;
+      } else if (nearbyPOIs.length > 0) {
+        storeLine = `📍 店名/打卡点：【优先从检测到的周边真实商家/地标（如：${nearbyPOIs[0].name}）中选取，若不符合画面才写“[在此输入店名或地标]”】`;
+      } else if (primaryLocation) {
+        storeLine = `📍 店名/打卡点：【可结合该地真实地标填写真实名称，若未知写“[在此输入店名或打卡点]”】`;
+      } else {
+        storeLine = `📍 店名/打卡点：[在此输入店名或打卡点]`;
+      }
+
+      let addressLine = '';
+      if (primaryLocation) {
+        addressLine = `📍 地址：${primaryLocation}`;
+      } else {
+        addressLine = `📍 地址：[在此输入具体地址或商圈]`;
+      }
+
       promptStyleGuidance = `这三款文案均应围绕【探店/打卡】风格进行创作，但侧重点不同：
 - 选项一的 styleName 为 “强力种草”：语气兴奋、极具煽动性，突出探店/打卡的特色亮点、招牌特色及消费体验。
 - 选项二的 styleName 为 “真实体验”：客观细致，从消费者的第一视角，介绍店内的环境、氛围、服务品质和性价比。
 - 选项三的 styleName 为 “避坑与打卡”：精简吸睛，告诉读者哪里拍照最出片，有哪些拍照姿势和探店避坑小建议。
 
 特别要求：为了规范探店/打卡格式，每一款文案的【笔记正文】（body 字段）最开头，必须加入以下规范的结构化基本信息排版（空一行后再接后续详细推荐）：
-📍 店名/打卡点：${keywords ? keywords.trim() : '【若有真实周边商家/驿站/地标则填写真实名称（如“千岛湖千汾线·红叶湾骑行驿站”），户外自然风光切勿虚构假咖啡店，未知才写“[在此输入店名]”】'}
-📍 地址：${primaryLocation ? primaryLocation : '【根据拍摄坐标与地貌推算出的真实具体城市区县/商圈/景点名称，如“浙江省杭州市淳安县千岛湖千汾线红叶湾”，严禁输出数字经纬度坐标】'}
-💰 人均：【根据风格/场景给出一个合理的人均预估价（如“免费打卡/租车¥30-50”或“¥50-80”或“[在此输入人均消费]”）】
+${storeLine}
+${addressLine}
+💰 人均：【根据实际消费类型给出合理的人均预估价（如“¥50-80”或“免费打卡”或“[在此输入人均消费]”）】
 `;
     } else if (style === '旅行心情') {
+      let destLine = '';
+      if (primaryLocation) {
+        destLine = `📍 旅行目的地：${primaryLocation}`;
+      } else {
+        destLine = `📍 旅行目的地：[在此输入旅行地点/城市]`;
+      }
+
       promptStyleGuidance = `这三款文案均应围绕【旅行心情】风格进行创作，但侧重点不同：
 - 选项一的 styleName 为 “文艺治愈”：慢节奏、有故事感和温馨气息，探讨旅行中的偶遇、风景与内心的平静。
 - 选项二的 styleName 为 “碎碎念记录”：活泼轻快，记录旅途中的趣味瞬间、突发小状况或真实的旅行状态。
 - 选项三的 styleName 为 “金句共鸣”：文笔简练高级，探讨旅行的意义，产出容易引起小红书读者互动和收藏的金句。
 
 特别要求：为了规范【旅行心情】格式，文案正文中绝对不允许出现任何类似于“📍 店名”、“📍 地址”、“💰 人均”等探店类的商户占位排版！取而代之，请在每一款文案的【笔记正文】（body 字段）最开头，加入以下符合旅行心情的目的地与时间基本信息（空一行后再接后续游记正文）：
-📍 旅行目的地：${primaryLocation ? primaryLocation : '【根据拍摄坐标推算出的真实目的地/城市/地标，如“浙江杭州 · 千岛湖”，严禁输出数字经纬度坐标】'}
-📅 出行时间：${primaryDateTime ? primaryDateTime : '【填写真实时间或“[在此输入出行时间/季节]”】'}
-📷 记录设备：${primaryDevice ? primaryDevice : '【填写拍摄设备或“[在此输入拍摄相机/手机]”】'}
+${destLine}
+📅 出行时间：${primaryDateTime ? primaryDateTime : '[在此输入出行时间/季节]'}
+📷 记录设备：${primaryDevice ? primaryDevice : '[在此输入拍摄相机/手机]'}
 `;
     } else if (style === '运动') {
       promptStyleGuidance = `这三款文案均应围绕【运动】风格（如健身、户外、跑步、骑行、球类运动等）进行创作，但侧重点不同：
@@ -690,13 +715,13 @@ app.post('/api/ai/generate-copy', async (req, res) => {
 
     // Format EXIF & Location Guidance
     let exifGuidance = '';
-    if (parsedExifs.length > 0) {
+    if (parsedExifs.length > 0 && (primaryLocation || primaryDateTime || primaryDevice)) {
       let exifInfos = [];
       for (let i = 0; i < parsedExifs.length; i++) {
         const info = parsedExifs[i];
         exifInfos.push(`图片 ${i + 1} EXIF 元数据：
   - 拍摄日期时间: ${info.dateTime || '未知'}
-  - 拍摄位置: ${primaryLocation || (info.gps ? '已提供GPS坐标（请推算为真实中文地名）' : '未知')}
+  - 拍摄位置: ${primaryLocation || (info.gps ? '已提供GPS坐标（请结合画面推算真实地名）' : '未知')}
   - 拍摄设备: ${info.device || '未知'}`);
       }
 
@@ -705,21 +730,28 @@ app.post('/api/ai/generate-copy', async (req, res) => {
         poiText = `\n- 周边真实存在的商家/POI参考：\n${nearbyPOIs.map((p, idx) => `  ${idx + 1}. 【${p.name}】(${p.type || '地点'}, 距离约${p.distance}) 地址: ${p.address}`).join('\n')}`;
       }
 
+      let locationDetail = primaryLocation ? `- 真实拍摄地点（中文地名）：${primaryLocation}` : '';
+      let timeDetail = primaryDateTime ? `- 真实拍摄时间：${primaryDateTime}` : '';
+      let deviceDetail = primaryDevice ? `- 拍摄设备：${primaryDevice}` : '';
+
       exifGuidance = `
 ⚠️ 极其重要（结合真实图片EXIF拍摄信息与真实地理位置进行创作，绝对严禁输出数字经纬度坐标）：
 检测到这组照片中包含以下真实的 EXIF 拍摄元数据与地理位置：
-- 真实拍摄地点（中文地名）：${primaryLocation || '请根据GPS推算真实中文城市区县与地标'}
-- 真实拍摄时间：${primaryDateTime || '未知'}
-- 拍摄设备：${primaryDevice || '未知'}${poiText}
+${[locationDetail, timeDetail, deviceDetail].filter(Boolean).join('\n')}${poiText}
 
-⚠️ 严格规范与禁令：
-1. 绝对不要在标题、笔记正文、话题标签或任何结构化信息（如 📍 地址、📍 旅行目的地）中输出任何形式的数字经纬度（如“纬度 xx, 经度 xx”）！读者需要的是真实存在的中文地名、商圈、骑行路线或标志性景点！
-2. 绝对严禁凭空捏造不存在的虚假独立咖啡店或餐厅名称！若用户拍摄的是户外湖景、公路、山林、骑行绿道、观景台等自然/户外场景且未指定具体店名，请直接以该地真实存在的自然地标、公路线路、骑行绿道驿站、观景台或景区为打卡主体（例如：“千岛湖千汾线·红叶湾骑行驿站”、“金峰乡千岛湖观景台”、“千汾线最美公路打卡点”），人均写“免费打卡 / 租车¥30-50”；
-3. 若用户在关键词中主动提供了店名，以用户输入的店名为主；
-4. 在结构化基本信息中的 📍 地址 / 📍 旅行目的地 中，必须直接填入具体真实中文地名（例如：“${primaryLocation || '浙江省杭州市淳安县千岛湖千汾线红叶湾'}”），绝对不要输出数字坐标，也绝对不要输出 “[在此输入地址]”！
+⚠️ 严格规范与真实性准则：
+1. 绝对不要在标题、笔记正文、话题标签或任何结构化信息中输出任何形式的数字经纬度（如“纬度 xx, 经度 xx”）！读者需要的是人类可读的真实中文地名、商圈、路线或标志性景点！
+2. 绝对严禁编造未在图片中或检测数据中出现的虚构独立店铺名称或假想特定城市；若用户拍摄的是自然景观、街景或户外日常，以实际所处场景为主题；
+3. 若用户在主题/关键词中提供了具体的店名或主题，以用户指定的关键词为最高优先级；
+4. 结构化信息中的地址或目的地，必须如实填入上方检测到的真实地名（如已检测到：“${primaryLocation}”），未检测到时使用规范占位符。
 
 以下是提取出的详细元数据：
 ${exifInfos.join('\n')}
+`;
+    } else {
+      exifGuidance = `
+⚠️ 提示：本组图片未检测到有效的拍摄地 EXIF 信息。
+请严格根据用户上传图片的真实视觉画面内容（如画面中可见的物品、建筑、文字、自然风貌）以及用户填写的关键词进行创作，绝对不要假想或套用任何未在画面中体现的特定城市或景区！
 `;
     }
 

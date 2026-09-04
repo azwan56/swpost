@@ -398,16 +398,22 @@ function App() {
     setErrorMsg('');
 
     try {
+      // Prioritize the currently active image at index 0 so its EXIF and visual content are primary
+      const orderedImages = [
+        uploadedImages[activeIdx],
+        ...uploadedImages.filter((_, idx) => idx !== activeIdx)
+      ].filter(Boolean);
+
       // Compress all images to 512px low quality in parallel to speed up vision analysis
       const compressedImagesForCopy = await Promise.all(
-        uploadedImages.map(async (img) => {
+        orderedImages.map(async (img) => {
           const src = img.styledSrc || img.src;
           return await resizeImageBase64(src, 512, 0.7);
         })
       );
 
       // Send the pre-extracted EXIF data directly to the server (lightweight JSON list)
-      const exifDataList = uploadedImages.map(img => img.exif);
+      const exifDataList = orderedImages.map(img => img.exif);
 
       const res = await fetch(`${API_BASE}/api/ai/generate-copy`, {
         method: 'POST',

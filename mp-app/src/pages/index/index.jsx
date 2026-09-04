@@ -935,7 +935,11 @@ export default function Index() {
     const selectedStyle = copyStyle;
 
     setIsGeneratingCopy(true);
-    setErrorMsg('');
+    // Prioritize the currently active image at index 0 so its EXIF and visual content are primary
+    const orderedImages = [
+      uploadedImages[activeIdx],
+      ...uploadedImages.filter((_, idx) => idx !== activeIdx)
+    ].filter(Boolean);
 
     Taro.request({
       url: `${API_BASE}/api/ai/generate-copy`,
@@ -946,8 +950,8 @@ export default function Index() {
       data: {
         style: selectedStyle,
         keywords: copyKeywords,
-        images: uploadedImages.map(img => img.src),
-        exifList: uploadedImages.map(img => img.exif),
+        images: orderedImages.map(img => img.src),
+        exifList: orderedImages.map(img => img.exif),
         visualDescriptions: cachedVisualDescriptions
       },
       success: (res) => {
