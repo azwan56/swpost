@@ -275,7 +275,7 @@ function App() {
 
   // Cover Title Card States
   const [coverImageIdx, setCoverImageIdx] = useState(0);
-  const [coverStyle, setCoverStyle] = useState('magazine'); // 'magazine' | 'minimal' | 'sticker'
+  const [coverStyle, setCoverStyle] = useState('magazine'); // 'magazine' | 'minimal' | 'sticker' | 'cinema' | 'collage'
   const [coverTag, setCoverTag] = useState('⚡ BREAKING 速报');
   const [coverTitle, setCoverTitle] = useState('3秒极限绝杀！');
   const [coverSubtitle, setCoverSubtitle] = useState('2026 视觉精选指南 · 建议先马后看');
@@ -285,6 +285,16 @@ function App() {
   const [coverPreviewUri, setCoverPreviewUri] = useState('');
   const [activePreviewTab, setActivePreviewTab] = useState('styled'); // 'styled' | 'cover'
 
+  // Subject Outline & Doodle States
+  const [outlineEnabled, setOutlineEnabled] = useState(false);
+  const [outlineType, setOutlineType] = useState('dashed'); // 'dashed' | 'smooth' | 'glow'
+  const [outlineColor, setOutlineColor] = useState('#FFFFFF'); // '#FFFFFF', '#FFE600', '#FF2E93', '#00F0FF', '#A3E635'
+  const [outlineWidth, setOutlineWidth] = useState(10); // 6 | 10 | 16
+  const [outlineMasks, setOutlineMasks] = useState({}); // { [imageIndex]: HTMLCanvasElement }
+  const [isDetectingOutline, setIsDetectingOutline] = useState(false);
+  const [isDoodleMode, setIsDoodleMode] = useState(false);
+  const [doodleStrokes, setDoodleStrokes] = useState({}); // { [imageIndex]: Array of strokes }
+
   // General UI States
   const [isLoading, setIsLoading] = useState(false);
   const [aiOperationName, setAiOperationName] = useState(''); 
@@ -292,6 +302,173 @@ function App() {
 
   // Refs
   const fileInputRef = useRef(null);
+  const previewImgRef = useRef(null);
+  const doodleCanvasRef = useRef(null);
+  const isDrawingRef = useRef(false);
+  const currentStrokeRef = useRef(null);
+
+  // Helper: Dynamically load MediaPipe SelfieSegmentation from CDN
+  const loadMediaPipe = () => {
+    return new Promise((resolve, reject) => {
+      if (window.SelfieSegmentation) {
+        resolve(window.SelfieSegmentation);
+        return;
+      }
+      const existing = document.getElementById('mediapipe-selfie-script');
+      if (existing) {
+        existing.addEventListener('load', () => resolve(window.SelfieSegmentation));
+        existing.addEventListener('error', (e) => reject(e));
+        return;
+      }
+      const script = document.createElement('script');
+      script.id = 'mediapipe-selfie-script';
+      script.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js';
+      script.onload = () => resolve(window.SelfieSegmentation);
+      script.onerror = (err) => reject(err);
+      document.head.appendChild(script);
+    });
+  };
+
+  // Run AI Portrait Segmentation for subject outline
+  const handleDetectSubjectOutline = async (targetIdx = coverImageIdx) => {
+    const target = uploadedImages[targetIdx] || uploadedImages[activeIdx] || uploadedImages[0];
+    if (!target) return;
+
+    setIsDetectingOutline(true);
+    try {
+      const SelfieSegmentationClass = await loadMediaPipe();
+      const segmenter = new SelfieSegmentationClass({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`
+      });
+      segmenter.setOptions({ modelSelection: 1 });
+
+      const img = new Image();
+      if (!target.src.startsWith('data:')) {
+        img.crossOrigin = 'anonymous';
+      }
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = target.styledSrc || target.src;
+      });
+
+      const maskCanvas = await new Promise((resolve, reject) => {
+        let finished = false;
+        const timer = setTimeout(() => {
+          if (!finished) reject(new Error('Segmentation timeout'));
+        }, 12000);
+
+        segmenter.onResults((results) => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timer);
+          if (results.segmentationMask) {
+            const mCanvas = document.createElement('canvas');
+            mCanvas.width = results.segmentationMask.width;
+            mCanvas.height = results.segmentationMask.height;
+            const mCtx = mCanvas.getContext('2d');
+            mCtx.drawImage(results.segmentationMask, 0, 0);
+            resolve(mCanvas);
+          } else {
+            reject(new Error('No mask returned'));
+          }
+        });
+        segmenter.send({ image: img }).catch(reject);
+      });
+
+      setOutlineMasks(prev => ({ ...prev, [targetIdx]: maskCanvas }));
+      setOutlineEnabled(true);
+      setActivePreviewTab('cover');
+    } catch (err) {
+      console.error('Subject outline detection error:', err);
+      alert('未能自动检测到人像主体，您可以开启「自由手绘涂鸦」在画面上直接绘制轮廓或箭头标记哦！');
+    } finally {
+      setIsDetectingOutline(false);
+    }
+  };
+
+  // Handle pointer events on doodle overlay canvas
+  const handleDoodlePointerDown = (e) => {
+    isDrawingRef.current = true;
+    const canvas = doodleCanvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top) / rect.height;
+    currentStrokeRef.current = {
+      color: outlineColor,
+      width: outlineWidth,
+      type: outlineType,
+      points: [{ x, y }]
+    };
+  };
+
+  const handleDoodlePointerMove = (e) => {
+    if (!isDrawingRef.current || !currentStrokeRef.current) return;
+    const canvas = doodleCanvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top) / rect.height;
+    currentStrokeRef.current.points.push({ x, y });
+
+    // Live draw on overlay canvas for instant feedback
+    const ctx = canvas.getContext('2d');
+    ctx.strokeStyle = outlineColor;
+    ctx.lineWidth = Math.max(3, outlineWidth * (canvas.width / 1000));
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    if (outlineType === 'dashed') {
+      ctx.setLineDash([12, 8]);
+    } else {
+      ctx.setLineDash([]);
+    }
+    const pts = currentStrokeRef.current.points;
+    if (pts.length > 1) {
+      const p1 = pts[pts.length - 2];
+      const p2 = pts[pts.length - 1];
+      ctx.beginPath();
+      ctx.moveTo(p1.x * canvas.width, p1.y * canvas.height);
+      ctx.lineTo(p2.x * canvas.width, p2.y * canvas.height);
+      ctx.stroke();
+    }
+  };
+
+  const handleDoodlePointerUp = () => {
+    if (!isDrawingRef.current) return;
+    isDrawingRef.current = false;
+    if (currentStrokeRef.current && currentStrokeRef.current.points.length > 1) {
+      const stroke = currentStrokeRef.current;
+      setDoodleStrokes(prev => {
+        const curList = prev[coverImageIdx] || [];
+        return {
+          ...prev,
+          [coverImageIdx]: [...curList, stroke]
+        };
+      });
+    }
+    currentStrokeRef.current = null;
+  };
+
+  const clearDoodles = () => {
+    setDoodleStrokes(prev => ({ ...prev, [coverImageIdx]: [] }));
+    const canvas = doodleCanvasRef.current;
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+  };
+
+  const undoLastDoodle = () => {
+    setDoodleStrokes(prev => {
+      const curList = prev[coverImageIdx] || [];
+      if (curList.length === 0) return prev;
+      return {
+        ...prev,
+        [coverImageIdx]: curList.slice(0, -1)
+      };
+    });
+  };
 
   // Live update cover preview whenever parameters change
   useEffect(() => {
@@ -312,6 +489,12 @@ function App() {
           subtitle: coverSubtitle,
           style: coverStyle,
           position: coverPosition,
+          outlineEnabled,
+          outlineType,
+          outlineColor,
+          outlineWidth,
+          outlineMask: outlineMasks[coverImageIdx] || null,
+          doodleStrokes: doodleStrokes[coverImageIdx] || [],
           exif: target.exif
         });
         if (isMounted) {
@@ -326,7 +509,7 @@ function App() {
       isMounted = false;
       clearTimeout(timer);
     };
-  }, [uploadedImages, coverImageIdx, activeIdx, coverStyle, coverTag, coverTitle, coverSubtitle, coverPosition]);
+  }, [uploadedImages, coverImageIdx, activeIdx, coverStyle, coverTag, coverTitle, coverSubtitle, coverPosition, outlineEnabled, outlineType, outlineColor, outlineWidth, outlineMasks, doodleStrokes]);
 
   // Handle multiple photos upload
   const handlePhotosUpload = async (e) => {
@@ -686,6 +869,12 @@ function App() {
         subtitle: coverSubtitle,
         style: coverStyle,
         position: coverPosition,
+        outlineEnabled,
+        outlineType,
+        outlineColor,
+        outlineWidth,
+        outlineMask: outlineMasks[coverImageIdx] || null,
+        doodleStrokes: doodleStrokes[coverImageIdx] || [],
         exif: target.exif
       });
 
@@ -1216,6 +1405,12 @@ function App() {
     subtitle = '2026 UTMB OCC 女子前三',
     style = 'magazine',
     position = 'bottom',
+    outlineEnabled = false,
+    outlineType = 'dashed',
+    outlineColor = '#FFFFFF',
+    outlineWidth = 10,
+    outlineMask = null,
+    doodleStrokes = [],
     exif = null
   }) => {
     return new Promise((resolve, reject) => {
@@ -1242,6 +1437,90 @@ function App() {
           ctx.drawImage(img, 0, 0, w, h);
 
           const scale = Math.max(0.65, w / 1000);
+
+          // 1.5. Draw Subject Hand-drawn Outline (if enabled)
+          if (outlineEnabled && outlineMask) {
+            try {
+              const strokeCanvas = document.createElement('canvas');
+              strokeCanvas.width = w;
+              strokeCanvas.height = h;
+              const sctx = strokeCanvas.getContext('2d');
+
+              const strokeW = Math.max(4, Math.round((outlineWidth || 10) * scale));
+              const numSteps = 24;
+
+              for (let i = 0; i < numSteps; i++) {
+                const angle = (i / numSteps) * Math.PI * 2;
+                const dx = Math.cos(angle) * strokeW;
+                const dy = Math.sin(angle) * strokeW;
+                sctx.drawImage(outlineMask, dx, dy, w, h);
+              }
+
+              sctx.globalCompositeOperation = 'source-in';
+              sctx.fillStyle = outlineColor || '#FFFFFF';
+              sctx.fillRect(0, 0, w, h);
+
+              sctx.globalCompositeOperation = 'destination-out';
+              sctx.drawImage(outlineMask, 0, 0, w, h);
+              sctx.globalCompositeOperation = 'source-over';
+
+              if (outlineType === 'dashed') {
+                const dashCanvas = document.createElement('canvas');
+                dashCanvas.width = w;
+                dashCanvas.height = h;
+                const dctx = dashCanvas.getContext('2d');
+                dctx.drawImage(strokeCanvas, 0, 0);
+
+                dctx.globalCompositeOperation = 'destination-out';
+                const stripeCanvas = document.createElement('canvas');
+                stripeCanvas.width = Math.round(26 * scale);
+                stripeCanvas.height = Math.round(26 * scale);
+                const spCtx = stripeCanvas.getContext('2d');
+                spCtx.fillStyle = '#000000';
+                spCtx.fillRect(0, 0, Math.round(11 * scale), Math.round(26 * scale));
+
+                const pattern = dctx.createPattern(stripeCanvas, 'repeat');
+                dctx.fillStyle = pattern;
+                dctx.fillRect(0, 0, w, h);
+
+                ctx.drawImage(dashCanvas, 0, 0);
+              } else if (outlineType === 'glow') {
+                ctx.save();
+                ctx.shadowColor = outlineColor || '#FFFFFF';
+                ctx.shadowBlur = Math.round(strokeW * 1.6);
+                ctx.drawImage(strokeCanvas, 0, 0);
+                ctx.drawImage(strokeCanvas, 0, 0);
+                ctx.restore();
+              } else {
+                ctx.drawImage(strokeCanvas, 0, 0);
+              }
+            } catch (maskErr) {
+              console.warn('[renderCoverCanvas] Subject outline render error:', maskErr);
+            }
+          }
+
+          // 1.8. Draw User Freehand Doodles
+          if (doodleStrokes && doodleStrokes.length > 0) {
+            doodleStrokes.forEach(st => {
+              if (st.points && st.points.length > 1) {
+                ctx.save();
+                ctx.strokeStyle = st.color || '#FFFFFF';
+                ctx.lineWidth = Math.max(3, Math.round((st.width || 8) * scale));
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                if (st.type === 'dashed') {
+                  ctx.setLineDash([12 * scale, 8 * scale]);
+                }
+                ctx.beginPath();
+                ctx.moveTo(st.points[0].x * w, st.points[0].y * h);
+                for (let j = 1; j < st.points.length; j++) {
+                  ctx.lineTo(st.points[j].x * w, st.points[j].y * h);
+                }
+                ctx.stroke();
+                ctx.restore();
+              }
+            });
+          }
           const tagText = (tag || '').trim();
           const titleText = (title || '').trim();
           const subText = (subtitle || '').trim();
@@ -1441,7 +1720,7 @@ function App() {
             }
             ctx.restore();
 
-          } else {
+          } else if (style === 'sticker') {
             // --- STYLE 3: 潮酷贴纸风 ---
             const padX = 46 * scale;
             const titleLineH = titleFontSize * 1.35;
@@ -1533,6 +1812,263 @@ function App() {
               ctx.textAlign = 'left';
               ctx.textBaseline = 'middle';
               ctx.fillText(subText, padX + 14 * scale, curY + subPillH / 2);
+              ctx.restore();
+            }
+          } else if (style === 'cinema') {
+            // --- STYLE 4: 电影大片风 (Cinematic Impact) ---
+            // Ultra-large headline, Klein Blue + Ivory Warm White + Carbon Black
+            const padX = 48 * scale;
+            const cinemaTitleFontSize = Math.round(72 * scale); // Much larger headline
+            const cinemaSubFontSize = Math.round(24 * scale);
+            const cinemaTagFontSize = Math.round(20 * scale);
+
+            ctx.font = `900 ${cinemaTitleFontSize}px -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif`;
+            const cinemaTitleLines = wrapCanvasTextLines(ctx, titleText || '点击输入号召力大标题', w * 0.88);
+
+            const titleLineH = cinemaTitleFontSize * 1.18;
+            const totalTitleH = cinemaTitleLines.length * titleLineH;
+            const tagH = tagText ? cinemaTagFontSize * 1.7 : 0;
+            const tagMarginB = tagText ? 16 * scale : 0;
+            const subH = subText ? cinemaSubFontSize * 1.3 : 0;
+            const subMarginT = subText ? 14 * scale : 0;
+            const totalContentH = tagH + tagMarginB + totalTitleH + subMarginT + subH;
+
+            let blockY = position === 'top' 
+              ? h * 0.10 
+              : (position === 'center' ? (h - totalContentH) / 2 : h - totalContentH - h * 0.08);
+
+            // Cinematic Letterbox / Backdrop with deep night tint
+            const scrimGrad = ctx.createLinearGradient(
+              0,
+              position === 'top' ? 0 : (position === 'center' ? blockY - 60 * scale : blockY - 110 * scale),
+              0,
+              position === 'top' ? blockY + totalContentH + 110 * scale : (position === 'center' ? blockY + totalContentH + 60 * scale : h)
+            );
+
+            if (position === 'top') {
+              scrimGrad.addColorStop(0, 'rgba(11, 14, 20, 0.94)');
+              scrimGrad.addColorStop(0.7, 'rgba(11, 14, 20, 0.65)');
+              scrimGrad.addColorStop(1, 'rgba(11, 14, 20, 0)');
+              ctx.fillStyle = scrimGrad;
+              ctx.fillRect(0, 0, w, blockY + totalContentH + 110 * scale);
+            } else if (position === 'center') {
+              scrimGrad.addColorStop(0, 'rgba(11, 14, 20, 0)');
+              scrimGrad.addColorStop(0.2, 'rgba(11, 14, 20, 0.78)');
+              scrimGrad.addColorStop(0.8, 'rgba(11, 14, 20, 0.78)');
+              scrimGrad.addColorStop(1, 'rgba(11, 14, 20, 0)');
+              ctx.fillStyle = scrimGrad;
+              ctx.fillRect(0, blockY - 60 * scale, w, totalContentH + 120 * scale);
+            } else {
+              scrimGrad.addColorStop(0, 'rgba(11, 14, 20, 0)');
+              scrimGrad.addColorStop(0.3, 'rgba(11, 14, 20, 0.65)');
+              scrimGrad.addColorStop(1, 'rgba(8, 10, 16, 0.94)');
+              ctx.fillStyle = scrimGrad;
+              ctx.fillRect(0, blockY - 110 * scale, w, h - (blockY - 110 * scale));
+            }
+
+            // Top header metadata: Cinema Issue Bar
+            ctx.save();
+            ctx.font = `800 ${16 * scale}px sans-serif`;
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+            ctx.fillText('CINEMATIC FOCUS · VOL.26', padX, 42 * scale);
+
+            ctx.textAlign = 'right';
+            ctx.fillStyle = '#0052FF'; // Klein Blue
+            ctx.fillText('★ SPECIAL ISSUE', w - padX, 42 * scale);
+            ctx.restore();
+
+            let curY = blockY;
+
+            // Tag Badge: High-luxury Klein Blue Pill with Amber highlight dot
+            if (tagText) {
+              ctx.font = `bold ${cinemaTagFontSize}px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif`;
+              const tagMetrics = ctx.measureText(tagText);
+              const pillW = tagMetrics.width + 38 * scale;
+              const pillH = cinemaTagFontSize * 1.8;
+
+              drawRoundRect(ctx, padX, curY, pillW, pillH, 4 * scale);
+              ctx.fillStyle = '#002FA7'; // International Klein Blue
+              ctx.fill();
+
+              ctx.strokeStyle = '#3874FF';
+              ctx.lineWidth = 1.5 * scale;
+              ctx.stroke();
+
+              // Amber dot
+              ctx.beginPath();
+              ctx.arc(padX + 14 * scale, curY + pillH / 2, 4 * scale, 0, Math.PI * 2);
+              ctx.fillStyle = '#FFB703'; // Warm amber dot
+              ctx.fill();
+
+              ctx.fillStyle = '#FFFFFF';
+              ctx.textAlign = 'left';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(tagText, padX + 26 * scale, curY + pillH / 2);
+              curY += pillH + tagMarginB;
+            }
+
+            // Huge Master Title: Solid Ivory Cream text with heavy presence
+            ctx.save();
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
+            ctx.shadowBlur = 18 * scale;
+            ctx.shadowOffsetY = 6 * scale;
+            ctx.fillStyle = '#FAF8F5'; // Ivory Cream
+            ctx.font = `900 ${cinemaTitleFontSize}px -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif`;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+
+            cinemaTitleLines.forEach(line => {
+              ctx.fillText(line, padX, curY);
+              curY += titleLineH;
+            });
+            ctx.restore();
+
+            // Subtitle: Film Subtitle with vertical accent bar
+            if (subText) {
+              curY += subMarginT;
+              ctx.save();
+              ctx.fillStyle = '#0052FF';
+              ctx.fillRect(padX, curY + 2 * scale, 4 * scale, cinemaSubFontSize * 1.15);
+
+              ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+              ctx.shadowBlur = 8 * scale;
+              ctx.shadowOffsetY = 2 * scale;
+              ctx.fillStyle = '#E2E8F0';
+              ctx.font = `600 ${cinemaSubFontSize}px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif`;
+              ctx.textBaseline = 'top';
+              ctx.fillText(subText, padX + 14 * scale, curY);
+              ctx.restore();
+            }
+
+          } else if (style === 'collage') {
+            // --- STYLE 5: 撞色拼贴风 (Neo-Chic Color Blocking) ---
+            // Avocado Mustard Green + Carbon Black + Coral Orange, tilted overlapping paper tapes
+            const padX = 42 * scale;
+            const collageTitleFontSize = Math.round(68 * scale);
+            const collageSubFontSize = Math.round(22 * scale);
+            const collageTagFontSize = Math.round(20 * scale);
+
+            ctx.font = `900 ${collageTitleFontSize}px -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif`;
+            const collageTitleLines = wrapCanvasTextLines(ctx, titleText || '点击输入号召力大标题', w * 0.82);
+
+            const titleLineH = collageTitleFontSize * 1.32;
+            const totalTitleH = collageTitleLines.length * titleLineH;
+            const tagH = tagText ? collageTagFontSize * 1.9 : 0;
+            const tagMarginB = tagText ? 16 * scale : 0;
+            const subH = subText ? collageSubFontSize * 1.5 : 0;
+            const subMarginT = subText ? 16 * scale : 0;
+            const totalContentH = tagH + tagMarginB + totalTitleH + subMarginT + subH;
+
+            let blockY = position === 'top' 
+              ? h * 0.10 
+              : (position === 'center' ? (h - totalContentH) / 2 : h - totalContentH - h * 0.08);
+
+            let curY = blockY;
+
+            // 1. Tag: Pin / Tape with Coral Red background
+            if (tagText) {
+              ctx.save();
+              ctx.translate(padX, curY);
+              ctx.rotate((-3 * Math.PI) / 180);
+
+              ctx.font = `900 ${collageTagFontSize}px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif`;
+              const tagMetrics = ctx.measureText(tagText);
+              const tagW = tagMetrics.width + 34 * scale;
+              const tagHReal = collageTagFontSize * 1.85;
+
+              ctx.shadowColor = 'rgba(0, 0, 0, 0.28)';
+              ctx.shadowBlur = 12 * scale;
+              ctx.shadowOffsetY = 4 * scale;
+
+              drawRoundRect(ctx, 0, 0, tagW, tagHReal, 4 * scale);
+              ctx.fillStyle = '#FF4D6D'; // Vibrant Coral
+              ctx.fill();
+
+              ctx.shadowColor = 'transparent';
+              ctx.strokeStyle = '#FFFFFF';
+              ctx.lineWidth = 2 * scale;
+              ctx.stroke();
+
+              ctx.fillStyle = '#FFFFFF';
+              ctx.textAlign = 'left';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(`📌 ${tagText}`, 12 * scale, tagHReal / 2);
+              ctx.restore();
+
+              curY += tagHReal + tagMarginB + 10 * scale;
+            }
+
+            // 2. Alternating Tilted Color-Block Banners for Title
+            collageTitleLines.forEach((line, idx) => {
+              ctx.save();
+              ctx.font = `900 ${collageTitleFontSize}px -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif`;
+              const lineMetrics = ctx.measureText(line);
+              const bannerW = lineMetrics.width + 36 * scale;
+              const bannerH = collageTitleFontSize * 1.25;
+
+              // Alternate tilt: line 0: +2°, line 1: -1.8°, line 2: +1.5°
+              const angleDeg = idx % 2 === 0 ? 2 : -1.8;
+              const angleRad = (angleDeg * Math.PI) / 180;
+
+              ctx.translate(padX, curY);
+              ctx.rotate(angleRad);
+
+              ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+              ctx.shadowBlur = 14 * scale;
+              ctx.shadowOffsetY = 5 * scale;
+
+              drawRoundRect(ctx, 0, 0, bannerW, bannerH, 4 * scale);
+
+              if (idx % 2 === 0) {
+                ctx.fillStyle = '#A3E635'; // Avocado Lime
+                ctx.fill();
+                ctx.shadowColor = 'transparent';
+                ctx.fillStyle = '#18181B'; // Carbon Black font
+              } else {
+                ctx.fillStyle = '#18181B'; // Carbon Black
+                ctx.fill();
+                ctx.shadowColor = 'transparent';
+                ctx.strokeStyle = '#A3E635';
+                ctx.lineWidth = 2 * scale;
+                ctx.stroke();
+                ctx.fillStyle = '#FFFDF7'; // Crisp White font
+              }
+
+              ctx.textAlign = 'left';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(line, 18 * scale, bannerH / 2);
+              ctx.restore();
+
+              curY += bannerH + 10 * scale;
+            });
+
+            // 3. Subtitle: Milk White Sticker with Dashed Border
+            if (subText) {
+              curY += subMarginT;
+              ctx.save();
+              ctx.font = `800 ${collageSubFontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+              const subMetrics = ctx.measureText(subText);
+              const subPillW = subMetrics.width + 32 * scale;
+              const subPillH = collageSubFontSize * 1.7;
+
+              ctx.shadowColor = 'rgba(0, 0, 0, 0.22)';
+              ctx.shadowBlur = 10 * scale;
+              ctx.shadowOffsetY = 3 * scale;
+
+              drawRoundRect(ctx, padX, curY, subPillW, subPillH, 6 * scale);
+              ctx.fillStyle = '#FFFDF7'; // Milk white
+              ctx.fill();
+
+              ctx.shadowColor = 'transparent';
+              ctx.strokeStyle = '#18181B';
+              ctx.lineWidth = 1.5 * scale;
+              ctx.setLineDash([4 * scale, 3 * scale]);
+              ctx.stroke();
+
+              ctx.fillStyle = '#18181B';
+              ctx.textAlign = 'left';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(subText, padX + 16 * scale, curY + subPillH / 2);
               ctx.restore();
             }
           }
@@ -1945,16 +2481,18 @@ function App() {
                 </div>
               </div>
 
-              {/* 2. Choose 3 Styles */}
+              {/* 2. Choose 5 Styles */}
               <div style={{ marginBottom: '0.75rem' }}>
                 <label className="form-label" style={{ fontSize: '0.78rem', display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>
-                  2. 选择封面风格（3款不同版式）：
+                  2. 选择封面风格（5款不同版式）：
                 </label>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.4rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(88px, 1fr))', gap: '0.4rem' }}>
                   {[
-                    { id: 'magazine', name: '杂志速报', desc: '渐变暗角·亮黄胶囊标', icon: '📸' },
+                    { id: 'magazine', name: '杂志速报', desc: '渐变暗角·亮黄标', icon: '📸' },
                     { id: 'minimal', name: '极简质感', desc: '白底卡片·质感留白', icon: '🖼️' },
-                    { id: 'sticker', name: '潮酷贴纸', desc: '荧光纸胶带·斜角徽章', icon: '⚡' }
+                    { id: 'sticker', name: '潮酷贴纸', desc: '荧光纸带·斜角徽章', icon: '⚡' },
+                    { id: 'cinema', name: '电影大片', desc: '巨幅大字·克莱因蓝', icon: '🎬' },
+                    { id: 'collage', name: '撞色拼贴', desc: '牛油果绿·错落色块', icon: '🎨' }
                   ].map((s) => (
                     <button
                       key={s.id}
@@ -1963,7 +2501,7 @@ function App() {
                         setActivePreviewTab('cover');
                       }}
                       style={{
-                        padding: '0.5rem 0.25rem',
+                        padding: '0.45rem 0.2rem',
                         borderRadius: '10px',
                         border: coverStyle === s.id ? '2px solid var(--xhs-red)' : '1px solid var(--border-color)',
                         background: coverStyle === s.id ? 'var(--xhs-red-light)' : 'var(--bg-card)',
@@ -1975,14 +2513,207 @@ function App() {
                         gap: '2px'
                       }}
                     >
-                      <span style={{ fontSize: '1.1rem' }}>{s.icon}</span>
-                      <span style={{ fontSize: '0.75rem', fontWeight: 700 }}>{s.name}</span>
-                      <span style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', textAlign: 'center', lineHeight: 1.2 }}>
+                      <span style={{ fontSize: '1.05rem' }}>{s.icon}</span>
+                      <span style={{ fontSize: '0.72rem', fontWeight: 700 }}>{s.name}</span>
+                      <span style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', textAlign: 'center', lineHeight: 1.15 }}>
                         {s.desc}
                       </span>
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* 3. Subject Hand-drawn Outline & Doodle Section */}
+              <div style={{ marginBottom: '0.75rem', padding: '0.6rem', background: 'var(--bg-main)', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 700 }}>✨ 主人公手绘外轮廓线</span>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => setOutlineEnabled(!outlineEnabled)}
+                      style={{
+                        fontSize: '0.7rem',
+                        padding: '0.15rem 0.5rem',
+                        borderRadius: '12px',
+                        background: outlineEnabled ? '#10b981' : 'var(--border-color)',
+                        color: '#fff',
+                        fontWeight: 700,
+                        border: 'none',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {outlineEnabled ? '已开启 ✓' : '已关闭'}
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={isDetectingOutline}
+                    onClick={() => handleDetectSubjectOutline(coverImageIdx)}
+                    style={{
+                      fontSize: '0.7rem',
+                      padding: '0.2rem 0.6rem',
+                      borderRadius: '12px',
+                      background: 'linear-gradient(135deg, #6366f1, #a855f7)',
+                      border: 'none',
+                      fontWeight: 600,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {isDetectingOutline ? '⏳ 智能识别中...' : '🤖 AI 智能描边'}
+                  </button>
+                </div>
+
+                {outlineEnabled && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.35rem' }}>
+                    {/* Outline line styles */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', width: '56px', flexShrink: 0 }}>线条质感:</span>
+                      {[
+                        { id: 'dashed', name: '涂鸦虚线' },
+                        { id: 'smooth', name: '实线手绘' },
+                        { id: 'glow', name: '霓虹发光' }
+                      ].map(t => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => setOutlineType(t.id)}
+                          style={{
+                            flex: 1,
+                            padding: '0.2rem 0.35rem',
+                            fontSize: '0.7rem',
+                            borderRadius: '6px',
+                            border: outlineType === t.id ? '1.5px solid var(--xhs-red)' : '1px solid var(--border-color)',
+                            background: outlineType === t.id ? 'rgba(255, 36, 66, 0.12)' : 'var(--bg-card)',
+                            color: outlineType === t.id ? 'var(--xhs-red)' : 'var(--text-primary)',
+                            fontWeight: outlineType === t.id ? 700 : 500,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {t.name}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Outline colors */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', width: '56px', flexShrink: 0 }}>轮廓配色:</span>
+                      <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+                        {[
+                          { color: '#FFFFFF', name: '经典白', border: '#cbd5e1' },
+                          { color: '#FFE600', name: '荧光黄', border: '#eab308' },
+                          { color: '#FF2E93', name: '芭比粉', border: '#db2777' },
+                          { color: '#00F0FF', name: '电光蓝', border: '#06b6d4' },
+                          { color: '#A3E635', name: '牛油果绿', border: '#84cc16' }
+                        ].map(c => (
+                          <button
+                            key={c.color}
+                            type="button"
+                            onClick={() => setOutlineColor(c.color)}
+                            title={c.name}
+                            style={{
+                              width: '22px',
+                              height: '22px',
+                              borderRadius: '50%',
+                              backgroundColor: c.color,
+                              border: outlineColor === c.color ? '2.5px solid #1e293b' : `1.5px solid ${c.border}`,
+                              boxShadow: outlineColor === c.color ? '0 0 0 2px #fff, 0 0 0 4px var(--xhs-red)' : 'none',
+                              cursor: 'pointer',
+                              padding: 0
+                            }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Outline thickness */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', width: '56px', flexShrink: 0 }}>线条粗细:</span>
+                      {[
+                        { val: 6, label: '细 (6px)' },
+                        { val: 10, label: '中 (10px)' },
+                        { val: 16, label: '粗 (16px)' }
+                      ].map(w => (
+                        <button
+                          key={w.val}
+                          type="button"
+                          onClick={() => setOutlineWidth(w.val)}
+                          style={{
+                            flex: 1,
+                            padding: '0.2rem 0.35rem',
+                            fontSize: '0.7rem',
+                            borderRadius: '6px',
+                            border: outlineWidth === w.val ? '1.5px solid var(--xhs-red)' : '1px solid var(--border-color)',
+                            background: outlineWidth === w.val ? 'rgba(255, 36, 66, 0.12)' : 'var(--bg-card)',
+                            color: outlineWidth === w.val ? 'var(--xhs-red)' : 'var(--text-primary)',
+                            fontWeight: outlineWidth === w.val ? 700 : 500,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {w.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Doodle Brush Controls */}
+                    <div style={{ display: 'flex', gap: '0.35rem', paddingTop: '0.25rem', borderTop: '1px dashed var(--border-color)' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsDoodleMode(!isDoodleMode);
+                          setActivePreviewTab('cover');
+                        }}
+                        style={{
+                          flex: 1.3,
+                          padding: '0.25rem 0.4rem',
+                          fontSize: '0.7rem',
+                          borderRadius: '6px',
+                          border: isDoodleMode ? '1.5px solid #6366f1' : '1px solid var(--border-color)',
+                          background: isDoodleMode ? '#6366f1' : 'var(--bg-card)',
+                          color: isDoodleMode ? '#fff' : 'var(--text-primary)',
+                          fontWeight: 700,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {isDoodleMode ? '✍️ 涂鸦绘制中 (点击完成)' : '✍️ 自由手绘画笔'}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={undoLastDoodle}
+                        style={{
+                          padding: '0.25rem 0.45rem',
+                          fontSize: '0.7rem',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border-color)',
+                          background: 'var(--bg-card)',
+                          color: 'var(--text-secondary)',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        ↩️ 撤销
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={clearDoodles}
+                        style={{
+                          padding: '0.25rem 0.45rem',
+                          fontSize: '0.7rem',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border-color)',
+                          background: 'var(--bg-card)',
+                          color: 'var(--text-secondary)',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        🧹 清空
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* 3. AI Generated Candidates Chips (if available) */}
@@ -2148,7 +2879,7 @@ function App() {
                     <div>
                       <h3 style={{ fontSize: '1rem', fontWeight: 700, display: 'inline-block', marginRight: '8px' }}>🏷️ 封面标题图效果</h3>
                       <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                        ({coverStyle === 'magazine' ? '📸 杂志速报风' : coverStyle === 'minimal' ? '🖼️ 极简质感风' : '⚡ 潮酷贴纸风'})
+                        ({coverStyle === 'magazine' ? '📸 杂志速报风' : coverStyle === 'minimal' ? '🖼️ 极简质感风' : coverStyle === 'sticker' ? '⚡ 潮酷贴纸风' : coverStyle === 'cinema' ? '🎬 电影大片风' : '🎨 撞色拼贴风'})
                       </span>
                     </div>
                     <button 
@@ -2160,13 +2891,37 @@ function App() {
                     </button>
                   </div>
                   
-                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#0e1117', borderRadius: 'var(--radius-md)', overflow: 'hidden', padding: '0.75rem', minHeight: '380px' }}>
+                  <div style={{ position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#0e1117', borderRadius: 'var(--radius-md)', overflow: 'hidden', padding: '0.75rem', minHeight: '380px' }}>
                     {coverPreviewUri ? (
-                      <img 
-                        src={coverPreviewUri} 
-                        alt="Cover Preview" 
-                        style={{ maxWidth: '100%', maxHeight: '520px', objectFit: 'contain', borderRadius: 'var(--radius-sm)', boxShadow: '0 8px 24px rgba(0,0,0,0.35)' }}
-                      />
+                      <div style={{ position: 'relative', display: 'inline-block', lineHeight: 0, maxWidth: '100%', maxHeight: '520px' }}>
+                        <img 
+                          ref={previewImgRef}
+                          src={coverPreviewUri} 
+                          alt="Cover Preview" 
+                          style={{ maxWidth: '100%', maxHeight: '520px', objectFit: 'contain', borderRadius: 'var(--radius-sm)', boxShadow: '0 8px 24px rgba(0,0,0,0.35)', display: 'block' }}
+                        />
+                        {isDoodleMode && (
+                          <canvas
+                            ref={doodleCanvasRef}
+                            onPointerDown={handleDoodlePointerDown}
+                            onPointerMove={handleDoodlePointerMove}
+                            onPointerUp={handleDoodlePointerUp}
+                            onPointerLeave={handleDoodlePointerUp}
+                            width={previewImgRef.current ? previewImgRef.current.clientWidth : 400}
+                            height={previewImgRef.current ? previewImgRef.current.clientHeight : 533}
+                            style={{
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              width: '100%',
+                              height: '100%',
+                              cursor: 'crosshair',
+                              touchAction: 'none',
+                              zIndex: 10
+                            }}
+                          />
+                        )}
+                      </div>
                     ) : (
                       <div className="spinner"></div>
                     )}
