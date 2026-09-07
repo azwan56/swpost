@@ -833,6 +833,23 @@ ${visualGuidance}
       "body": "直接输出正文内容，绝对不要包含 '【笔记正文】' 标签前缀",
       "tags": "直接输出话题标签（如 #探店 #美食），绝对不要包含 '【推荐话题标签】' 标签前缀"
     }
+  ],
+  "coverOptions": [
+    {
+      "tag": "醒目胶囊角标（例如：⚡ BREAKING 速报 / 🔥 闭眼冲 / 🏷️ 穿搭公式 / ✨ 独家私藏，不超过8字）",
+      "title": "极具号召力的主标题大字（短促、反差、吸睛，如：3秒极限绝杀！/ 人均30吃到撑！，8-14字）",
+      "subtitle": "副标题补充说明（例如：2026 UTMB OCC 女子前三 / 本地人私藏的老破小，10-18字）"
+    },
+    {
+      "tag": "第二款胶囊角标",
+      "title": "第二款号召力大标题",
+      "subtitle": "第二款副标题"
+    },
+    {
+      "tag": "第三款胶囊角标",
+      "title": "第三款号召力大标题",
+      "subtitle": "第三款副标题"
+    }
   ]
 }
 注意：JSON 中的字段值应当是完全纯净的文案本身，千万不要在其内容中夹杂 '【爆款标题】'、'【笔记正文】' 或 '【推荐话题标签】' 这些起提示作用的汉字字符标签！不要输出任何 Markdown 格式包裹（如 \`\`\`json 标记），不要输出任何解释性话语，直接返回纯 JSON 对象。`
@@ -858,8 +875,31 @@ ${visualGuidance}
 
     try {
       const parsed = JSON.parse(text);
+      let coverOptions = parsed.coverOptions || [];
+      if (!Array.isArray(coverOptions) || coverOptions.length === 0) {
+        const firstOpt = parsed.options?.[0] || {};
+        coverOptions = [
+          {
+            tag: style === '运动' ? '⚡ BREAKING 速报' : style === '探店' ? '🔥 必打卡推荐' : '✨ 独家私藏',
+            title: firstOpt.title || keywords || '发现生活新美好',
+            subtitle: keywords ? `${keywords} · 亲测打卡记录` : '小红书视觉精选指南'
+          },
+          {
+            tag: '🏷️ 深度体验',
+            title: firstOpt.title ? `${firstOpt.title.slice(0, 12)}...` : '封神级现场直击',
+            subtitle: '全网高赞攻略 · 建议先马后看'
+          },
+          {
+            tag: '⚠️ 闭眼冲指南',
+            title: keywords ? `绝不踩雷！${keywords}` : '高赞封神大片机位',
+            subtitle: '沉浸式体验 · 真实测评分享'
+          }
+        ];
+      }
+
       res.json({
         options: parsed.options || [],
+        coverOptions,
         visualDescriptions: combinedDescriptions
       });
     } catch (parseErr) {
@@ -873,12 +913,101 @@ ${visualGuidance}
             tags: '#日常碎片 #AI生活记录'
           }
         ],
+        coverOptions: [
+          {
+            tag: '✨ 视觉精选',
+            title: '日常碎片记录',
+            subtitle: '治愈系生活瞬间'
+          }
+        ],
         visualDescriptions: combinedDescriptions
       });
     }
   } catch (error) {
     console.error('Copy generation error:', error);
     res.status(500).json({ error: `文案生成失败: ${error.message}` });
+  }
+});
+
+// Dedicated AI Cover Title / Headline Generator
+app.post('/api/ai/generate-cover-titles', async (req, res) => {
+  try {
+    const { style = '探店', keywords = '', noteTitle = '', noteBody = '', visualDescriptions = '' } = req.body;
+    const volcKey = process.env.VOLC_API_KEY;
+    if (!volcKey) {
+      return res.status(500).json({ error: 'Volcano Ark Key is not configured on the server.' });
+    }
+
+    const prompt = `你是一个顶级小红书视觉总监与爆款首图封面策划专家。请根据以下帖子信息，为该帖子的【封面标题图（首图Cover）】提炼 3 组具有极强点击号召力、视觉张力与好奇心驱动的文字组合。
+
+帖子背景信息：
+- 风格类型：${style}
+- 核心关键词：${keywords || '未提供'}
+- 帖子现有标题：${noteTitle || '未命名'}
+- 帖子正文摘要：${noteBody ? noteBody.slice(0, 200) : '未提供'}
+${visualDescriptions ? `- 画面视觉细节：${visualDescriptions.slice(0, 150)}` : ''}
+
+每一组封面文字必须包含 3 个要素：
+1. "tag"：醒目胶囊角标/情绪标签（如：⚡ BREAKING 速报、🔥 必吃榜、🏷️ 穿搭公式、✨ 独家私藏、⚠️ 避坑预警、TOP 1 测评，不超过8个字）
+2. "title"：极具号召力的主标题（短促有力、直击好奇心或痛点，适合以特大粗体排在封面中心或底部，例如：“3秒极限绝杀！”、“辛芷蕾同款装备”、“人均30吃到撑！”、“死磕这家老破小”，8-14字以内）
+3. "subtitle"：副标题/背景补充（提供关键细节、时间、地名或补充信息，例如：“2026 UTMB OCC 女子前三”、“本地人才知道的私藏小馆”、“避开99%人群的机位”，10-18字以内）
+
+请直接输出纯 JSON 格式（不要包含任何 markdown 代码块包裹），结构如下：
+{
+  "coverOptions": [
+    {
+      "tag": "⚡ BREAKING 速报",
+      "title": "3秒极限绝杀！",
+      "subtitle": "2026 UTMB OCC 女子前三"
+    },
+    {
+      "tag": "🔥 必打卡指南",
+      "title": "...",
+      "subtitle": "..."
+    },
+    {
+      "tag": "✨ 独家私藏",
+      "title": "...",
+      "subtitle": "..."
+    }
+  ]
+}`;
+
+    const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${volcKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'deepseek-v4-flash-260425',
+        messages: [
+          {
+            role: 'user',
+            content: prompt
+          }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Volcano API error: ${response.status} - ${errText}`);
+    }
+
+    const data = await response.json();
+    let text = data.choices?.[0]?.message?.content?.trim();
+    if (text.startsWith('```')) {
+      text = text.replace(/^```(?:json)?\n/, '').replace(/\n```$/, '').trim();
+    }
+
+    const parsed = JSON.parse(text);
+    res.json({
+      coverOptions: parsed.coverOptions || []
+    });
+  } catch (err) {
+    console.error('Generate cover titles error:', err);
+    res.status(500).json({ error: `封面标题生成失败: ${err.message}` });
   }
 });
 // Health check

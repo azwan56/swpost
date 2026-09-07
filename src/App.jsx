@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import piexif from 'piexifjs';
 import ExifReader from 'exifreader';
 
@@ -273,6 +273,18 @@ function App() {
   const [aiBody, setAiBody] = useState('');
   const [cachedVisualDescriptions, setCachedVisualDescriptions] = useState(null);
 
+  // Cover Title Card States
+  const [coverImageIdx, setCoverImageIdx] = useState(0);
+  const [coverStyle, setCoverStyle] = useState('magazine'); // 'magazine' | 'minimal' | 'sticker'
+  const [coverTag, setCoverTag] = useState('⚡ BREAKING 速报');
+  const [coverTitle, setCoverTitle] = useState('3秒极限绝杀！');
+  const [coverSubtitle, setCoverSubtitle] = useState('2026 视觉精选指南 · 建议先马后看');
+  const [coverPosition, setCoverPosition] = useState('bottom'); // 'bottom' | 'center' | 'top'
+  const [coverCandidates, setCoverCandidates] = useState([]);
+  const [isGeneratingCoverTitles, setIsGeneratingCoverTitles] = useState(false);
+  const [coverPreviewUri, setCoverPreviewUri] = useState('');
+  const [activePreviewTab, setActivePreviewTab] = useState('styled'); // 'styled' | 'cover'
+
   // General UI States
   const [isLoading, setIsLoading] = useState(false);
   const [aiOperationName, setAiOperationName] = useState(''); 
@@ -280,6 +292,41 @@ function App() {
 
   // Refs
   const fileInputRef = useRef(null);
+
+  // Live update cover preview whenever parameters change
+  useEffect(() => {
+    if (uploadedImages.length === 0) {
+      setCoverPreviewUri('');
+      return;
+    }
+    const target = uploadedImages[coverImageIdx] || uploadedImages[activeIdx] || uploadedImages[0];
+    if (!target) return;
+
+    let isMounted = true;
+    const timer = setTimeout(async () => {
+      try {
+        const src = target.styledSrc || target.src;
+        const preview = await renderCoverCanvas(src, {
+          tag: coverTag,
+          title: coverTitle,
+          subtitle: coverSubtitle,
+          style: coverStyle,
+          position: coverPosition,
+          exif: target.exif
+        });
+        if (isMounted) {
+          setCoverPreviewUri(preview);
+        }
+      } catch (err) {
+        console.warn('Cover preview render error:', err);
+      }
+    }, 120);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [uploadedImages, coverImageIdx, activeIdx, coverStyle, coverTag, coverTitle, coverSubtitle, coverPosition]);
 
   // Handle multiple photos upload
   const handlePhotosUpload = async (e) => {
@@ -372,6 +419,9 @@ function App() {
     setAiTitle('');
     setAiBody('');
     setCachedVisualDescriptions(null); // Clear description cache
+    setCoverCandidates([]);
+    setCoverPreviewUri('');
+    setCoverImageIdx(0);
   };
 
   // Call Doubao style transfer model via backend (supporting multi-image parallel processing)
@@ -539,6 +589,15 @@ function App() {
         setAiTitle(firstOpt.title);
         const cleanTags = (firstOpt.tags && firstOpt.tags !== 'undefined') ? firstOpt.tags : '';
         setAiBody(firstOpt.body + (cleanTags && !firstOpt.body.includes(cleanTags) ? `\n\n${cleanTags}` : ''));
+
+        // If coverOptions are returned, populate cover candidates & inputs!
+        if (result.coverOptions && result.coverOptions.length > 0) {
+          setCoverCandidates(result.coverOptions);
+          const firstCover = result.coverOptions[0];
+          if (firstCover.tag) setCoverTag(firstCover.tag);
+          if (firstCover.title) setCoverTitle(firstCover.title);
+          if (firstCover.subtitle) setCoverSubtitle(firstCover.subtitle);
+        }
       } else {
         throw new Error('未返回有效的文案选项');
       }
@@ -557,6 +616,90 @@ function App() {
     setAiTitle(opt.title);
     const cleanTags = (opt.tags && opt.tags !== 'undefined') ? opt.tags : '';
     setAiBody(opt.body + (cleanTags && !opt.body.includes(cleanTags) ? `\n\n${cleanTags}` : ''));
+
+    // If matching cover option exists, sync it
+    if (coverCandidates[idx]) {
+      const cand = coverCandidates[idx];
+      if (cand.tag) setCoverTag(cand.tag);
+      if (cand.title) setCoverTitle(cand.title);
+      if (cand.subtitle) setCoverSubtitle(cand.subtitle);
+    }
+  };
+
+  // Generate punchy cover titles via AI
+  const handleGenerateCoverTitles = async () => {
+    if (uploadedImages.length === 0) {
+      setErrorMsg('请先上传图片！');
+      return;
+    }
+    setIsGeneratingCoverTitles(true);
+    setErrorMsg('');
+
+    try {
+      const res = await fetch(`${API_BASE}/api/ai/generate-cover-titles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          style: copyStyle,
+          keywords: copyKeywords,
+          noteTitle: aiTitle,
+          noteBody: aiBody,
+          visualDescriptions: cachedVisualDescriptions
+        })
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || '生成封面标题失败');
+      }
+
+      const data = await res.json();
+      if (data.coverOptions && data.coverOptions.length > 0) {
+        setCoverCandidates(data.coverOptions);
+        const firstCover = data.coverOptions[0];
+        if (firstCover.tag) setCoverTag(firstCover.tag);
+        if (firstCover.title) setCoverTitle(firstCover.title);
+        if (firstCover.subtitle) setCoverSubtitle(firstCover.subtitle);
+        setActivePreviewTab('cover');
+      }
+    } catch (err) {
+      console.error(err);
+      setErrorMsg(err.message || '生成封面标题失败，请检查网络配置');
+    } finally {
+      setIsGeneratingCoverTitles(false);
+    }
+  };
+
+  // Download high-resolution cover image with EXIF preserved
+  const downloadCoverImage = async () => {
+    const target = uploadedImages[coverImageIdx] || uploadedImages[activeIdx];
+    if (!target) return;
+
+    try {
+      setIsLoading(true);
+      setAiOperationName('正在导出高清封面标题图');
+
+      const src = target.styledSrc || target.src;
+      const dataUri = await renderCoverCanvas(src, {
+        tag: coverTag,
+        title: coverTitle,
+        subtitle: coverSubtitle,
+        style: coverStyle,
+        position: coverPosition,
+        exif: target.exif
+      });
+
+      const link = document.createElement('a');
+      link.href = dataUri;
+      link.download = `xhs-cover-${coverStyle}-${Date.now()}.jpg`;
+      link.click();
+    } catch (err) {
+      console.error('Download cover image failed:', err);
+      setErrorMsg('导出封面标题图失败，请重试');
+    } finally {
+      setIsLoading(false);
+      setAiOperationName('');
+    }
   };
 
   // Helper: Clean text from emojis, formatting, and hashtags for a clean TTS read
@@ -1016,6 +1159,444 @@ function App() {
     });
   };
 
+  // Helper: Draw round rectangle compatible across all browsers
+  const drawRoundRect = (ctx, x, y, width, height, radius) => {
+    if (typeof ctx.roundRect === 'function') {
+      ctx.beginPath();
+      ctx.roundRect(x, y, width, height, radius);
+      return;
+    }
+    const r = Math.min(radius, width / 2, height / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + width - r, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+    ctx.lineTo(x + width, y + height - r);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+    ctx.lineTo(x + r, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+  };
+
+  // Helper: Measure and wrap text into multiple lines
+  const wrapCanvasTextLines = (ctx, text, maxWidth) => {
+    if (!text) return [];
+    const chars = Array.from(text);
+    const lines = [];
+    let currentLine = '';
+
+    for (let i = 0; i < chars.length; i++) {
+      const char = chars[i];
+      if (char === '\n') {
+        if (currentLine) lines.push(currentLine);
+        currentLine = '';
+        continue;
+      }
+      const testLine = currentLine + char;
+      const metrics = ctx.measureText(testLine);
+      if (metrics.width > maxWidth && currentLine.length > 0) {
+        lines.push(currentLine);
+        currentLine = char;
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine) {
+      lines.push(currentLine);
+    }
+    return lines;
+  };
+
+  // Helper: Render high-impact Xiaohongshu Cover Title Card on Canvas (3 styles: magazine, minimal, sticker)
+  const renderCoverCanvas = (imageSrc, {
+    tag = '⚡ BREAKING 速报',
+    title = '3秒极限绝杀！',
+    subtitle = '2026 UTMB OCC 女子前三',
+    style = 'magazine',
+    position = 'bottom',
+    exif = null
+  }) => {
+    return new Promise((resolve, reject) => {
+      if (!imageSrc) {
+        reject(new Error('No image source provided'));
+        return;
+      }
+
+      const img = new Image();
+      if (!imageSrc.startsWith('data:')) {
+        img.crossOrigin = 'anonymous';
+      }
+
+      img.onload = () => {
+        try {
+          const w = img.width;
+          const h = img.height;
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+
+          // 1. Draw base image
+          ctx.drawImage(img, 0, 0, w, h);
+
+          const scale = Math.max(0.65, w / 1000);
+          const tagText = (tag || '').trim();
+          const titleText = (title || '').trim();
+          const subText = (subtitle || '').trim();
+
+          const titleFontSize = Math.round(54 * scale);
+          const subFontSize = Math.round(24 * scale);
+          const tagFontSize = Math.round(22 * scale);
+
+          // Pre-calculate wrapped lines for title
+          ctx.font = `900 ${titleFontSize}px -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif`;
+          const maxTitleWidth = style === 'minimal' ? w * 0.78 : (style === 'sticker' ? w * 0.82 : w * 0.86);
+          const titleLines = wrapCanvasTextLines(ctx, titleText || '点击输入号召力大标题', maxTitleWidth);
+
+          // 2. Render according to selected style
+          if (style === 'magazine') {
+            // --- STYLE 1: 杂志大片速报风 ---
+            const padX = 52 * scale;
+            const titleLineH = titleFontSize * 1.25;
+            const totalTitleH = titleLines.length * titleLineH;
+            const tagH = tagText ? tagFontSize * 1.85 : 0;
+            const tagMarginB = tagText ? 18 * scale : 0;
+            const subH = subText ? subFontSize * 1.3 : 0;
+            const subMarginT = subText ? 12 * scale : 0;
+            const totalContentH = tagH + tagMarginB + totalTitleH + subMarginT + subH;
+
+            let blockY = position === 'top' 
+              ? h * 0.12 
+              : (position === 'center' ? (h - totalContentH) / 2 : h - totalContentH - h * 0.10);
+
+            // Deep gradient scrim for 100% legibility over any background
+            const scrimGrad = ctx.createLinearGradient(
+              0,
+              position === 'top' ? 0 : (position === 'center' ? blockY - 50 * scale : blockY - 90 * scale),
+              0,
+              position === 'top' ? blockY + totalContentH + 90 * scale : (position === 'center' ? blockY + totalContentH + 50 * scale : h)
+            );
+
+            if (position === 'top') {
+              scrimGrad.addColorStop(0, 'rgba(0, 0, 0, 0.88)');
+              scrimGrad.addColorStop(0.65, 'rgba(0, 0, 0, 0.55)');
+              scrimGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+              ctx.fillStyle = scrimGrad;
+              ctx.fillRect(0, 0, w, blockY + totalContentH + 90 * scale);
+            } else if (position === 'center') {
+              scrimGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+              scrimGrad.addColorStop(0.2, 'rgba(0, 0, 0, 0.65)');
+              scrimGrad.addColorStop(0.8, 'rgba(0, 0, 0, 0.65)');
+              scrimGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+              ctx.fillStyle = scrimGrad;
+              ctx.fillRect(0, blockY - 50 * scale, w, totalContentH + 100 * scale);
+            } else {
+              scrimGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+              scrimGrad.addColorStop(0.35, 'rgba(0, 0, 0, 0.55)');
+              scrimGrad.addColorStop(1, 'rgba(0, 0, 0, 0.88)');
+              ctx.fillStyle = scrimGrad;
+              ctx.fillRect(0, blockY - 90 * scale, w, h - (blockY - 90 * scale));
+            }
+
+            let curY = blockY;
+
+            // Capsule Tag: Vibrant Yellow
+            if (tagText) {
+              ctx.font = `bold ${tagFontSize}px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif`;
+              const tagMetrics = ctx.measureText(tagText);
+              const pillW = tagMetrics.width + 30 * scale;
+              const pillH = tagFontSize * 1.85;
+
+              drawRoundRect(ctx, padX, curY, pillW, pillH, pillH / 2);
+              ctx.fillStyle = '#FFE600'; // High-visibility Neon Yellow
+              ctx.fill();
+
+              ctx.fillStyle = '#111111';
+              ctx.textAlign = 'left';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(tagText, padX + 15 * scale, curY + pillH / 2);
+              curY += pillH + tagMarginB;
+            }
+
+            // Main Title: Big Bold Sans-serif with soft shadow
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+            ctx.shadowBlur = 14 * scale;
+            ctx.shadowOffsetY = 4 * scale;
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = `900 ${titleFontSize}px -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif`;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+
+            titleLines.forEach(line => {
+              ctx.fillText(line, padX, curY);
+              curY += titleLineH;
+            });
+
+            // Subtitle
+            if (subText) {
+              curY += subMarginT;
+              ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+              ctx.shadowBlur = 8 * scale;
+              ctx.shadowOffsetY = 2 * scale;
+              ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+              ctx.font = `600 ${subFontSize}px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif`;
+              ctx.fillText(subText, padX, curY);
+            }
+
+            // Reset shadow
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetY = 0;
+
+            // Header branding at the top
+            ctx.font = `800 ${18 * scale}px sans-serif`;
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.82)';
+            ctx.fillText('⚡ XIAOHONGSHU PICKS • 2026', padX, 46 * scale);
+
+          } else if (style === 'minimal') {
+            // --- STYLE 2: 极简质感风 ---
+            const cardPad = 40 * scale;
+            const cardW = w - cardPad * 2;
+            const cardInnerPadX = 36 * scale;
+            const cardInnerPadY = 32 * scale;
+
+            const titleLineH = titleFontSize * 1.35;
+            const innerTitleH = titleLines.length * titleLineH;
+            const tagH = tagText ? tagFontSize * 1.8 + 14 * scale : 0;
+            const subH = subText ? subFontSize * 1.3 + 14 * scale : 0;
+            const dividerH = (titleText && subText) ? 18 * scale : 0;
+            const cardH = cardInnerPadY * 2 + tagH + innerTitleH + dividerH + subH;
+
+            const cardY = position === 'top' 
+              ? 52 * scale 
+              : (position === 'center' ? (h - cardH) / 2 : h - cardH - 52 * scale);
+
+            // Frosted Glass Floating Card
+            ctx.save();
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.18)';
+            ctx.shadowBlur = 32 * scale;
+            ctx.shadowOffsetY = 8 * scale;
+
+            drawRoundRect(ctx, cardPad, cardY, cardW, cardH, 20 * scale);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.93)';
+            ctx.fill();
+
+            ctx.shadowColor = 'transparent';
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+            ctx.lineWidth = 2 * scale;
+            ctx.stroke();
+
+            let curY = cardY + cardInnerPadY;
+
+            // Tag: Subtle amber/indigo outline capsule
+            if (tagText) {
+              ctx.font = `700 ${tagFontSize}px sans-serif`;
+              const tagMetrics = ctx.measureText(tagText);
+              const pillW = tagMetrics.width + 24 * scale;
+              const pillH = tagFontSize * 1.7;
+
+              drawRoundRect(ctx, cardPad + cardInnerPadX, curY, pillW, pillH, pillH / 2);
+              ctx.fillStyle = 'rgba(245, 158, 11, 0.12)';
+              ctx.fill();
+              ctx.strokeStyle = 'rgba(217, 119, 6, 0.4)';
+              ctx.lineWidth = 1.5 * scale;
+              ctx.stroke();
+
+              ctx.fillStyle = '#B45309'; // Warm amber
+              ctx.textAlign = 'left';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(tagText, cardPad + cardInnerPadX + 12 * scale, curY + pillH / 2);
+              curY += pillH + 16 * scale;
+            }
+
+            // Title: Elegant serif font with bracket quotation
+            ctx.fillStyle = '#111827';
+            ctx.font = `800 ${titleFontSize}px "Songti SC", "Noto Serif SC", "PingFang SC", serif, sans-serif`;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+
+            titleLines.forEach((line, idx) => {
+              const displayLine = (idx === 0 && titleLines.length === 1) ? `「 ${line} 」` : line;
+              ctx.fillText(displayLine, cardPad + cardInnerPadX, curY);
+              curY += titleLineH;
+            });
+
+            // Hairline Divider
+            if (subText) {
+              curY += 8 * scale;
+              ctx.strokeStyle = 'rgba(0, 0, 0, 0.08)';
+              ctx.lineWidth = 1 * scale;
+              ctx.beginPath();
+              ctx.moveTo(cardPad + cardInnerPadX, curY);
+              ctx.lineTo(cardPad + cardW - cardInnerPadX, curY);
+              ctx.stroke();
+              curY += 14 * scale;
+
+              // Subtitle
+              ctx.fillStyle = '#4B5563';
+              ctx.font = `600 ${subFontSize}px sans-serif`;
+              ctx.fillText(`CITY GUIDE · ${subText}`, cardPad + cardInnerPadX, curY);
+            }
+            ctx.restore();
+
+          } else {
+            // --- STYLE 3: 潮酷贴纸风 ---
+            const padX = 46 * scale;
+            const titleLineH = titleFontSize * 1.35;
+            const totalTitleH = titleLines.length * titleLineH;
+            const tagH = tagText ? tagFontSize * 1.9 + 18 * scale : 0;
+            const subH = subText ? subFontSize * 1.8 + 14 * scale : 0;
+            const totalH = tagH + totalTitleH + subH;
+
+            let curY = position === 'top' 
+              ? 60 * scale 
+              : (position === 'center' ? (h - totalH) / 2 : h - totalH - 60 * scale);
+
+            // 1. Slanted Sticker Tag
+            if (tagText) {
+              ctx.save();
+              ctx.translate(padX, curY);
+              ctx.rotate((-3.5 * Math.PI) / 180);
+
+              ctx.font = `900 ${tagFontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+              const tagMetrics = ctx.measureText(tagText);
+              const badgeW = tagMetrics.width + 30 * scale;
+              const badgeH = tagFontSize * 1.8;
+
+              ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
+              ctx.shadowBlur = 14 * scale;
+              ctx.shadowOffsetY = 5 * scale;
+
+              drawRoundRect(ctx, 0, 0, badgeW, badgeH, 6 * scale);
+              ctx.fillStyle = '#FF2442'; // Signature Red
+              ctx.fill();
+
+              ctx.shadowColor = 'transparent';
+              ctx.strokeStyle = '#FFFFFF';
+              ctx.lineWidth = 3 * scale;
+              ctx.stroke();
+
+              ctx.fillStyle = '#FFFFFF';
+              ctx.textAlign = 'left';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(tagText, 15 * scale, badgeH / 2);
+              ctx.restore();
+
+              curY += badgeH + 22 * scale;
+            }
+
+            // 2. Fluorescent Yellow Ribbon Banners behind each title line
+            titleLines.forEach(line => {
+              ctx.font = `900 ${titleFontSize}px -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif`;
+              const lineMetrics = ctx.measureText(line);
+              const ribbonW = lineMetrics.width + 28 * scale;
+              const ribbonH = titleFontSize * 1.25;
+
+              ctx.save();
+              ctx.shadowColor = 'rgba(0, 0, 0, 0.25)';
+              ctx.shadowBlur = 10 * scale;
+              ctx.shadowOffsetY = 4 * scale;
+
+              drawRoundRect(ctx, padX, curY, ribbonW, ribbonH, 4 * scale);
+              ctx.fillStyle = '#FFE600'; // Fluorescent Yellow
+              ctx.fill();
+
+              ctx.shadowColor = 'transparent';
+              ctx.fillStyle = '#000000'; // Pure Black font
+              ctx.textAlign = 'left';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(line, padX + 14 * scale, curY + ribbonH / 2);
+              ctx.restore();
+
+              curY += ribbonH + 8 * scale;
+            });
+
+            // 3. Dark pill subtitle underneath
+            if (subText) {
+              curY += 10 * scale;
+              ctx.font = `700 ${subFontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+              const subMetrics = ctx.measureText(subText);
+              const subPillW = subMetrics.width + 28 * scale;
+              const subPillH = subFontSize * 1.75;
+
+              ctx.save();
+              ctx.shadowColor = 'rgba(0, 0, 0, 0.25)';
+              ctx.shadowBlur = 8 * scale;
+              drawRoundRect(ctx, padX, curY, subPillW, subPillH, 6 * scale);
+              ctx.fillStyle = 'rgba(17, 24, 39, 0.9)';
+              ctx.fill();
+
+              ctx.shadowColor = 'transparent';
+              ctx.fillStyle = '#FFFFFF';
+              ctx.textAlign = 'left';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(subText, padX + 14 * scale, curY + subPillH / 2);
+              ctx.restore();
+            }
+          }
+
+          // Export as JPEG with 0.95 quality
+          const watermarkedDataUri = canvas.toDataURL('image/jpeg', 0.95);
+
+          // Inject EXIF if present to preserve metadata
+          try {
+            const piexifLib = getPiexif();
+            if (piexifLib && piexifLib.load && piexifLib.dump && piexifLib.insert) {
+              let exifObj = null;
+              if (exif && exif.rawBytes) {
+                try {
+                  exifObj = piexifLib.load(exif.rawBytes);
+                  exifObj["0th"] = exifObj["0th"] || {};
+                  exifObj["0th"][piexifLib.ImageIFD.Orientation] = 1;
+                  exifObj["0th"][piexifLib.ImageIFD.Software] = "Shantie AI Cover";
+                  delete exifObj["thumbnail"];
+                } catch (rawErr) {
+                  exifObj = null;
+                }
+              }
+
+              if (!exifObj && exif) {
+                exifObj = {
+                  "0th": {
+                    [piexifLib.ImageIFD.Orientation]: 1,
+                    [piexifLib.ImageIFD.Software]: "Shantie AI Cover"
+                  },
+                  "Exif": {},
+                  "GPS": {},
+                  "Interop": {},
+                  "1st": {},
+                  "thumbnail": null
+                };
+                if (exif.dateTime) {
+                  exifObj["0th"][piexifLib.ImageIFD.DateTime] = String(exif.dateTime);
+                  exifObj["Exif"][piexifLib.ExifIFD.DateTimeOriginal] = String(exif.dateTime);
+                }
+              }
+
+              if (exifObj) {
+                const exifBytes = piexifLib.dump(exifObj);
+                const finalDataUri = piexifLib.insert(exifBytes, watermarkedDataUri);
+                resolve(finalDataUri);
+                return;
+              }
+            }
+          } catch (exifErr) {
+            console.warn('[Cover EXIF] Failed to inject EXIF:', exifErr);
+          }
+
+          resolve(watermarkedDataUri);
+        } catch (err) {
+          reject(err);
+        }
+      };
+
+      img.onerror = (err) => reject(err);
+      img.src = imageSrc;
+    });
+  };
+
 
 
   // Download the currently displayed styled (or original) active image
@@ -1043,7 +1624,7 @@ function App() {
           <p className="welcome-subtitle">AI 智能画风转换与爆款文案助手</p>
           
           <div className="welcome-workflow">
-            <h3 className="workflow-title" style={{ textAlign: 'center', justifyContent: 'center' }}>✨ 三步体验：拍、生、变！</h3>
+            <h3 className="workflow-title" style={{ textAlign: 'center', justifyContent: 'center' }}>✨ 四步体验：拍、生、变、标！</h3>
             <div className="workflow-steps">
               <div className="workflow-step">
                 <span className="step-num">1</span>
@@ -1056,14 +1637,21 @@ function App() {
                 <span className="step-num">2</span>
                 <div className="step-content">
                   <strong>✍️ 一键生成（生）</strong>
-                  <span>AI 结合画面时空智能撰写 3 款不同风格的社交爆款文案，复制即可去朋友圈、小红书、Ins 发文！</span>
+                  <span>AI 结合画面时空智能撰写 3 款不同风格的社交爆款文案，复制即可去发文！</span>
                 </div>
               </div>
               <div className="workflow-step">
                 <span className="step-num">3</span>
                 <div className="step-content">
                   <strong>🎨 艺术重绘（变）</strong>
-                  <span>一键转换为治愈吉卜力、软萌泥塑或复古日式胶片风，并可保存高清原图。</span>
+                  <span>一键转换为治愈吉卜力、软萌泥塑或复古日式胶片风，保存高清原图。</span>
+                </div>
+              </div>
+              <div className="workflow-step">
+                <span className="step-num">4</span>
+                <div className="step-content">
+                  <strong>🏷️ 标题大片（标）</strong>
+                  <span>智能提炼高号召力大字，提供杂志速报、极简质感、潮酷贴纸 3 种爆款封面！</span>
                 </div>
               </div>
             </div>
@@ -1292,34 +1880,321 @@ function App() {
               )}
             </div>
           )}
+
+          {/* 4. Cover Title Card Generator Tab */}
+          {uploadedImages.length > 0 && (
+            <div className="card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                <h2 className="card-title" style={{ margin: 0 }}>🏷️ 第四步：爆款封面标题图</h2>
+                <button
+                  className="btn"
+                  style={{
+                    fontSize: '0.72rem',
+                    padding: '0.25rem 0.6rem',
+                    borderRadius: '14px',
+                    background: 'linear-gradient(135deg, #ff2442, #ff6584)',
+                    color: '#fff',
+                    border: 'none',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                  onClick={handleGenerateCoverTitles}
+                  disabled={isGeneratingCoverTitles}
+                >
+                  {isGeneratingCoverTitles ? '✨ 生成中...' : '✨ AI 提炼标题'}
+                </button>
+              </div>
+
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+                选择底图与风格，生成醒目有吸引力的高号召力文字封面：
+              </p>
+
+              {/* 1. Pick Base Image */}
+              <div style={{ marginBottom: '0.75rem' }}>
+                <label className="form-label" style={{ fontSize: '0.78rem', display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>
+                  1. 选择封面底图：
+                </label>
+                <div style={{ display: 'flex', gap: '0.5rem', overflowX: 'auto', paddingBottom: '0.25rem' }}>
+                  {uploadedImages.map((img, idx) => (
+                    <div
+                      key={img.id}
+                      onClick={() => {
+                        setCoverImageIdx(idx);
+                        setActivePreviewTab('cover');
+                      }}
+                      style={{
+                        position: 'relative',
+                        width: '56px',
+                        height: '56px',
+                        borderRadius: '8px',
+                        overflow: 'hidden',
+                        cursor: 'pointer',
+                        border: coverImageIdx === idx ? '2.5px solid var(--xhs-red)' : '1.5px solid var(--border-color)',
+                        boxShadow: coverImageIdx === idx ? '0 0 0 2px rgba(255, 36, 66, 0.25)' : 'none',
+                        flexShrink: 0
+                      }}
+                    >
+                      <img src={img.styledSrc || img.src} alt={`Cover base ${idx}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      {coverImageIdx === idx && (
+                        <span style={{ position: 'absolute', bottom: '2px', right: '2px', background: 'var(--xhs-red)', color: '#fff', fontSize: '9px', padding: '0 3px', borderRadius: '4px', fontWeight: 800 }}>
+                          底图
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* 2. Choose 3 Styles */}
+              <div style={{ marginBottom: '0.75rem' }}>
+                <label className="form-label" style={{ fontSize: '0.78rem', display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>
+                  2. 选择封面风格（3款不同版式）：
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.4rem' }}>
+                  {[
+                    { id: 'magazine', name: '杂志速报', desc: '渐变暗角·亮黄胶囊标', icon: '📸' },
+                    { id: 'minimal', name: '极简质感', desc: '白底卡片·质感留白', icon: '🖼️' },
+                    { id: 'sticker', name: '潮酷贴纸', desc: '荧光纸胶带·斜角徽章', icon: '⚡' }
+                  ].map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => {
+                        setCoverStyle(s.id);
+                        setActivePreviewTab('cover');
+                      }}
+                      style={{
+                        padding: '0.5rem 0.25rem',
+                        borderRadius: '10px',
+                        border: coverStyle === s.id ? '2px solid var(--xhs-red)' : '1px solid var(--border-color)',
+                        background: coverStyle === s.id ? 'var(--xhs-red-light)' : 'var(--bg-card)',
+                        color: coverStyle === s.id ? 'var(--xhs-red)' : 'var(--text-primary)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: '2px'
+                      }}
+                    >
+                      <span style={{ fontSize: '1.1rem' }}>{s.icon}</span>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 700 }}>{s.name}</span>
+                      <span style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', textAlign: 'center', lineHeight: 1.2 }}>
+                        {s.desc}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 3. AI Generated Candidates Chips (if available) */}
+              {coverCandidates.length > 0 && (
+                <div style={{ marginBottom: '0.75rem', padding: '0.5rem', background: 'var(--bg-main)', borderRadius: '8px' }}>
+                  <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                    ✨ 点击快速套用推荐文案：
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                    {coverCandidates.map((cand, cIdx) => (
+                      <div
+                        key={cIdx}
+                        onClick={() => {
+                          if (cand.tag) setCoverTag(cand.tag);
+                          if (cand.title) setCoverTitle(cand.title);
+                          if (cand.subtitle) setCoverSubtitle(cand.subtitle);
+                          setActivePreviewTab('cover');
+                        }}
+                        style={{
+                          padding: '0.35rem 0.5rem',
+                          borderRadius: '6px',
+                          background: (coverTitle === cand.title) ? 'rgba(255, 36, 66, 0.1)' : 'var(--bg-card)',
+                          border: (coverTitle === cand.title) ? '1px solid var(--xhs-red)' : '1px solid var(--border-color)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          fontSize: '0.75rem'
+                        }}
+                      >
+                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <span style={{ fontWeight: 800, color: 'var(--xhs-red)', marginRight: '4px' }}>[{cand.tag}]</span>
+                          <span style={{ fontWeight: 600 }}>{cand.title}</span>
+                        </div>
+                        <span style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', marginLeft: '6px', flexShrink: 0 }}>套用 ➔</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 4. Title Customization Inputs */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>
+                      🏷️ 胶囊角标
+                    </label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={coverTag}
+                      onChange={(e) => setCoverTag(e.target.value)}
+                      placeholder="如：⚡ BREAKING 速报"
+                      style={{ width: '100%', fontSize: '0.78rem', padding: '0.35rem 0.5rem', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                  <div style={{ width: '105px' }}>
+                    <label style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>
+                      📍 文字位置
+                    </label>
+                    <select
+                      className="form-control"
+                      value={coverPosition}
+                      onChange={(e) => setCoverPosition(e.target.value)}
+                      style={{ width: '100%', fontSize: '0.78rem', padding: '0.35rem 0.25rem', boxSizing: 'border-box' }}
+                    >
+                      <option value="bottom">⬇️ 底部（推荐）</option>
+                      <option value="center">⏺️ 居中</option>
+                      <option value="top">⬆️ 顶部</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>
+                    ✍️ 号召力主标题（醒目大字）
+                  </label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={coverTitle}
+                    onChange={(e) => setCoverTitle(e.target.value)}
+                    placeholder="如：3秒极限绝杀！/ 辛芷蕾同款装备"
+                    style={{ width: '100%', fontSize: '0.82rem', fontWeight: 700, padding: '0.35rem 0.5rem', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>
+                    📝 关键副标题（补充说明）
+                  </label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={coverSubtitle}
+                    onChange={(e) => setCoverSubtitle(e.target.value)}
+                    placeholder="如：2026 UTMB OCC 女子前三 / 亲测不踩雷"
+                    style={{ width: '100%', fontSize: '0.78rem', padding: '0.35rem 0.5rem', boxSizing: 'border-box' }}
+                  />
+                </div>
+              </div>
+
+              <button
+                className="btn btn-primary"
+                style={{ width: '100%', padding: '0.55rem', fontSize: '0.82rem', background: 'linear-gradient(135deg, #ff2442, #e01b38)', border: 'none', fontWeight: 700 }}
+                onClick={() => {
+                  setActivePreviewTab('cover');
+                  downloadCoverImage();
+                }}
+              >
+                📥 立即导出高清封面标题图
+              </button>
+            </div>
+          )}
         </section>
 
         {/* Right Preview & Result Column */}
         <section className="preview-panel" style={{ flex: '1.4' }}>
           {uploadedImages.length > 0 && activeImage ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%' }}>
-              
-              {/* Image Preview Card */}
-              <div className="card" style={{ padding: '1rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                  <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>🖼️ 风格化效果预览</h3>
-                  <button 
-                    className="btn btn-primary" 
-                    style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #ff2442, #ff4d66)', border: 'none', fontWeight: '600' }} 
-                    onClick={downloadActiveImage}
-                  >
-                    📥 导出当前图片
-                  </button>
-                </div>
-                
-                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#f3f4f6', borderRadius: 'var(--radius-md)', overflow: 'hidden', padding: '1rem', minHeight: '300px' }}>
-                  <img 
-                    src={activeImage.styledSrc || activeImage.src} 
-                    alt="Preview" 
-                    style={{ maxWidth: '100%', maxHeight: '500px', objectFit: 'contain', borderRadius: 'var(--radius-sm)', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-                  />
-                </div>
+
+              {/* View Switcher Tabs */}
+              <div style={{ display: 'flex', gap: '0.5rem', background: 'var(--bg-card)', padding: '0.35rem', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+                <button
+                  className={`btn ${activePreviewTab === 'styled' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{
+                    flex: 1,
+                    padding: '0.45rem',
+                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                    borderRadius: '8px',
+                    background: activePreviewTab === 'styled' ? 'linear-gradient(135deg, #4f46e5, #6366f1)' : 'transparent',
+                    border: 'none',
+                    color: activePreviewTab === 'styled' ? '#fff' : 'var(--text-secondary)'
+                  }}
+                  onClick={() => setActivePreviewTab('styled')}
+                >
+                  🖼️ 画风重绘预览
+                </button>
+                <button
+                  className={`btn ${activePreviewTab === 'cover' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{
+                    flex: 1,
+                    padding: '0.45rem',
+                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                    borderRadius: '8px',
+                    background: activePreviewTab === 'cover' ? 'linear-gradient(135deg, #ff2442, #ff4d66)' : 'transparent',
+                    border: 'none',
+                    color: activePreviewTab === 'cover' ? '#fff' : 'var(--text-secondary)'
+                  }}
+                  onClick={() => setActivePreviewTab('cover')}
+                >
+                  🏷️ 封面标题图预览
+                </button>
               </div>
+
+              {activePreviewTab === 'cover' ? (
+                /* Cover Title Card Preview Card */
+                <div className="card" style={{ padding: '1rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                    <div>
+                      <h3 style={{ fontSize: '1rem', fontWeight: 700, display: 'inline-block', marginRight: '8px' }}>🏷️ 封面标题图效果</h3>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                        ({coverStyle === 'magazine' ? '📸 杂志速报风' : coverStyle === 'minimal' ? '🖼️ 极简质感风' : '⚡ 潮酷贴纸风'})
+                      </span>
+                    </div>
+                    <button 
+                      className="btn btn-primary" 
+                      style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #ff2442, #ff4d66)', border: 'none', fontWeight: '600' }} 
+                      onClick={downloadCoverImage}
+                    >
+                      📥 导出高清封面图
+                    </button>
+                  </div>
+                  
+                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#0e1117', borderRadius: 'var(--radius-md)', overflow: 'hidden', padding: '0.75rem', minHeight: '380px' }}>
+                    {coverPreviewUri ? (
+                      <img 
+                        src={coverPreviewUri} 
+                        alt="Cover Preview" 
+                        style={{ maxWidth: '100%', maxHeight: '520px', objectFit: 'contain', borderRadius: 'var(--radius-sm)', boxShadow: '0 8px 24px rgba(0,0,0,0.35)' }}
+                      />
+                    ) : (
+                      <div className="spinner"></div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                /* Image Preview Card (Style Transfer) */
+                <div className="card" style={{ padding: '1rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                    <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>🖼️ 风格化效果预览</h3>
+                    <button 
+                      className="btn btn-primary" 
+                      style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #ff2442, #ff4d66)', border: 'none', fontWeight: '600' }} 
+                      onClick={downloadActiveImage}
+                    >
+                      📥 导出当前图片
+                    </button>
+                  </div>
+                  
+                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#f3f4f6', borderRadius: 'var(--radius-md)', overflow: 'hidden', padding: '1rem', minHeight: '300px' }}>
+                    <img 
+                      src={activeImage.styledSrc || activeImage.src} 
+                      alt="Preview" 
+                      style={{ maxWidth: '100%', maxHeight: '500px', objectFit: 'contain', borderRadius: 'var(--radius-sm)', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                    />
+                  </div>
+                </div>
+              )}
 
               {/* Copywriting Result Card */}
               {generatedCopyOptions.length > 0 && (
