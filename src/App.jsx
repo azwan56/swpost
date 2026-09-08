@@ -342,16 +342,18 @@ function App() {
       const segmenter = new SelfieSegmentationClass({
         locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`
       });
-      segmenter.setOptions({ modelSelection: 1 });
+      // Use Model 0 (General model: higher resolution, superior for full-body, outdoor scenes, and stylized anime/cartoon characters)
+      segmenter.setOptions({ modelSelection: 0 });
 
+      const actualSrc = target.styledSrc || target.src;
       const img = new Image();
-      if (!target.src.startsWith('data:')) {
+      if (!actualSrc.startsWith('data:')) {
         img.crossOrigin = 'anonymous';
       }
       await new Promise((resolve, reject) => {
         img.onload = resolve;
         img.onerror = reject;
-        img.src = target.styledSrc || target.src;
+        img.src = actualSrc;
       });
 
       const maskCanvas = await new Promise((resolve, reject) => {
@@ -370,6 +372,30 @@ function App() {
             mCanvas.height = results.segmentationMask.height;
             const mCtx = mCanvas.getContext('2d');
             mCtx.drawImage(results.segmentationMask, 0, 0);
+
+            // Binarize & harden mask: ensure subject is 100% solid opaque (alpha=255) with smooth anti-aliased edge
+            const imgData = mCtx.getImageData(0, 0, mCanvas.width, mCanvas.height);
+            const d = imgData.data;
+            const low = 0.15 * 255;
+            const high = 0.35 * 255;
+            for (let i = 0; i < d.length; i += 4) {
+              const val = Math.max(d[i], d[i + 3]);
+              let alpha = 0;
+              if (val >= high) {
+                alpha = 255;
+              } else if (val <= low) {
+                alpha = 0;
+              } else {
+                const t = (val - low) / (high - low);
+                alpha = Math.round(t * t * (3 - 2 * t) * 255);
+              }
+              d[i] = 255;
+              d[i + 1] = 255;
+              d[i + 2] = 255;
+              d[i + 3] = alpha;
+            }
+            mCtx.putImageData(imgData, 0, 0);
+
             resolve(mCanvas);
           } else {
             reject(new Error('No mask returned'));
@@ -680,6 +706,16 @@ function App() {
           }
           return img;
         }));
+
+        // Invalidate cached outline mask for this image so it re-detects precisely on the new styled image
+        const targetImgIdx = uploadedImages.findIndex(img => img.id === targetImage.id);
+        if (targetImgIdx !== -1) {
+          setOutlineMasks(prev => {
+            const next = { ...prev };
+            delete next[targetImgIdx];
+            return next;
+          });
+        }
       }));
 
     } catch (err) {
@@ -708,6 +744,17 @@ function App() {
       }
       return img;
     }));
+
+    // Invalidate outline masks for restored images
+    setOutlineMasks(prev => {
+      const next = { ...prev };
+      uploadedImages.forEach((img, idx) => {
+        if (targetIds.includes(img.id)) {
+          delete next[idx];
+        }
+      });
+      return next;
+    });
   };
 
   // Generate copywriting via backend LLM
@@ -1540,9 +1587,46 @@ function App() {
               personCanvas.width = w;
               personCanvas.height = h;
               const pctx = personCanvas.getContext('2d');
-              pctx.drawImage(outlineMask, 0, 0, w, h);
+              pctx.imageSmoothingEnabled = true;
+              pctx.imageSmoothingQuality = 'high';
+
+              // Ensure the mask is 100% SOLID and OPAQUE on the subject (prevent semi-transparent ghosting)
+              const solidMaskCanvas = document.createElement('canvas');
+              solidMaskCanvas.width = w;
+              solidMaskCanvas.height = h;
+              const smCtx = solidMaskCanvas.getContext('2d');
+              smCtx.imageSmoothingEnabled = true;
+              smCtx.imageSmoothingQuality = 'high';
+              smCtx.drawImage(outlineMask, 0, 0, w, h);
+
+              const maskData = smCtx.getImageData(0, 0, w, h);
+              const md = maskData.data;
+              const low = 0.15 * 255;  // ~38
+              const high = 0.35 * 255; // ~89
+              for (let i = 0; i < md.length; i += 4) {
+                const val = Math.max(md[i], md[i + 3]);
+                let a = 0;
+                if (val >= high) {
+                  a = 255;
+                } else if (val <= low) {
+                  a = 0;
+                } else {
+                  const t = (val - low) / (high - low);
+                  a = Math.round(t * t * (3 - 2 * t) * 255);
+                }
+                md[i] = 255;
+                md[i + 1] = 255;
+                md[i + 2] = 255;
+                md[i + 3] = a;
+              }
+              smCtx.putImageData(maskData, 0, 0);
+
+              // Clip the 100% solid person cutout from the source image
+              pctx.drawImage(solidMaskCanvas, 0, 0);
               pctx.globalCompositeOperation = 'source-in';
               pctx.drawImage(img, 0, 0, w, h);
+
+              // Draw the solid person cutout on top of background & giant text
               ctx.drawImage(personCanvas, 0, 0);
             } catch (occErr) {
               console.warn('[renderCoverCanvas] Subject occlusion error:', occErr);
@@ -1609,14 +1693,14 @@ function App() {
               ? h * 0.10 
               : (position === 'center' ? (h - totalTitleH) / 2 : h - totalTitleH - h * 0.10);
 
-            // Subtle cinematic gradient behind the giant text for maximum contrast
-            const scrimGrad = ctx.createLinearGradient(0, Math.max(0, blockY - 80 * scale), 0, blockY + totalTitleH + 80 * scale);
+            // Soft contrast scrim behind the giant text (gentle to avoid dark horizontal bands)
+            const scrimGrad = ctx.createLinearGradient(0, Math.max(0, blockY - 50 * scale), 0, blockY + totalTitleH + 50 * scale);
             scrimGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
-            scrimGrad.addColorStop(0.35, 'rgba(0, 0, 0, 0.45)');
-            scrimGrad.addColorStop(0.65, 'rgba(0, 0, 0, 0.45)');
+            scrimGrad.addColorStop(0.35, 'rgba(0, 0, 0, 0.15)');
+            scrimGrad.addColorStop(0.65, 'rgba(0, 0, 0, 0.15)');
             scrimGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
             ctx.fillStyle = scrimGrad;
-            ctx.fillRect(0, Math.max(0, blockY - 80 * scale), w, totalTitleH + 160 * scale);
+            ctx.fillRect(0, Math.max(0, blockY - 50 * scale), w, totalTitleH + 100 * scale);
 
             // Render Giant Title Typography (Layer: Behind Subject)
             ctx.save();
@@ -2706,6 +2790,9 @@ function App() {
                       onClick={() => {
                         setCoverImageIdx(idx);
                         setActivePreviewTab('cover');
+                        if (subjectOcclusion && !outlineMasks[idx] && !isDetectingOutline) {
+                          handleDetectSubjectOutline(idx);
+                        }
                       }}
                       style={{
                         position: 'relative',
