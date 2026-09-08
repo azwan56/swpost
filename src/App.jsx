@@ -1571,8 +1571,8 @@ function App() {
           // 2. Render according to selected style
           if (style === 'giant') {
             // --- STYLE 6: 巨幕穿插风 (Giant Typography & Depth Occlusion) ---
-            // Main title occupies 30% - 50% of the canvas vertical screen area!
-            const padX = 44 * scale;
+            // Main title occupies ~40% - 46% of the canvas vertical screen area (~15% larger than original)
+            const padX = 36 * scale;
 
             // 1. Split title into punchy lines (typically 2-3 lines of 2-5 characters)
             let giantLines = [];
@@ -1589,25 +1589,25 @@ function App() {
                 titleText.slice(chunk * 2)
               ].filter(Boolean);
             } else {
-              giantLines = wrapCanvasTextLines(ctx, titleText, w * 0.88);
+              giantLines = wrapCanvasTextLines(ctx, titleText, w * 0.90);
             }
 
-            // 2. Dynamically calculate font size so the title text block occupies ~35% - 46% of canvas height (30%-50%)
+            // 2. Dynamically calculate font size: ~15% larger than previous baseline
             const maxLineChars = Math.max(...giantLines.map(l => l.length), 1);
-            const targetBlockH = h * 0.38; // Target ~38% of canvas height
-            const maxFontByWidth = (w * 0.88) / maxLineChars;
-            const fontByTargetHeight = targetBlockH / (giantLines.length * 1.15);
-            const giantTitleFontSize = Math.round(Math.min(maxFontByWidth, fontByTargetHeight, 260 * scale));
-            const lineH = giantTitleFontSize * 1.15;
+            const targetBlockH = h * 0.44; // Target ~44% of canvas height (increased by 15% from 0.38)
+            const maxFontByWidth = (w * 1.02) / maxLineChars;
+            const fontByTargetHeight = targetBlockH / (giantLines.length * 1.12);
+            const giantTitleFontSize = Math.round(Math.min(maxFontByWidth, fontByTargetHeight, 300 * scale));
+            const lineH = giantTitleFontSize * 1.12;
             const totalTitleH = giantLines.length * lineH;
 
             // Determine vertical position:
-            // 'top': upper 10%-48% of screen (behind head/shoulders)
-            // 'center': middle 28%-68% of screen
+            // 'top': upper 10%-54% of screen (behind head/shoulders)
+            // 'center': middle ~26%-70% of screen
             // 'bottom': lower half
             let blockY = position === 'top' 
-              ? h * 0.12 
-              : (position === 'center' ? (h - totalTitleH) / 2 : h - totalTitleH - h * 0.12);
+              ? h * 0.10 
+              : (position === 'center' ? (h - totalTitleH) / 2 : h - totalTitleH - h * 0.10);
 
             // Subtle cinematic gradient behind the giant text for maximum contrast
             const scrimGrad = ctx.createLinearGradient(0, Math.max(0, blockY - 80 * scale), 0, blockY + totalTitleH + 80 * scale);
@@ -1626,12 +1626,18 @@ function App() {
 
             // Multi-tier deep soft shadow + clean subtle dark contour
             ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
-            ctx.shadowBlur = 24 * scale;
-            ctx.shadowOffsetY = 8 * scale;
+            ctx.shadowBlur = 26 * scale;
+            ctx.shadowOffsetY = 9 * scale;
 
             let textY = blockY;
+            const maxAllowW = w - padX * 2;
+
             giantLines.forEach((line) => {
-              const lineW = ctx.measureText(line).width;
+              const rawW = ctx.measureText(line).width;
+              // Subtle condensed scaling if line exceeds margins, ensuring characters stay cleanly framed
+              const scaleX = rawW > maxAllowW ? maxAllowW / rawW : 1.0;
+              const lineW = rawW * scaleX;
+
               let lineX = padX;
               if (align === 'center') {
                 lineX = (w - lineW) / 2;
@@ -1639,14 +1645,22 @@ function App() {
                 lineX = w - padX - lineW;
               }
 
+              ctx.save();
+              ctx.translate(lineX, textY);
+              if (scaleX !== 1.0) {
+                ctx.scale(scaleX, 1.0);
+              }
+
               // Subtle dark contour
               ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
               ctx.lineWidth = 3.5 * scale;
-              ctx.strokeText(line, lineX, textY);
+              ctx.strokeText(line, 0, 0);
 
               // Pure Chalk White main text
               ctx.fillStyle = '#FFFFFF';
-              ctx.fillText(line, lineX, textY);
+              ctx.fillText(line, 0, 0);
+              ctx.restore();
+
               textY += lineH;
             });
             ctx.restore();
@@ -2256,7 +2270,7 @@ function App() {
 
           // 4. Foreground UI / Masthead Overlays for Giant Style
           if (style === 'giant') {
-            const padX = 44 * scale;
+            const padX = 36 * scale;
             // Top Magazine Masthead
             ctx.save();
             ctx.font = `800 ${16 * scale}px -apple-system, BlinkMacSystemFont, sans-serif`;
