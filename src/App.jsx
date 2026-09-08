@@ -280,6 +280,7 @@ function App() {
   const [coverTitle, setCoverTitle] = useState('氛围感彻底封神');
   const [coverSubtitle, setCoverSubtitle] = useState('2026 视觉精选指南 · 建议先马后看');
   const [coverPosition, setCoverPosition] = useState('top'); // 'bottom' | 'center' | 'top'
+  const [coverAlign, setCoverAlign] = useState('left'); // 'left' | 'center' | 'right'
   const [subjectOcclusion, setSubjectOcclusion] = useState(true); // 3D Depth Layering: title behind subject
   const [coverCandidates, setCoverCandidates] = useState([]);
   const [isGeneratingCoverTitles, setIsGeneratingCoverTitles] = useState(false);
@@ -490,6 +491,7 @@ function App() {
           subtitle: coverSubtitle,
           style: coverStyle,
           position: coverPosition,
+          align: coverAlign,
           subjectOcclusion,
           outlineEnabled,
           outlineType,
@@ -511,7 +513,7 @@ function App() {
       isMounted = false;
       clearTimeout(timer);
     };
-  }, [uploadedImages, coverImageIdx, activeIdx, coverStyle, coverTag, coverTitle, coverSubtitle, coverPosition, subjectOcclusion, outlineEnabled, outlineType, outlineColor, outlineWidth, outlineMasks, doodleStrokes]);
+  }, [uploadedImages, coverImageIdx, activeIdx, coverStyle, coverTag, coverTitle, coverSubtitle, coverPosition, coverAlign, subjectOcclusion, outlineEnabled, outlineType, outlineColor, outlineWidth, outlineMasks, doodleStrokes]);
 
   // Handle multiple photos upload
   const handlePhotosUpload = async (e) => {
@@ -871,6 +873,7 @@ function App() {
         subtitle: coverSubtitle,
         style: coverStyle,
         position: coverPosition,
+        align: coverAlign,
         subjectOcclusion,
         outlineEnabled,
         outlineType,
@@ -1408,6 +1411,7 @@ function App() {
     subtitle = '2026 视觉精选指南 · 建议先马后看',
     style = 'giant',
     position = 'top',
+    align = 'left',
     subjectOcclusion = true,
     outlineEnabled = false,
     outlineType = 'dashed',
@@ -1627,14 +1631,22 @@ function App() {
 
             let textY = blockY;
             giantLines.forEach((line) => {
+              const lineW = ctx.measureText(line).width;
+              let lineX = padX;
+              if (align === 'center') {
+                lineX = (w - lineW) / 2;
+              } else if (align === 'right') {
+                lineX = w - padX - lineW;
+              }
+
               // Subtle dark contour
               ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
               ctx.lineWidth = 3.5 * scale;
-              ctx.strokeText(line, padX, textY);
+              ctx.strokeText(line, lineX, textY);
 
               // Pure Chalk White main text
               ctx.fillStyle = '#FFFFFF';
-              ctx.fillText(line, padX, textY);
+              ctx.fillText(line, lineX, textY);
               textY += lineH;
             });
             ctx.restore();
@@ -1691,15 +1703,18 @@ function App() {
               const tagMetrics = ctx.measureText(tagText);
               const pillW = tagMetrics.width + 30 * scale;
               const pillH = tagFontSize * 1.85;
+              let pillX = padX;
+              if (align === 'center') pillX = (w - pillW) / 2;
+              else if (align === 'right') pillX = w - padX - pillW;
 
-              drawRoundRect(ctx, padX, curY, pillW, pillH, pillH / 2);
+              drawRoundRect(ctx, pillX, curY, pillW, pillH, pillH / 2);
               ctx.fillStyle = '#FFE600'; // High-visibility Neon Yellow
               ctx.fill();
 
               ctx.fillStyle = '#111111';
               ctx.textAlign = 'left';
               ctx.textBaseline = 'middle';
-              ctx.fillText(tagText, padX + 15 * scale, curY + pillH / 2);
+              ctx.fillText(tagText, pillX + 15 * scale, curY + pillH / 2);
               curY += pillH + tagMarginB;
             }
 
@@ -1713,7 +1728,11 @@ function App() {
             ctx.textBaseline = 'top';
 
             titleLines.forEach(line => {
-              ctx.fillText(line, padX, curY);
+              const lineW = ctx.measureText(line).width;
+              let lineX = padX;
+              if (align === 'center') lineX = (w - lineW) / 2;
+              else if (align === 'right') lineX = w - padX - lineW;
+              ctx.fillText(line, lineX, curY);
               curY += titleLineH;
             });
 
@@ -1725,7 +1744,11 @@ function App() {
               ctx.shadowOffsetY = 2 * scale;
               ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
               ctx.font = `600 ${subFontSize}px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif`;
-              ctx.fillText(subText, padX, curY);
+              const subW = ctx.measureText(subText).width;
+              let subX = padX;
+              if (align === 'center') subX = (w - subW) / 2;
+              else if (align === 'right') subX = w - padX - subW;
+              ctx.fillText(subText, subX, curY);
             }
 
             // Reset shadow
@@ -1736,7 +1759,12 @@ function App() {
             // Header branding at the top
             ctx.font = `800 ${18 * scale}px sans-serif`;
             ctx.fillStyle = 'rgba(255, 255, 255, 0.82)';
-            ctx.fillText('⚡ XIAOHONGSHU PICKS • 2026', padX, 46 * scale);
+            const brandText = '⚡ XIAOHONGSHU PICKS • 2026';
+            const brandW = ctx.measureText(brandText).width;
+            let brandX = padX;
+            if (align === 'center') brandX = (w - brandW) / 2;
+            else if (align === 'right') brandX = w - padX - brandW;
+            ctx.fillText(brandText, brandX, 46 * scale);
 
           } else if (style === 'minimal') {
             // --- STYLE 2: 极简质感风 ---
@@ -1779,8 +1807,11 @@ function App() {
               const tagMetrics = ctx.measureText(tagText);
               const pillW = tagMetrics.width + 24 * scale;
               const pillH = tagFontSize * 1.7;
+              let tagX = cardPad + cardInnerPadX;
+              if (align === 'center') tagX = cardPad + (cardW - pillW) / 2;
+              else if (align === 'right') tagX = cardPad + cardW - cardInnerPadX - pillW;
 
-              drawRoundRect(ctx, cardPad + cardInnerPadX, curY, pillW, pillH, pillH / 2);
+              drawRoundRect(ctx, tagX, curY, pillW, pillH, pillH / 2);
               ctx.fillStyle = 'rgba(245, 158, 11, 0.12)';
               ctx.fill();
               ctx.strokeStyle = 'rgba(217, 119, 6, 0.4)';
@@ -1790,7 +1821,7 @@ function App() {
               ctx.fillStyle = '#B45309'; // Warm amber
               ctx.textAlign = 'left';
               ctx.textBaseline = 'middle';
-              ctx.fillText(tagText, cardPad + cardInnerPadX + 12 * scale, curY + pillH / 2);
+              ctx.fillText(tagText, tagX + 12 * scale, curY + pillH / 2);
               curY += pillH + 16 * scale;
             }
 
@@ -1802,7 +1833,11 @@ function App() {
 
             titleLines.forEach((line, idx) => {
               const displayLine = (idx === 0 && titleLines.length === 1) ? `「 ${line} 」` : line;
-              ctx.fillText(displayLine, cardPad + cardInnerPadX, curY);
+              const lineW = ctx.measureText(displayLine).width;
+              let lineX = cardPad + cardInnerPadX;
+              if (align === 'center') lineX = cardPad + (cardW - lineW) / 2;
+              else if (align === 'right') lineX = cardPad + cardW - cardInnerPadX - lineW;
+              ctx.fillText(displayLine, lineX, curY);
               curY += titleLineH;
             });
 
@@ -1820,7 +1855,12 @@ function App() {
               // Subtitle
               ctx.fillStyle = '#4B5563';
               ctx.font = `600 ${subFontSize}px sans-serif`;
-              ctx.fillText(`CITY GUIDE · ${subText}`, cardPad + cardInnerPadX, curY);
+              const fullSub = `CITY GUIDE · ${subText}`;
+              const subW = ctx.measureText(fullSub).width;
+              let subX = cardPad + cardInnerPadX;
+              if (align === 'center') subX = cardPad + (cardW - subW) / 2;
+              else if (align === 'right') subX = cardPad + cardW - cardInnerPadX - subW;
+              ctx.fillText(fullSub, subX, curY);
             }
             ctx.restore();
 
@@ -1840,13 +1880,16 @@ function App() {
             // 1. Slanted Sticker Tag
             if (tagText) {
               ctx.save();
-              ctx.translate(padX, curY);
-              ctx.rotate((-3.5 * Math.PI) / 180);
-
               ctx.font = `900 ${tagFontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
               const tagMetrics = ctx.measureText(tagText);
               const badgeW = tagMetrics.width + 30 * scale;
               const badgeH = tagFontSize * 1.8;
+              let badgeX = padX;
+              if (align === 'center') badgeX = (w - badgeW) / 2;
+              else if (align === 'right') badgeX = w - padX - badgeW;
+
+              ctx.translate(badgeX, curY);
+              ctx.rotate((-3.5 * Math.PI) / 180);
 
               ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
               ctx.shadowBlur = 14 * scale;
@@ -1876,13 +1919,16 @@ function App() {
               const lineMetrics = ctx.measureText(line);
               const ribbonW = lineMetrics.width + 28 * scale;
               const ribbonH = titleFontSize * 1.25;
+              let ribbonX = padX;
+              if (align === 'center') ribbonX = (w - ribbonW) / 2;
+              else if (align === 'right') ribbonX = w - padX - ribbonW;
 
               ctx.save();
               ctx.shadowColor = 'rgba(0, 0, 0, 0.25)';
               ctx.shadowBlur = 10 * scale;
               ctx.shadowOffsetY = 4 * scale;
 
-              drawRoundRect(ctx, padX, curY, ribbonW, ribbonH, 4 * scale);
+              drawRoundRect(ctx, ribbonX, curY, ribbonW, ribbonH, 4 * scale);
               ctx.fillStyle = '#FFE600'; // Fluorescent Yellow
               ctx.fill();
 
@@ -1890,7 +1936,7 @@ function App() {
               ctx.fillStyle = '#000000'; // Pure Black font
               ctx.textAlign = 'left';
               ctx.textBaseline = 'middle';
-              ctx.fillText(line, padX + 14 * scale, curY + ribbonH / 2);
+              ctx.fillText(line, ribbonX + 14 * scale, curY + ribbonH / 2);
               ctx.restore();
 
               curY += ribbonH + 8 * scale;
@@ -1903,11 +1949,14 @@ function App() {
               const subMetrics = ctx.measureText(subText);
               const subPillW = subMetrics.width + 28 * scale;
               const subPillH = subFontSize * 1.75;
+              let subPillX = padX;
+              if (align === 'center') subPillX = (w - subPillW) / 2;
+              else if (align === 'right') subPillX = w - padX - subPillW;
 
               ctx.save();
               ctx.shadowColor = 'rgba(0, 0, 0, 0.25)';
               ctx.shadowBlur = 8 * scale;
-              drawRoundRect(ctx, padX, curY, subPillW, subPillH, 6 * scale);
+              drawRoundRect(ctx, subPillX, curY, subPillW, subPillH, 6 * scale);
               ctx.fillStyle = 'rgba(17, 24, 39, 0.9)';
               ctx.fill();
 
@@ -1915,7 +1964,7 @@ function App() {
               ctx.fillStyle = '#FFFFFF';
               ctx.textAlign = 'left';
               ctx.textBaseline = 'middle';
-              ctx.fillText(subText, padX + 14 * scale, curY + subPillH / 2);
+              ctx.fillText(subText, subPillX + 14 * scale, curY + subPillH / 2);
               ctx.restore();
             }
           } else if (style === 'cinema') {
@@ -1989,8 +2038,11 @@ function App() {
               const tagMetrics = ctx.measureText(tagText);
               const pillW = tagMetrics.width + 38 * scale;
               const pillH = cinemaTagFontSize * 1.8;
+              let pillX = padX;
+              if (align === 'center') pillX = (w - pillW) / 2;
+              else if (align === 'right') pillX = w - padX - pillW;
 
-              drawRoundRect(ctx, padX, curY, pillW, pillH, 4 * scale);
+              drawRoundRect(ctx, pillX, curY, pillW, pillH, 4 * scale);
               ctx.fillStyle = '#002FA7'; // International Klein Blue
               ctx.fill();
 
@@ -2000,14 +2052,14 @@ function App() {
 
               // Amber dot
               ctx.beginPath();
-              ctx.arc(padX + 14 * scale, curY + pillH / 2, 4 * scale, 0, Math.PI * 2);
+              ctx.arc(pillX + 14 * scale, curY + pillH / 2, 4 * scale, 0, Math.PI * 2);
               ctx.fillStyle = '#FFB703'; // Warm amber dot
               ctx.fill();
 
               ctx.fillStyle = '#FFFFFF';
               ctx.textAlign = 'left';
               ctx.textBaseline = 'middle';
-              ctx.fillText(tagText, padX + 26 * scale, curY + pillH / 2);
+              ctx.fillText(tagText, pillX + 26 * scale, curY + pillH / 2);
               curY += pillH + tagMarginB;
             }
 
@@ -2022,7 +2074,11 @@ function App() {
             ctx.textBaseline = 'top';
 
             cinemaTitleLines.forEach(line => {
-              ctx.fillText(line, padX, curY);
+              const lineW = ctx.measureText(line).width;
+              let lineX = padX;
+              if (align === 'center') lineX = (w - lineW) / 2;
+              else if (align === 'right') lineX = w - padX - lineW;
+              ctx.fillText(line, lineX, curY);
               curY += titleLineH;
             });
             ctx.restore();
@@ -2031,16 +2087,21 @@ function App() {
             if (subText) {
               curY += subMarginT;
               ctx.save();
+              ctx.font = `600 ${cinemaSubFontSize}px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif`;
+              const subW = ctx.measureText(subText).width + 18 * scale;
+              let subX = padX;
+              if (align === 'center') subX = (w - subW) / 2;
+              else if (align === 'right') subX = w - padX - subW;
+
               ctx.fillStyle = '#0052FF';
-              ctx.fillRect(padX, curY + 2 * scale, 4 * scale, cinemaSubFontSize * 1.15);
+              ctx.fillRect(subX, curY + 2 * scale, 4 * scale, cinemaSubFontSize * 1.15);
 
               ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
               ctx.shadowBlur = 8 * scale;
               ctx.shadowOffsetY = 2 * scale;
               ctx.fillStyle = '#E2E8F0';
-              ctx.font = `600 ${cinemaSubFontSize}px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif`;
               ctx.textBaseline = 'top';
-              ctx.fillText(subText, padX + 14 * scale, curY);
+              ctx.fillText(subText, subX + 14 * scale, curY);
               ctx.restore();
             }
 
@@ -2072,13 +2133,16 @@ function App() {
             // 1. Tag: Pin / Tape with Coral Red background
             if (tagText) {
               ctx.save();
-              ctx.translate(padX, curY);
-              ctx.rotate((-3 * Math.PI) / 180);
-
               ctx.font = `900 ${collageTagFontSize}px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif`;
               const tagMetrics = ctx.measureText(tagText);
               const tagW = tagMetrics.width + 34 * scale;
               const tagHReal = collageTagFontSize * 1.85;
+              let tagX = padX;
+              if (align === 'center') tagX = (w - tagW) / 2;
+              else if (align === 'right') tagX = w - padX - tagW;
+
+              ctx.translate(tagX, curY);
+              ctx.rotate((-3 * Math.PI) / 180);
 
               ctx.shadowColor = 'rgba(0, 0, 0, 0.28)';
               ctx.shadowBlur = 12 * scale;
@@ -2109,12 +2173,15 @@ function App() {
               const lineMetrics = ctx.measureText(line);
               const bannerW = lineMetrics.width + 36 * scale;
               const bannerH = collageTitleFontSize * 1.25;
+              let bannerX = padX;
+              if (align === 'center') bannerX = (w - bannerW) / 2;
+              else if (align === 'right') bannerX = w - padX - bannerW;
 
               // Alternate tilt: line 0: +2°, line 1: -1.8°, line 2: +1.5°
               const angleDeg = idx % 2 === 0 ? 2 : -1.8;
               const angleRad = (angleDeg * Math.PI) / 180;
 
-              ctx.translate(padX, curY);
+              ctx.translate(bannerX, curY);
               ctx.rotate(angleRad);
 
               ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
@@ -2154,12 +2221,15 @@ function App() {
               const subMetrics = ctx.measureText(subText);
               const subPillW = subMetrics.width + 32 * scale;
               const subPillH = collageSubFontSize * 1.7;
+              let subPillX = padX;
+              if (align === 'center') subPillX = (w - subPillW) / 2;
+              else if (align === 'right') subPillX = w - padX - subPillW;
 
               ctx.shadowColor = 'rgba(0, 0, 0, 0.22)';
               ctx.shadowBlur = 10 * scale;
               ctx.shadowOffsetY = 3 * scale;
 
-              drawRoundRect(ctx, padX, curY, subPillW, subPillH, 6 * scale);
+              drawRoundRect(ctx, subPillX, curY, subPillW, subPillH, 6 * scale);
               ctx.fillStyle = '#FFFDF7'; // Milk white
               ctx.fill();
 
@@ -2172,7 +2242,7 @@ function App() {
               ctx.fillStyle = '#18181B';
               ctx.textAlign = 'left';
               ctx.textBaseline = 'middle';
-              ctx.fillText(subText, padX + 16 * scale, curY + subPillH / 2);
+              ctx.fillText(subText, subPillX + 16 * scale, curY + subPillH / 2);
               ctx.restore();
             }
           }
@@ -2210,12 +2280,18 @@ function App() {
               const pillW = Math.min(w - padX * 2, subMetrics.width + 36 * scale);
               const pillH = giantSubFontSize * 1.8;
               const pillY = position === 'bottom' ? h * 0.08 : h - pillH - 46 * scale;
+              let pillX = padX;
+              if (align === 'center') {
+                pillX = (w - pillW) / 2;
+              } else if (align === 'right') {
+                pillX = w - padX - pillW;
+              }
 
               ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
               ctx.shadowBlur = 12 * scale;
               ctx.shadowOffsetY = 4 * scale;
 
-              drawRoundRect(ctx, padX, pillY, pillW, pillH, pillH / 2);
+              drawRoundRect(ctx, pillX, pillY, pillW, pillH, pillH / 2);
               ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
               ctx.fill();
 
@@ -2227,7 +2303,7 @@ function App() {
               ctx.fillStyle = '#FFFFFF';
               ctx.textAlign = 'left';
               ctx.textBaseline = 'middle';
-              ctx.fillText(displaySub, padX + 18 * scale, pillY + pillH / 2);
+              ctx.fillText(displaySub, pillX + 18 * scale, pillY + pillH / 2);
               ctx.restore();
             }
           }
@@ -2990,33 +3066,49 @@ function App() {
 
               {/* 4. Title Customization Inputs */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                <div>
+                  <label style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>
+                    🏷️ 胶囊角标
+                  </label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={coverTag}
+                    onChange={(e) => setCoverTag(e.target.value)}
+                    placeholder="如：⚡ BREAKING 速报"
+                    style={{ width: '100%', fontSize: '0.78rem', padding: '0.35rem 0.5rem', boxSizing: 'border-box' }}
+                  />
+                </div>
+
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <div style={{ flex: 1 }}>
                     <label style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>
-                      🏷️ 胶囊角标
-                    </label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={coverTag}
-                      onChange={(e) => setCoverTag(e.target.value)}
-                      placeholder="如：⚡ BREAKING 速报"
-                      style={{ width: '100%', fontSize: '0.78rem', padding: '0.35rem 0.5rem', boxSizing: 'border-box' }}
-                    />
-                  </div>
-                  <div style={{ width: '105px' }}>
-                    <label style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>
-                      📍 文字位置
+                      ↕️ 纵向位置
                     </label>
                     <select
                       className="form-control"
                       value={coverPosition}
                       onChange={(e) => setCoverPosition(e.target.value)}
-                      style={{ width: '100%', fontSize: '0.78rem', padding: '0.35rem 0.25rem', boxSizing: 'border-box' }}
+                      style={{ width: '100%', fontSize: '0.78rem', padding: '0.35rem 0.35rem', boxSizing: 'border-box' }}
                     >
-                      <option value="bottom">⬇️ 底部（推荐）</option>
-                      <option value="center">⏺️ 居中</option>
                       <option value="top">⬆️ 顶部</option>
+                      <option value="center">⏺️ 居中</option>
+                      <option value="bottom">⬇️ 底部</option>
+                    </select>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>
+                      ↔️ 横向位置
+                    </label>
+                    <select
+                      className="form-control"
+                      value={coverAlign}
+                      onChange={(e) => setCoverAlign(e.target.value)}
+                      style={{ width: '100%', fontSize: '0.78rem', padding: '0.35rem 0.35rem', boxSizing: 'border-box' }}
+                    >
+                      <option value="left">⬅️ 居左</option>
+                      <option value="center">⏺️ 居中</option>
+                      <option value="right">➡️ 居右</option>
                     </select>
                   </div>
                 </div>
