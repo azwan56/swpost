@@ -2975,17 +2975,28 @@ function App() {
                         }
                       }}
                       style={{
-                        fontSize: '0.72rem',
-                        padding: '0.2rem 0.6rem',
-                        borderRadius: '12px',
-                        background: subjectOcclusion ? '#6366f1' : 'var(--border-color)',
-                        color: '#fff',
+                        fontSize: '0.74rem',
+                        padding: '0.22rem 0.65rem',
+                        borderRadius: '14px',
+                        background: subjectOcclusion ? '#6366f1' : 'var(--bg-card)',
+                        color: subjectOcclusion ? '#ffffff' : 'var(--text-primary)',
                         fontWeight: 700,
-                        border: 'none',
-                        cursor: 'pointer'
+                        border: subjectOcclusion ? '1.5px solid #6366f1' : '1.5px solid #cbd5e1',
+                        boxShadow: subjectOcclusion ? '0 2px 6px rgba(99, 102, 241, 0.3)' : '0 1px 2px rgba(0, 0, 0, 0.05)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        transition: 'all 0.2s ease'
                       }}
                     >
-                      {subjectOcclusion ? '已开启 ✓' : '已关闭'}
+                      <span style={{
+                        width: '6px',
+                        height: '6px',
+                        borderRadius: '50%',
+                        background: subjectOcclusion ? '#ffffff' : '#64748b'
+                      }} />
+                      {subjectOcclusion ? '已开启' : '已关闭'}
                     </button>
                   </div>
                 </div>
@@ -3015,17 +3026,28 @@ function App() {
                       className="btn"
                       onClick={() => setOutlineEnabled(!outlineEnabled)}
                       style={{
-                        fontSize: '0.7rem',
-                        padding: '0.15rem 0.5rem',
-                        borderRadius: '12px',
-                        background: outlineEnabled ? '#10b981' : 'var(--border-color)',
-                        color: '#fff',
+                        fontSize: '0.74rem',
+                        padding: '0.22rem 0.65rem',
+                        borderRadius: '14px',
+                        background: outlineEnabled ? '#10b981' : 'var(--bg-card)',
+                        color: outlineEnabled ? '#ffffff' : 'var(--text-primary)',
                         fontWeight: 700,
-                        border: 'none',
-                        cursor: 'pointer'
+                        border: outlineEnabled ? '1.5px solid #10b981' : '1.5px solid #cbd5e1',
+                        boxShadow: outlineEnabled ? '0 2px 6px rgba(16, 185, 129, 0.3)' : '0 1px 2px rgba(0, 0, 0, 0.05)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        transition: 'all 0.2s ease'
                       }}
                     >
-                      {outlineEnabled ? '已开启 ✓' : '已关闭'}
+                      <span style={{
+                        width: '6px',
+                        height: '6px',
+                        borderRadius: '50%',
+                        background: outlineEnabled ? '#ffffff' : '#64748b'
+                      }} />
+                      {outlineEnabled ? '已开启' : '已关闭'}
                     </button>
                   </div>
 
