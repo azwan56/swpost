@@ -1869,7 +1869,7 @@ function App() {
             if (tagText) {
               ctx.font = `bold ${tagFontSize}px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif`;
               const tagMetrics = ctx.measureText(tagText);
-              const pillW = tagMetrics.width + 30 * scale;
+              const pillW = tagMetrics.width + 36 * scale;
               const pillH = tagFontSize * 1.85;
               let pillX = padX;
               if (align === 'center') pillX = (w - pillW) / 2;
@@ -1882,7 +1882,7 @@ function App() {
               ctx.fillStyle = '#111111';
               ctx.textAlign = 'left';
               ctx.textBaseline = 'middle';
-              ctx.fillText(tagText, pillX + 15 * scale, curY + pillH / 2);
+              ctx.fillText(tagText, pillX + 18 * scale, curY + pillH / 2);
               curY += pillH + tagMarginB;
             }
 
@@ -1973,7 +1973,7 @@ function App() {
             if (tagText) {
               ctx.font = `700 ${tagFontSize}px sans-serif`;
               const tagMetrics = ctx.measureText(tagText);
-              const pillW = tagMetrics.width + 24 * scale;
+              const pillW = tagMetrics.width + 32 * scale;
               const pillH = tagFontSize * 1.7;
               let tagX = cardPad + cardInnerPadX;
               if (align === 'center') tagX = cardPad + (cardW - pillW) / 2;
@@ -1989,7 +1989,7 @@ function App() {
               ctx.fillStyle = '#B45309'; // Warm amber
               ctx.textAlign = 'left';
               ctx.textBaseline = 'middle';
-              ctx.fillText(tagText, tagX + 12 * scale, curY + pillH / 2);
+              ctx.fillText(tagText, tagX + 16 * scale, curY + pillH / 2);
               curY += pillH + 16 * scale;
             }
 
@@ -2050,7 +2050,7 @@ function App() {
               ctx.save();
               ctx.font = `900 ${tagFontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
               const tagMetrics = ctx.measureText(tagText);
-              const badgeW = tagMetrics.width + 30 * scale;
+              const badgeW = tagMetrics.width + 36 * scale;
               const badgeH = tagFontSize * 1.8;
               let badgeX = padX;
               if (align === 'center') badgeX = (w - badgeW) / 2;
@@ -2075,7 +2075,7 @@ function App() {
               ctx.fillStyle = '#FFFFFF';
               ctx.textAlign = 'left';
               ctx.textBaseline = 'middle';
-              ctx.fillText(tagText, 15 * scale, badgeH / 2);
+              ctx.fillText(tagText, 18 * scale, badgeH / 2);
               ctx.restore();
 
               curY += badgeH + 22 * scale;
@@ -2204,7 +2204,7 @@ function App() {
             if (tagText) {
               ctx.font = `bold ${cinemaTagFontSize}px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif`;
               const tagMetrics = ctx.measureText(tagText);
-              const pillW = tagMetrics.width + 38 * scale;
+              const pillW = tagMetrics.width + 46 * scale;
               const pillH = cinemaTagFontSize * 1.8;
               let pillX = padX;
               if (align === 'center') pillX = (w - pillW) / 2;
@@ -2302,9 +2302,11 @@ function App() {
             if (tagText) {
               ctx.save();
               ctx.font = `900 ${collageTagFontSize}px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif`;
-              const tagMetrics = ctx.measureText(tagText);
-              const tagW = tagMetrics.width + 34 * scale;
-              const tagHReal = collageTagFontSize * 1.85;
+              const fullTagStr = tagText.startsWith('📌') ? tagText : `📌 ${tagText}`;
+              const tagMetrics = ctx.measureText(fullTagStr);
+              const padH = Math.round(18 * scale);
+              const tagW = Math.round(tagMetrics.width + padH * 2);
+              const tagHReal = Math.round(collageTagFontSize * 1.95);
               let tagX = padX;
               if (align === 'center') tagX = (w - tagW) / 2;
               else if (align === 'right') tagX = w - padX - tagW;
@@ -2328,7 +2330,7 @@ function App() {
               ctx.fillStyle = '#FFFFFF';
               ctx.textAlign = 'left';
               ctx.textBaseline = 'middle';
-              ctx.fillText(`📌 ${tagText}`, 12 * scale, tagHReal / 2);
+              ctx.fillText(fullTagStr, padH, tagHReal / 2);
               ctx.restore();
 
               curY += tagHReal + tagMarginB + 10 * scale;
