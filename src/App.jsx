@@ -331,8 +331,125 @@ function App() {
     });
   };
 
-  // Run AI Portrait Segmentation for subject outline
-  const handleDetectSubjectOutline = async (targetIdx = coverImageIdx) => {
+  // High-Precision AI Subject Mask Refinement (人像抠图高精边缘平滑与智能收边算法)
+  // 1. Bicubic Upscaling: smooth scaling from 256x256 MediaPipe probability map to target canvas resolution
+  // 2. Anti-Aliasing Pre-blur: removes 256-grid piecewise blockiness and staircase artifacts
+  // 3. Fast Separable 1D Morphological Erosion (收边/Defringe): contracts boundary by ~1.5-2px to eliminate background halos (grass/stone/white fringe)
+  // 4. Hermite Smoothstep Sigmoid (low=0.38, high=0.60): guarantees 100% solid opacity inside the subject (no text ghosting)
+  // 5. Final Sub-Pixel Feathering: gives silky-smooth anti-aliased contours conforming to the person's true silhouette
+  const refineSubjectSegmentationMask = (sourceMask, targetW, targetH) => {
+    if (!sourceMask || !targetW || !targetH) return sourceMask;
+
+    try {
+      // 1. Upscale to target dimensions with high smoothing
+      const scaleCanvas = document.createElement('canvas');
+      scaleCanvas.width = targetW;
+      scaleCanvas.height = targetH;
+      const sctx = scaleCanvas.getContext('2d');
+      sctx.imageSmoothingEnabled = true;
+      sctx.imageSmoothingQuality = 'high';
+      sctx.drawImage(sourceMask, 0, 0, targetW, targetH);
+
+      // 2. Anti-aliasing pre-blur to round out 256-grid piecewise discontinuities
+      const scale = Math.max(0.7, targetW / 1000);
+      const blurCanvas = document.createElement('canvas');
+      blurCanvas.width = targetW;
+      blurCanvas.height = targetH;
+      const bctx = blurCanvas.getContext('2d');
+      bctx.filter = `blur(${Math.max(1.5, Math.round(2.0 * scale))}px)`;
+      bctx.drawImage(scaleCanvas, 0, 0);
+
+      const bData = bctx.getImageData(0, 0, targetW, targetH);
+      const bd = bData.data;
+
+      // Extract raw confidence channel into compact array
+      const rawA = new Uint8Array(targetW * targetH);
+      for (let i = 0; i < rawA.length; i++) {
+        rawA[i] = Math.max(bd[i * 4], bd[i * 4 + 3]);
+      }
+
+      // 3. Fast 1D Separable Erosion (Radius ~1.8*scale)
+      // Contracts boundary strictly inside subject to eliminate background fringe (grass/stone/white halo)
+      const rad = Math.max(1, Math.round(1.8 * scale));
+      const erodedH = new Uint8Array(targetW * targetH);
+      for (let y = 0; y < targetH; y++) {
+        const row = y * targetW;
+        for (let x = 0; x < targetW; x++) {
+          let min = rawA[row + x];
+          for (let dx = 1; dx <= rad; dx++) {
+            const xL = x >= dx ? x - dx : 0;
+            const xR = x + dx < targetW ? x + dx : targetW - 1;
+            if (rawA[row + xL] < min) min = rawA[row + xL];
+            if (rawA[row + xR] < min) min = rawA[row + xR];
+          }
+          erodedH[row + x] = min;
+        }
+      }
+
+      const eroded = new Uint8Array(targetW * targetH);
+      for (let y = 0; y < targetH; y++) {
+        const row = y * targetW;
+        for (let x = 0; x < targetW; x++) {
+          let min = erodedH[row + x];
+          for (let dy = 1; dy <= rad; dy++) {
+            const yT = y >= dy ? y - dy : 0;
+            const yB = y + dy < targetH ? y + dy : targetH - 1;
+            const rT = yT * targetW;
+            const rB = yB * targetW;
+            if (erodedH[rT + x] < min) min = erodedH[rT + x];
+            if (erodedH[rB + x] < min) min = erodedH[rB + x];
+          }
+          eroded[row + x] = min;
+        }
+      }
+
+      // 4. Hermite Smoothstep Sigmoid with Calibrated Range
+      const outCanvas = document.createElement('canvas');
+      outCanvas.width = targetW;
+      outCanvas.height = targetH;
+      const octx = outCanvas.getContext('2d');
+      const outData = octx.createImageData(targetW, targetH);
+      const od = outData.data;
+
+      const low = 0.38 * 255;  // ~97
+      const high = 0.60 * 255; // ~153
+
+      for (let i = 0; i < eroded.length; i++) {
+        const val = eroded[i];
+        let a = 0;
+        if (val >= high) {
+          a = 255;
+        } else if (val <= low) {
+          a = 0;
+        } else {
+          const t = (val - low) / (high - low);
+          a = Math.round(t * t * (3 - 2 * t) * 255);
+        }
+        const idx = i * 4;
+        od[idx] = 255;
+        od[idx + 1] = 255;
+        od[idx + 2] = 255;
+        od[idx + 3] = a;
+      }
+      octx.putImageData(outData, 0, 0);
+
+      // 5. Final Sub-pixel Feathering for vector-smooth edge anti-aliasing
+      const finalCanvas = document.createElement('canvas');
+      finalCanvas.width = targetW;
+      finalCanvas.height = targetH;
+      const fctx = finalCanvas.getContext('2d');
+      fctx.filter = `blur(${Math.max(0.8, 1.0 * scale)}px)`;
+      fctx.drawImage(outCanvas, 0, 0);
+
+      return finalCanvas;
+    } catch (e) {
+      console.warn('Mask refinement fallback:', e);
+      return sourceMask;
+    }
+  };
+
+  // Run AI Portrait Segmentation for subject outline and 3D occlusion
+  const handleDetectSubjectOutline = async (targetIdx = coverImageIdx, enableOutline = false) => {
     const target = uploadedImages[targetIdx] || uploadedImages[activeIdx] || uploadedImages[0];
     if (!target) return;
 
@@ -367,36 +484,10 @@ function App() {
           finished = true;
           clearTimeout(timer);
           if (results.segmentationMask) {
-            const mCanvas = document.createElement('canvas');
-            mCanvas.width = results.segmentationMask.width;
-            mCanvas.height = results.segmentationMask.height;
-            const mCtx = mCanvas.getContext('2d');
-            mCtx.drawImage(results.segmentationMask, 0, 0);
-
-            // Binarize & harden mask: ensure subject is 100% solid opaque (alpha=255) with smooth anti-aliased edge
-            const imgData = mCtx.getImageData(0, 0, mCanvas.width, mCanvas.height);
-            const d = imgData.data;
-            const low = 0.15 * 255;
-            const high = 0.35 * 255;
-            for (let i = 0; i < d.length; i += 4) {
-              const val = Math.max(d[i], d[i + 3]);
-              let alpha = 0;
-              if (val >= high) {
-                alpha = 255;
-              } else if (val <= low) {
-                alpha = 0;
-              } else {
-                const t = (val - low) / (high - low);
-                alpha = Math.round(t * t * (3 - 2 * t) * 255);
-              }
-              d[i] = 255;
-              d[i + 1] = 255;
-              d[i + 2] = 255;
-              d[i + 3] = alpha;
-            }
-            mCtx.putImageData(imgData, 0, 0);
-
-            resolve(mCanvas);
+            const targetW = img.naturalWidth || img.width || 1024;
+            const targetH = img.naturalHeight || img.height || 1024;
+            const refinedMask = refineSubjectSegmentationMask(results.segmentationMask, targetW, targetH);
+            resolve(refinedMask);
           } else {
             reject(new Error('No mask returned'));
           }
@@ -405,7 +496,9 @@ function App() {
       });
 
       setOutlineMasks(prev => ({ ...prev, [targetIdx]: maskCanvas }));
-      setOutlineEnabled(true);
+      if (enableOutline) {
+        setOutlineEnabled(true);
+      }
       setActivePreviewTab('cover');
     } catch (err) {
       console.error('Subject outline detection error:', err);
@@ -1503,7 +1596,7 @@ function App() {
               const sctx = strokeCanvas.getContext('2d');
 
               const strokeW = Math.max(4, Math.round((outlineWidth || 10) * scale));
-              const numSteps = 24;
+              const numSteps = 36;
 
               for (let i = 0; i < numSteps; i++) {
                 const angle = (i / numSteps) * Math.PI * 2;
@@ -1590,39 +1683,16 @@ function App() {
               pctx.imageSmoothingEnabled = true;
               pctx.imageSmoothingQuality = 'high';
 
-              // Ensure the mask is 100% SOLID and OPAQUE on the subject (prevent semi-transparent ghosting)
-              const solidMaskCanvas = document.createElement('canvas');
-              solidMaskCanvas.width = w;
-              solidMaskCanvas.height = h;
-              const smCtx = solidMaskCanvas.getContext('2d');
-              smCtx.imageSmoothingEnabled = true;
-              smCtx.imageSmoothingQuality = 'high';
-              smCtx.drawImage(outlineMask, 0, 0, w, h);
-
-              const maskData = smCtx.getImageData(0, 0, w, h);
-              const md = maskData.data;
-              const low = 0.15 * 255;  // ~38
-              const high = 0.35 * 255; // ~89
-              for (let i = 0; i < md.length; i += 4) {
-                const val = Math.max(md[i], md[i + 3]);
-                let a = 0;
-                if (val >= high) {
-                  a = 255;
-                } else if (val <= low) {
-                  a = 0;
-                } else {
-                  const t = (val - low) / (high - low);
-                  a = Math.round(t * t * (3 - 2 * t) * 255);
-                }
-                md[i] = 255;
-                md[i + 1] = 255;
-                md[i + 2] = 255;
-                md[i + 3] = a;
+              // Ensure the mask matches target canvas dimensions with high-precision anti-aliasing
+              let solidMaskCanvas;
+              if (outlineMask.width === w && outlineMask.height === h) {
+                solidMaskCanvas = outlineMask;
+              } else {
+                solidMaskCanvas = refineSubjectSegmentationMask(outlineMask, w, h);
               }
-              smCtx.putImageData(maskData, 0, 0);
 
               // Clip the 100% solid person cutout from the source image
-              pctx.drawImage(solidMaskCanvas, 0, 0);
+              pctx.drawImage(solidMaskCanvas, 0, 0, w, h);
               pctx.globalCompositeOperation = 'source-in';
               pctx.drawImage(img, 0, 0, w, h);
 
