@@ -275,11 +275,12 @@ function App() {
 
   // Cover Title Card States
   const [coverImageIdx, setCoverImageIdx] = useState(0);
-  const [coverStyle, setCoverStyle] = useState('magazine'); // 'magazine' | 'minimal' | 'sticker' | 'cinema' | 'collage'
+  const [coverStyle, setCoverStyle] = useState('giant'); // 'giant' | 'magazine' | 'minimal' | 'sticker' | 'cinema' | 'collage'
   const [coverTag, setCoverTag] = useState('⚡ BREAKING 速报');
-  const [coverTitle, setCoverTitle] = useState('3秒极限绝杀！');
+  const [coverTitle, setCoverTitle] = useState('氛围感彻底封神');
   const [coverSubtitle, setCoverSubtitle] = useState('2026 视觉精选指南 · 建议先马后看');
-  const [coverPosition, setCoverPosition] = useState('bottom'); // 'bottom' | 'center' | 'top'
+  const [coverPosition, setCoverPosition] = useState('top'); // 'bottom' | 'center' | 'top'
+  const [subjectOcclusion, setSubjectOcclusion] = useState(true); // 3D Depth Layering: title behind subject
   const [coverCandidates, setCoverCandidates] = useState([]);
   const [isGeneratingCoverTitles, setIsGeneratingCoverTitles] = useState(false);
   const [coverPreviewUri, setCoverPreviewUri] = useState('');
@@ -489,6 +490,7 @@ function App() {
           subtitle: coverSubtitle,
           style: coverStyle,
           position: coverPosition,
+          subjectOcclusion,
           outlineEnabled,
           outlineType,
           outlineColor,
@@ -509,7 +511,7 @@ function App() {
       isMounted = false;
       clearTimeout(timer);
     };
-  }, [uploadedImages, coverImageIdx, activeIdx, coverStyle, coverTag, coverTitle, coverSubtitle, coverPosition, outlineEnabled, outlineType, outlineColor, outlineWidth, outlineMasks, doodleStrokes]);
+  }, [uploadedImages, coverImageIdx, activeIdx, coverStyle, coverTag, coverTitle, coverSubtitle, coverPosition, subjectOcclusion, outlineEnabled, outlineType, outlineColor, outlineWidth, outlineMasks, doodleStrokes]);
 
   // Handle multiple photos upload
   const handlePhotosUpload = async (e) => {
@@ -869,6 +871,7 @@ function App() {
         subtitle: coverSubtitle,
         style: coverStyle,
         position: coverPosition,
+        subjectOcclusion,
         outlineEnabled,
         outlineType,
         outlineColor,
@@ -1398,13 +1401,14 @@ function App() {
     return lines;
   };
 
-  // Helper: Render high-impact Xiaohongshu Cover Title Card on Canvas (3 styles: magazine, minimal, sticker)
+  // Helper: Render high-impact Xiaohongshu Cover Title Card on Canvas (6 styles: giant, magazine, minimal, sticker, cinema, collage)
   const renderCoverCanvas = (imageSrc, {
     tag = '⚡ BREAKING 速报',
-    title = '3秒极限绝杀！',
-    subtitle = '2026 UTMB OCC 女子前三',
-    style = 'magazine',
-    position = 'bottom',
+    title = '氛围感彻底封神',
+    subtitle = '2026 视觉精选指南 · 建议先马后看',
+    style = 'giant',
+    position = 'top',
+    subjectOcclusion = true,
     outlineEnabled = false,
     outlineType = 'dashed',
     outlineColor = '#FFFFFF',
@@ -1438,8 +1442,9 @@ function App() {
 
           const scale = Math.max(0.65, w / 1000);
 
-          // 1.5. Draw Subject Hand-drawn Outline (if enabled)
-          if (outlineEnabled && outlineMask) {
+          // Helper: Draw Hand-drawn Outline around person
+          const renderOutline = () => {
+            if (!outlineEnabled || !outlineMask) return;
             try {
               const strokeCanvas = document.createElement('canvas');
               strokeCanvas.width = w;
@@ -1497,10 +1502,11 @@ function App() {
             } catch (maskErr) {
               console.warn('[renderCoverCanvas] Subject outline render error:', maskErr);
             }
-          }
+          };
 
-          // 1.8. Draw User Freehand Doodles
-          if (doodleStrokes && doodleStrokes.length > 0) {
+          // Helper: Draw User Freehand Doodles
+          const renderDoodles = () => {
+            if (!doodleStrokes || doodleStrokes.length === 0) return;
             doodleStrokes.forEach(st => {
               if (st.points && st.points.length > 1) {
                 ctx.save();
@@ -1520,7 +1526,31 @@ function App() {
                 ctx.restore();
               }
             });
+          };
+
+          // Helper: Subject Occlusion (Person cutout drawn on top of background & text)
+          const renderSubjectOcclusion = () => {
+            if (!subjectOcclusion || !outlineMask) return;
+            try {
+              const personCanvas = document.createElement('canvas');
+              personCanvas.width = w;
+              personCanvas.height = h;
+              const pctx = personCanvas.getContext('2d');
+              pctx.drawImage(outlineMask, 0, 0, w, h);
+              pctx.globalCompositeOperation = 'source-in';
+              pctx.drawImage(img, 0, 0, w, h);
+              ctx.drawImage(personCanvas, 0, 0);
+            } catch (occErr) {
+              console.warn('[renderCoverCanvas] Subject occlusion error:', occErr);
+            }
+          };
+
+          // If subjectOcclusion is NOT active, draw outline and doodles on base image directly
+          if (!subjectOcclusion) {
+            renderOutline();
+            renderDoodles();
           }
+
           const tagText = (tag || '').trim();
           const titleText = (title || '').trim();
           const subText = (subtitle || '').trim();
@@ -1529,13 +1559,87 @@ function App() {
           const subFontSize = Math.round(24 * scale);
           const tagFontSize = Math.round(22 * scale);
 
-          // Pre-calculate wrapped lines for title
+          // Pre-calculate wrapped lines for default styles
           ctx.font = `900 ${titleFontSize}px -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif`;
           const maxTitleWidth = style === 'minimal' ? w * 0.78 : (style === 'sticker' ? w * 0.82 : w * 0.86);
           const titleLines = wrapCanvasTextLines(ctx, titleText || '点击输入号召力大标题', maxTitleWidth);
 
           // 2. Render according to selected style
-          if (style === 'magazine') {
+          if (style === 'giant') {
+            // --- STYLE 6: 巨幕穿插风 (Giant Typography & Depth Occlusion) ---
+            // Main title occupies 30% - 50% of the canvas vertical screen area!
+            const padX = 44 * scale;
+
+            // 1. Split title into punchy lines (typically 2-3 lines of 2-5 characters)
+            let giantLines = [];
+            if (titleText.length <= 4) {
+              giantLines = [titleText];
+            } else if (titleText.length <= 8) {
+              const half = Math.ceil(titleText.length / 2);
+              giantLines = [titleText.slice(0, half), titleText.slice(half)];
+            } else if (titleText.length <= 15) {
+              const chunk = Math.ceil(titleText.length / 3);
+              giantLines = [
+                titleText.slice(0, chunk),
+                titleText.slice(chunk, chunk * 2),
+                titleText.slice(chunk * 2)
+              ].filter(Boolean);
+            } else {
+              giantLines = wrapCanvasTextLines(ctx, titleText, w * 0.88);
+            }
+
+            // 2. Dynamically calculate font size so the title text block occupies ~35% - 46% of canvas height (30%-50%)
+            const maxLineChars = Math.max(...giantLines.map(l => l.length), 1);
+            const targetBlockH = h * 0.38; // Target ~38% of canvas height
+            const maxFontByWidth = (w * 0.88) / maxLineChars;
+            const fontByTargetHeight = targetBlockH / (giantLines.length * 1.15);
+            const giantTitleFontSize = Math.round(Math.min(maxFontByWidth, fontByTargetHeight, 260 * scale));
+            const lineH = giantTitleFontSize * 1.15;
+            const totalTitleH = giantLines.length * lineH;
+
+            // Determine vertical position:
+            // 'top': upper 10%-48% of screen (behind head/shoulders)
+            // 'center': middle 28%-68% of screen
+            // 'bottom': lower half
+            let blockY = position === 'top' 
+              ? h * 0.12 
+              : (position === 'center' ? (h - totalTitleH) / 2 : h - totalTitleH - h * 0.12);
+
+            // Subtle cinematic gradient behind the giant text for maximum contrast
+            const scrimGrad = ctx.createLinearGradient(0, Math.max(0, blockY - 80 * scale), 0, blockY + totalTitleH + 80 * scale);
+            scrimGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+            scrimGrad.addColorStop(0.35, 'rgba(0, 0, 0, 0.45)');
+            scrimGrad.addColorStop(0.65, 'rgba(0, 0, 0, 0.45)');
+            scrimGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = scrimGrad;
+            ctx.fillRect(0, Math.max(0, blockY - 80 * scale), w, totalTitleH + 160 * scale);
+
+            // Render Giant Title Typography (Layer: Behind Subject)
+            ctx.save();
+            ctx.font = `900 ${giantTitleFontSize}px -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif`;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+
+            // Multi-tier deep soft shadow + clean subtle dark contour
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
+            ctx.shadowBlur = 24 * scale;
+            ctx.shadowOffsetY = 8 * scale;
+
+            let textY = blockY;
+            giantLines.forEach((line) => {
+              // Subtle dark contour
+              ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+              ctx.lineWidth = 3.5 * scale;
+              ctx.strokeText(line, padX, textY);
+
+              // Pure Chalk White main text
+              ctx.fillStyle = '#FFFFFF';
+              ctx.fillText(line, padX, textY);
+              textY += lineH;
+            });
+            ctx.restore();
+
+          } else if (style === 'magazine') {
             // --- STYLE 1: 杂志大片速报风 ---
             const padX = 52 * scale;
             const titleLineH = titleFontSize * 1.25;
@@ -2073,6 +2177,61 @@ function App() {
             }
           }
 
+          // 3. Subject Occlusion Layer (Foreground Cutout)
+          if (subjectOcclusion) {
+            renderSubjectOcclusion();
+            renderOutline();
+            renderDoodles();
+          }
+
+          // 4. Foreground UI / Masthead Overlays for Giant Style
+          if (style === 'giant') {
+            const padX = 44 * scale;
+            // Top Magazine Masthead
+            ctx.save();
+            ctx.font = `800 ${16 * scale}px -apple-system, BlinkMacSystemFont, sans-serif`;
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+            ctx.shadowBlur = 6 * scale;
+            ctx.fillText('EDITORIAL ISSUE // VOL.08', padX, 42 * scale);
+
+            ctx.textAlign = 'right';
+            ctx.fillStyle = '#FFE600'; // Fluorescent Yellow highlight
+            ctx.fillText('★ 3D DEPTH COVER', w - padX, 42 * scale);
+            ctx.restore();
+
+            // Bottom Subtitle & Tag Pill
+            if (subText || tagText) {
+              const displaySub = tagText ? `${tagText} ｜ ${subText || '2026 视觉精选指南'}` : subText;
+              const giantSubFontSize = Math.round(22 * scale);
+              ctx.save();
+              ctx.font = `700 ${giantSubFontSize}px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif`;
+              const subMetrics = ctx.measureText(displaySub);
+              const pillW = Math.min(w - padX * 2, subMetrics.width + 36 * scale);
+              const pillH = giantSubFontSize * 1.8;
+              const pillY = position === 'bottom' ? h * 0.08 : h - pillH - 46 * scale;
+
+              ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+              ctx.shadowBlur = 12 * scale;
+              ctx.shadowOffsetY = 4 * scale;
+
+              drawRoundRect(ctx, padX, pillY, pillW, pillH, pillH / 2);
+              ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+              ctx.fill();
+
+              ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+              ctx.lineWidth = 1 * scale;
+              ctx.stroke();
+
+              ctx.shadowColor = 'transparent';
+              ctx.fillStyle = '#FFFFFF';
+              ctx.textAlign = 'left';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(displaySub, padX + 18 * scale, pillY + pillH / 2);
+              ctx.restore();
+            }
+          }
+
           // Export as JPEG with 0.95 quality
           const watermarkedDataUri = canvas.toDataURL('image/jpeg', 0.95);
 
@@ -2481,24 +2640,31 @@ function App() {
                 </div>
               </div>
 
-              {/* 2. Choose 5 Styles */}
+              {/* 2. Choose 6 Styles */}
               <div style={{ marginBottom: '0.75rem' }}>
                 <label className="form-label" style={{ fontSize: '0.78rem', display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>
-                  2. 选择封面风格（5款不同版式）：
+                  2. 选择封面风格（6款不同版式）：
                 </label>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(88px, 1fr))', gap: '0.4rem' }}>
                   {[
+                    { id: 'giant', name: '巨幕穿插', desc: '30-50%大字·人物遮挡', icon: '💥' },
+                    { id: 'cinema', name: '电影大片', desc: '巨幅大字·克莱因蓝', icon: '🎬' },
+                    { id: 'collage', name: '撞色拼贴', desc: '牛油果绿·错落色块', icon: '🎨' },
                     { id: 'magazine', name: '杂志速报', desc: '渐变暗角·亮黄标', icon: '📸' },
                     { id: 'minimal', name: '极简质感', desc: '白底卡片·质感留白', icon: '🖼️' },
-                    { id: 'sticker', name: '潮酷贴纸', desc: '荧光纸带·斜角徽章', icon: '⚡' },
-                    { id: 'cinema', name: '电影大片', desc: '巨幅大字·克莱因蓝', icon: '🎬' },
-                    { id: 'collage', name: '撞色拼贴', desc: '牛油果绿·错落色块', icon: '🎨' }
+                    { id: 'sticker', name: '潮酷贴纸', desc: '荧光纸带·斜角徽章', icon: '⚡' }
                   ].map((s) => (
                     <button
                       key={s.id}
                       onClick={() => {
                         setCoverStyle(s.id);
                         setActivePreviewTab('cover');
+                        if (s.id === 'giant') {
+                          setSubjectOcclusion(true);
+                          if (!outlineMasks[coverImageIdx] && !isDetectingOutline) {
+                            handleDetectSubjectOutline(coverImageIdx);
+                          }
+                        }
                       }}
                       style={{
                         padding: '0.45rem 0.2rem',
@@ -2521,6 +2687,73 @@ function App() {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* 2.5 Subject Occlusion (3D Depth Layering) */}
+              <div style={{
+                marginBottom: '0.75rem',
+                padding: '0.6rem 0.75rem',
+                background: subjectOcclusion ? 'rgba(99, 102, 241, 0.08)' : 'var(--bg-main)',
+                borderRadius: '10px',
+                border: subjectOcclusion ? '1.5px solid #6366f1' : '1px solid var(--border-color)',
+                transition: 'all 0.2s ease'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '1.2rem' }}>👤</span>
+                    <div>
+                      <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        画面主人公遮挡大字
+                        <span style={{ fontSize: '0.65rem', background: '#6366f1', color: '#fff', padding: '1px 5px', borderRadius: '4px', fontWeight: 800 }}>
+                          3D穿插
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>
+                        超大标题位于人物身后，营造顶级大刊穿插视觉
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => {
+                        const next = !subjectOcclusion;
+                        setSubjectOcclusion(next);
+                        if (next && !outlineMasks[coverImageIdx] && !isDetectingOutline) {
+                          handleDetectSubjectOutline(coverImageIdx);
+                        }
+                      }}
+                      style={{
+                        fontSize: '0.72rem',
+                        padding: '0.2rem 0.6rem',
+                        borderRadius: '12px',
+                        background: subjectOcclusion ? '#6366f1' : 'var(--border-color)',
+                        color: '#fff',
+                        fontWeight: 700,
+                        border: 'none',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {subjectOcclusion ? '已开启 ✓' : '已关闭'}
+                    </button>
+                  </div>
+                </div>
+                {subjectOcclusion && !outlineMasks[coverImageIdx] && (
+                  <div style={{ marginTop: '0.45rem', padding: '0.35rem 0.5rem', background: 'rgba(99, 102, 241, 0.12)', borderRadius: '6px', fontSize: '0.68rem', color: '#6366f1', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>{isDetectingOutline ? '⏳ 正在提取人物主体蒙版...' : '💡 需先识别人像主体以开启遮挡'}</span>
+                    {!isDetectingOutline && (
+                      <button
+                        type="button"
+                        onClick={() => handleDetectSubjectOutline(coverImageIdx)}
+                        style={{ background: '#6366f1', color: '#fff', border: 'none', borderRadius: '4px', padding: '2px 8px', fontSize: '0.65rem', fontWeight: 700, cursor: 'pointer' }}
+                      >
+                        立即识别
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* 3. Subject Hand-drawn Outline & Doodle Section */}
@@ -2879,7 +3112,7 @@ function App() {
                     <div>
                       <h3 style={{ fontSize: '1rem', fontWeight: 700, display: 'inline-block', marginRight: '8px' }}>🏷️ 封面标题图效果</h3>
                       <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                        ({coverStyle === 'magazine' ? '📸 杂志速报风' : coverStyle === 'minimal' ? '🖼️ 极简质感风' : coverStyle === 'sticker' ? '⚡ 潮酷贴纸风' : coverStyle === 'cinema' ? '🎬 电影大片风' : '🎨 撞色拼贴风'})
+                        ({coverStyle === 'giant' ? '💥 巨幕穿插风' : coverStyle === 'cinema' ? '🎬 电影大片风' : coverStyle === 'collage' ? '🎨 撞色拼贴风' : coverStyle === 'magazine' ? '📸 杂志速报风' : coverStyle === 'minimal' ? '🖼️ 极简质感风' : '⚡ 潮酷贴纸风'})
                       </span>
                     </div>
                     <button 
