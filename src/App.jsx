@@ -741,7 +741,16 @@ function App() {
     if (targets.length === 0) return;
     
     setIsLoading(true);
-    const styleLabel = styleName === 'clay' ? '泥塑黏土化' : styleName === 'japanese-film' ? '日式胶片风' : '吉卜力卡通化';
+    const styleLabelMap = {
+      'cartoon': '吉卜力卡通化',
+      'clay': '泥塑黏土化',
+      'japanese-film': '日式胶片风',
+      'oriental-tale': '东方故事风（建筑）',
+      'baimiao': '传统白描风（建筑）',
+      'qianjiang': '浅绛山水风（风景）',
+      'mogu': '没骨画风（风景）'
+    };
+    const styleLabel = styleLabelMap[styleName] || '画风重绘';
     setAiOperationName(`豆包模型 ${styleLabel} (${targets.length}张)`);
     setErrorMsg('');
 
@@ -1335,6 +1344,14 @@ function App() {
           leftSubtitle = '日式胶片风 | Retro Film';
         } else if (styleName === 'polaroid') {
           leftSubtitle = '经典拍立得风 | Polaroid';
+        } else if (styleName === 'oriental-tale') {
+          leftSubtitle = '东方故事风 | Oriental Tale';
+        } else if (styleName === 'baimiao') {
+          leftSubtitle = '传统白描风 | Baimiao Line Art';
+        } else if (styleName === 'qianjiang') {
+          leftSubtitle = '浅绛山水风 | Qianjiang Landscape';
+        } else if (styleName === 'mogu') {
+          leftSubtitle = '没骨画风 | Boneless Painting';
         }
         
         const fontSizeMain = Math.round(watermarkHeight * 0.28);
@@ -2585,7 +2602,7 @@ function App() {
                 <span className="step-num">3</span>
                 <div className="step-content">
                   <strong>🎨 艺术重绘（变）</strong>
-                  <span>一键转换为治愈吉卜力、软萌泥塑或复古日式胶片风，保存高清原图。</span>
+                  <span>一键转换为东方故事、传统白描、浅绛山水、没骨画风或吉卜力等 7 款艺术画风，保存高清原图。</span>
                 </div>
               </div>
               <div className="workflow-step">
@@ -2781,39 +2798,188 @@ function App() {
           {/* 3. Image Style Control Tab */}
           {uploadedImages.length > 0 && activeImage && (
             <div className="card">
-              <h2 className="card-title">🎨 第三步：豆包 AI 画风重绘</h2>
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-                选择一种艺术画风，同时重绘所勾选的 **{uploadedImages.filter(img => img.selected !== false).length}** 张图片：
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
+                <h2 className="card-title" style={{ margin: 0 }}>🎨 第三步：豆包 AI 画风重绘</h2>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                  已勾选 <strong>{uploadedImages.filter(img => img.selected !== false).length}</strong> 张同步处理
+                </span>
+              </div>
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '0.85rem' }}>
+                选择一种艺术画风，一键将实拍照片转换为高清艺术插画与国风意境图：
               </p>
-              
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', marginBottom: '1rem' }}>
-                <button 
-                  className="btn btn-primary" 
-                  style={{ padding: '0.6rem 0.25rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #4f46e5, #6366f1)', border: 'none' }}
-                  onClick={() => handleAIStyleTransfer('cartoon')}
-                >
-                  🎨 治愈吉卜力
-                </button>
-                <button 
-                  className="btn btn-primary" 
-                  style={{ padding: '0.6rem 0.25rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #ec4899, #d946ef)', border: 'none' }}
-                  onClick={() => handleAIStyleTransfer('clay')}
-                >
-                  🧸 软萌泥塑风
-                </button>
-                <button 
-                  className="btn btn-primary" 
-                  style={{ padding: '0.6rem 0.25rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #d97706, #92400e)', border: 'none' }}
-                  onClick={() => handleAIStyleTransfer('japanese-film')}
-                >
-                  🎞️ 日式胶片风
-                </button>
+
+              {/* Category 1: 东方国风美学 */}
+              <div style={{ marginBottom: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '0.5rem' }}>
+                  <span style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    🇨🇳 东方国风意境
+                  </span>
+                  <span style={{ fontSize: '0.62rem', background: '#fef3c7', color: '#92400e', padding: '1px 6px', borderRadius: '10px', fontWeight: 700, border: '1px solid #fde68a' }}>
+                    全新上线
+                  </span>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '0.6rem' }}>
+                  {[
+                    {
+                      id: 'oriental-tale',
+                      icon: '🏮',
+                      name: '东方故事风格',
+                      scene: '建筑',
+                      sceneColor: '#b45309',
+                      sceneBg: '#fef3c7',
+                      highlight: '暖象牙白底 · 朱砂青蓝 · 诗意留白',
+                      desc: '原本硬朗的现代建筑被暖色调包裹，多了呼吸感与诗意。'
+                    },
+                    {
+                      id: 'baimiao',
+                      icon: '✒️',
+                      name: '白描画风格',
+                      scene: '建筑',
+                      sceneColor: '#374151',
+                      sceneBg: '#f3f4f6',
+                      highlight: '极简工笔墨线 · 书法韵律 · 减到极致',
+                      desc: '最简洁线条勾勒轮廓，无阴影无色彩，线条轻重顿挫更耐看。'
+                    },
+                    {
+                      id: 'qianjiang',
+                      icon: '🏔️',
+                      name: '浅绛山水风格',
+                      scene: '风景',
+                      sceneColor: '#047857',
+                      sceneBg: '#d1fae5',
+                      highlight: '水墨为骨 · 赭石花青 · 宁静淡泊',
+                      desc: '淡雅设色，文人画中最雅致的一支，清秀淡泊，宁静致远。'
+                    },
+                    {
+                      id: 'mogu',
+                      icon: '🪷',
+                      name: '没骨画风格',
+                      scene: '风景',
+                      sceneColor: '#0369a1',
+                      sceneBg: '#e0f2fe',
+                      highlight: '无墨线勾勒 · 晨雾柔和 · 温润色彩',
+                      desc: '直接用色彩渲染成形，中国画最温柔技法，如晨雾中的城市与山峦。'
+                    }
+                  ].map((s) => {
+                    const isActive = activeImage.activeStyle === s.id;
+                    return (
+                      <button
+                        key={s.id}
+                        type="button"
+                        className="btn"
+                        disabled={isLoading}
+                        onClick={() => handleAIStyleTransfer(s.id)}
+                        style={{
+                          textAlign: 'left',
+                          padding: '0.65rem 0.75rem',
+                          borderRadius: '12px',
+                          border: isActive ? '2px solid var(--xhs-red)' : '1px solid var(--border-color)',
+                          background: isActive ? 'var(--xhs-red-light)' : 'var(--bg-card)',
+                          boxShadow: isActive ? '0 3px 10px rgba(255, 36, 66, 0.12)' : '0 1px 3px rgba(0, 0, 0, 0.03)',
+                          cursor: isLoading ? 'not-allowed' : 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '4px',
+                          transition: 'all 0.2s ease',
+                          position: 'relative'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontSize: '1.2rem' }}>{s.icon}</span>
+                            <span style={{ fontSize: '0.82rem', fontWeight: 800, color: isActive ? 'var(--xhs-red)' : 'var(--text-primary)' }}>
+                              {s.name}
+                            </span>
+                          </div>
+                          <span style={{
+                            fontSize: '0.62rem',
+                            fontWeight: 700,
+                            padding: '1px 6px',
+                            borderRadius: '4px',
+                            background: s.sceneBg,
+                            color: s.sceneColor
+                          }}>
+                            {s.scene}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '0.68rem', fontWeight: 700, color: isActive ? 'var(--xhs-red)' : 'var(--text-primary)', marginTop: '2px' }}>
+                          {s.highlight}
+                        </div>
+                        <div style={{ fontSize: '0.64rem', color: 'var(--text-secondary)', lineHeight: 1.25 }}>
+                          {s.desc}
+                        </div>
+                        {isActive && (
+                          <div style={{
+                            position: 'absolute',
+                            top: '6px',
+                            right: '6px',
+                            fontSize: '0.65rem',
+                            background: 'var(--xhs-red)',
+                            color: '#fff',
+                            borderRadius: '50%',
+                            width: '14px',
+                            height: '14px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: 900
+                          }}>
+                            ✓
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Category 2: 经典流行画风 */}
+              <div style={{ marginBottom: '0.85rem' }}>
+                <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.45rem' }}>
+                  ✨ 经典潮流画风
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.5rem' }}>
+                  {[
+                    { id: 'cartoon', icon: '🎨', name: '治愈吉卜力', desc: '宫崎骏水彩手绘光影', gradient: 'linear-gradient(135deg, #4f46e5, #6366f1)' },
+                    { id: 'clay', icon: '🧸', name: '软萌泥塑风', desc: '3D橡皮泥立体质感', gradient: 'linear-gradient(135deg, #ec4899, #d946ef)' },
+                    { id: 'japanese-film', icon: '🎞️', name: '日式胶片风', desc: '富士颗粒复古色调', gradient: 'linear-gradient(135deg, #d97706, #92400e)' }
+                  ].map((s) => {
+                    const isActive = activeImage.activeStyle === s.id;
+                    return (
+                      <button
+                        key={s.id}
+                        type="button"
+                        className="btn btn-primary"
+                        disabled={isLoading}
+                        onClick={() => handleAIStyleTransfer(s.id)}
+                        style={{
+                          padding: '0.55rem 0.4rem',
+                          borderRadius: '10px',
+                          background: s.gradient,
+                          border: isActive ? '2px solid #fff' : 'none',
+                          boxShadow: isActive ? '0 0 0 2px var(--xhs-red)' : 'none',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          gap: '2px',
+                          cursor: isLoading ? 'not-allowed' : 'pointer',
+                          position: 'relative'
+                        }}
+                      >
+                        <span style={{ fontSize: '1.1rem' }}>{s.icon}</span>
+                        <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#fff' }}>{s.name}</span>
+                        <span style={{ fontSize: '0.62rem', color: 'rgba(255, 255, 255, 0.85)', lineHeight: 1.15 }}>{s.desc}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               {activeImage.styledSrc && (
                 <button
                   className="btn btn-secondary"
-                  style={{ width: '100%', fontSize: '0.8rem', padding: '0.5rem' }}
+                  style={{ width: '100%', fontSize: '0.8rem', padding: '0.5rem', marginTop: '0.25rem' }}
                   onClick={restoreToOriginal}
                 >
                   ↩️ 恢复原图

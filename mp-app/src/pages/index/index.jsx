@@ -850,7 +850,16 @@ export default function Index() {
     if (!activeImage) return;
     
     setIsLoading(true);
-    const styleLabel = styleName === 'clay' ? '泥塑黏土化' : styleName === 'japanese-film' ? '日式胶片风' : '吉卜力卡通化';
+    const styleLabelMap = {
+      'cartoon': '吉卜力卡通化',
+      'clay': '泥塑黏土化',
+      'japanese-film': '日式胶片风',
+      'oriental-tale': '东方故事风（建筑）',
+      'baimiao': '传统白描风（建筑）',
+      'qianjiang': '浅绛山水风（风景）',
+      'mogu': '没骨画风（风景）'
+    };
+    const styleLabel = styleLabelMap[styleName] || '画风重绘';
     setAiOperationName(`豆包模型 ${styleLabel}`);
     setErrorMsg('');
 
@@ -1057,7 +1066,7 @@ export default function Index() {
                 <Text className="step-num">3</Text>
                 <View className="step-content">
                   <Text className="step-content-title">🎨 艺术重绘（变）</Text>
-                  <Text className="step-content-desc">一键转换为治愈吉卜力、软萌泥塑或复古日式胶片风，并可保存高清原图。</Text>
+                  <Text className="step-content-desc">一键转换为东方故事、传统白描、浅绛山水、没骨画风或吉卜力等 7 款艺术画风，并可保存高清原图。</Text>
                 </View>
               </View>
             </View>
@@ -1267,33 +1276,65 @@ export default function Index() {
                 </View>
               )}
 
-              {/* Styled Picker Cards */}
-              <View className="style-picker-grid">
-                <View 
-                  className={`style-picker-card ${activeImage.activeStyle === 'cartoon' ? 'active' : ''}`}
-                  onClick={() => handleAIStyleTransfer('cartoon')}
-                >
-                  <Text className="style-picker-emoji">🎨</Text>
-                  <Text className="style-picker-name">吉卜力</Text>
-                  <Text className="style-picker-desc">温暖动漫色彩</Text>
+              {/* Category 1: 东方国风美学 */}
+              <View style={{ marginBottom: '12px' }}>
+                <View style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', marginBottom: '8px', gap: '6px' }}>
+                  <Text style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--text-primary)' }}>🇨🇳 东方国风意境</Text>
+                  <Text style={{ fontSize: '10px', background: '#fef3c7', color: '#92400e', padding: '1px 6px', borderRadius: '8px', fontWeight: 'bold' }}>NEW</Text>
                 </View>
-                
-                <View 
-                  className={`style-picker-card ${activeImage.activeStyle === 'clay' ? 'active' : ''}`}
-                  onClick={() => handleAIStyleTransfer('clay')}
-                >
-                  <Text className="style-picker-emoji">🧸</Text>
-                  <Text className="style-picker-name">泥塑黏土</Text>
-                  <Text className="style-picker-desc">软萌立体质感</Text>
+                <View style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+                  {[
+                    { id: 'oriental-tale', emoji: '🏮', name: '东方故事', scene: '建筑', desc: '暖象牙白·朱砂青蓝' },
+                    { id: 'baimiao', emoji: '✒️', name: '白描画风', scene: '建筑', desc: '书法骨力·极简留白' },
+                    { id: 'qianjiang', emoji: '🏔️', name: '浅绛山水', scene: '风景', desc: '水墨为骨·赭石花青' },
+                    { id: 'mogu', emoji: '🪷', name: '没骨画风', scene: '风景', desc: '色彩晕染·晨雾柔和' }
+                  ].map(s => (
+                    <View 
+                      key={s.id}
+                      className={`style-picker-card ${activeImage.activeStyle === s.id ? 'active' : ''}`}
+                      onClick={() => handleAIStyleTransfer(s.id)}
+                    >
+                      <View style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                        <Text className="style-picker-emoji">{s.emoji}</Text>
+                        <Text style={{ fontSize: '10px', color: '#666', background: 'rgba(0,0,0,0.05)', padding: '1px 4px', borderRadius: '4px' }}>{s.scene}</Text>
+                      </View>
+                      <Text className="style-picker-name">{s.name}</Text>
+                      <Text className="style-picker-desc">{s.desc}</Text>
+                    </View>
+                  ))}
                 </View>
-                
-                <View 
-                  className={`style-picker-card ${activeImage.activeStyle === 'japanese-film' ? 'active' : ''}`}
-                  onClick={() => handleAIStyleTransfer('japanese-film')}
-                >
-                  <Text className="style-picker-emoji">🎞️</Text>
-                  <Text className="style-picker-name">日式胶片</Text>
-                  <Text className="style-picker-desc">复古胶片颗粒</Text>
+              </View>
+
+              {/* Category 2: 经典流行画风 */}
+              <View>
+                <Text style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-secondary)', marginBottom: '8px', display: 'block' }}>✨ 经典潮流画风</Text>
+                <View className="style-picker-grid">
+                  <View 
+                    className={`style-picker-card ${activeImage.activeStyle === 'cartoon' ? 'active' : ''}`}
+                    onClick={() => handleAIStyleTransfer('cartoon')}
+                  >
+                    <Text className="style-picker-emoji">🎨</Text>
+                    <Text className="style-picker-name">吉卜力</Text>
+                    <Text className="style-picker-desc">温暖动漫色彩</Text>
+                  </View>
+                  
+                  <View 
+                    className={`style-picker-card ${activeImage.activeStyle === 'clay' ? 'active' : ''}`}
+                    onClick={() => handleAIStyleTransfer('clay')}
+                  >
+                    <Text className="style-picker-emoji">🧸</Text>
+                    <Text className="style-picker-name">泥塑黏土</Text>
+                    <Text className="style-picker-desc">软萌立体质感</Text>
+                  </View>
+                  
+                  <View 
+                    className={`style-picker-card ${activeImage.activeStyle === 'japanese-film' ? 'active' : ''}`}
+                    onClick={() => handleAIStyleTransfer('japanese-film')}
+                  >
+                    <Text className="style-picker-emoji">🎞️</Text>
+                    <Text className="style-picker-name">日式胶片</Text>
+                    <Text className="style-picker-desc">复古胶片颗粒</Text>
+                  </View>
                 </View>
               </View>
             </View>

@@ -197,7 +197,17 @@ async function copyAndModifyExif(originalBase64, styledBase64, styleName, modelN
     }
 
     // Convert style names to English ASCII to prevent unicode serialization issues in some EXIF readers
-    const styleLabelEn = styleName === 'clay' ? 'Claymation' : styleName === 'japanese-film' ? 'Japanese Retro Film' : styleName === 'polaroid' ? 'Polaroid' : 'Ghibli Anime';
+    const styleLabelMap = {
+      'clay': 'Claymation',
+      'japanese-film': 'Japanese Retro Film',
+      'polaroid': 'Polaroid',
+      'cartoon': 'Ghibli Anime',
+      'oriental-tale': 'Oriental Tale',
+      'baimiao': 'Traditional Baimiao',
+      'qianjiang': 'Qianjiang Landscape',
+      'mogu': 'Boneless Painting (Mogu)'
+    };
+    const styleLabelEn = styleLabelMap[styleName] || 'Oriental Art';
 
     // Write custom tags/markers in English ASCII
     exifObj["0th"] = exifObj["0th"] || {};
@@ -444,6 +454,14 @@ app.post('/api/ai/style-transfer', async (req, res) => {
       } else if (style === 'polaroid') {
         prompt = '将参考图重新渲染成经典的宝利来拍立得相机照片风格，1:1正方形构图，复古怀旧色调，画面四周带有拍立得经典的标志性宽大白色实体卡纸相框边框（底部相框较宽），富士胶片质感，温暖复古，Classic Polaroid photo with a signature white border frame, 1:1 square crop, vintage analog film look';
         size = '2048x2048';
+      } else if (style === 'oriental-tale') {
+        prompt = '将参考图重新渲染为东方故事艺术插画风格，建筑插画，温暖质朴的象牙白宣纸底色质感，保留原图建筑的主体特征与色彩倾向但调整为朱砂红、石青蓝等东方典雅传统色调，画面具有大面积优雅留白与呼吸感，原本硬朗的现代建筑被温润典雅的暖色调包裹，富有诗意与东方故事意境，东方美学建筑插画，高清细腻原画品质';
+      } else if (style === 'baimiao') {
+        prompt = '将参考图转换成极其纯粹的中国传统白描画风格，建筑白描线条艺术，纯净宣纸白底，纯黑墨线勾勒，极简工笔白描，只用最简洁洗练的线条勾勒轮廓与结构，无阴影，无色彩，大量素雅留白，线条具有书法般顿挫起伏的韵律感与骨力，轻重顿挫，减到极致更耐看的极简东方线条美学，高清原画品质';
+      } else if (style === 'qianjiang') {
+        prompt = '将参考图重新渲染为典雅的中国传统浅绛山水画风格，文人水墨山水画，以水墨线条为骨架，淡雅设色，主色调为古朴赭石、淡花青与清润淡墨，山水林木清秀淡泊，大面积留白与气韵流动，文人画中最雅致的一支，宁静致远，绢本古风质感，高清艺术原画品质';
+      } else if (style === 'mogu') {
+        prompt = '将参考图重新渲染为中国传统没骨画风格（没骨彩墨），不用粗重墨线勾勒，直接用色彩与水分自然渲染成形，轮廓温润柔和，如同透过晨雾看到的城市与风景，色调清润淡雅，彩墨交融晕染，画面朦胧唯美，充满江南水乡般的诗意与呼吸感，中国画中最温柔细腻的技法，高清原画品质';
       }
 
       const volcPayload = {
@@ -504,6 +522,14 @@ app.post('/api/ai/style-transfer', async (req, res) => {
       dashscopePrompt = '重新渲染成经典的日式复古胶片风，柔和自然的色调，清冷干净的画面，微弱的胶片颗粒感，色彩饱和度适中，温暖怀旧，富士胶片质感，高清原画品质，Japanese retro film style, soft and warm vintage colors, natural lighting, analog film grain, high quality';
     } else if (style === 'polaroid') {
       dashscopePrompt = '重新渲染成经典的宝利来拍立得相机照片风格，1:1正方形构图，复古怀旧色调，画面四周带有拍立得经典的标志性宽大白色实体卡纸相框边框（底部相框较宽），富士胶片质感，温暖复古，Classic Polaroid photo with a signature white border frame, 1:1 square crop, vintage analog film look';
+    } else if (style === 'oriental-tale') {
+      dashscopePrompt = '东方故事风格建筑插画，暖象牙白纸张底色，保留建筑特征，朱砂红、石青蓝等典雅东方色调，大量留白，硬朗建筑包裹温润诗意暖色调，东方传统国风美学，高清插画';
+    } else if (style === 'baimiao') {
+      dashscopePrompt = '中国传统工笔白描建筑画风，极简纯黑墨线，纯白宣纸底色，无阴影无色彩，大量留白，书法韵律线条，轻重顿挫，极简东方线条艺术，高清';
+    } else if (style === 'qianjiang') {
+      dashscopePrompt = '中国传统浅绛山水画风格，水墨为骨，淡雅设色，赭石、花青、淡墨，清秀淡泊，文人画气韵，宁静致远，绢本水墨晕染，高清国风山水';
+    } else if (style === 'mogu') {
+      dashscopePrompt = '中国传统没骨画风格，不用墨线勾勒，直接用色彩与水墨渲染成形，轮廓柔和朦胧，如晨雾中的景致，温柔淡雅彩墨晕染，诗意东方美学，高清原画';
     }
 
     let payload = {
