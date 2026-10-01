@@ -256,11 +256,81 @@ function App() {
   // API base path — adapts automatically to Vite's base setting
   const API_BASE = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
 
+  // WeChat Environment & Device Detection
+  const isWeChat = typeof navigator !== 'undefined' && /micromessenger/i.test(navigator.userAgent);
+
   // App States
   const [showWelcome, setShowWelcome] = useState(true);
   const [uploadedImages, setUploadedImages] = useState([]); // [{ id, file, src, styledSrc, activeStyle }]
   const [activeIdx, setActiveIdx] = useState(0); 
   const [activeTab, setActiveTab] = useState('style'); // 'style', 'ai-copy'
+
+  // WeChat Save Modal & Toast States
+  const [wechatSaveModal, setWechatSaveModal] = useState({
+    isOpen: false,
+    imageSrc: '',
+    title: '',
+    fileName: ''
+  });
+  const [toastMsg, setToastMsg] = useState('');
+
+  const showToast = (msg, duration = 2500) => {
+    setToastMsg(msg);
+    setTimeout(() => {
+      setToastMsg((cur) => (cur === msg ? '' : cur));
+    }, duration);
+  };
+
+  const copyToClipboard = async (text, successMsg = '文案已复制到剪贴板！') => {
+    if (!text) return;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        showToast(successMsg);
+        return;
+      }
+    } catch (e) {
+      console.warn('Clipboard API failed, using fallback', e);
+    }
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      textarea.style.pointerEvents = 'none';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      const success = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      if (success) {
+        showToast(successMsg);
+      } else {
+        prompt('请长按复制文案：', text);
+      }
+    } catch (err) {
+      console.error('Fallback copy failed', err);
+      prompt('请长按复制文案：', text);
+    }
+  };
+
+  const handleSaveOrDownloadImage = (imageSrc, fileName, title = '高清图片') => {
+    if (!imageSrc) return;
+    if (isWeChat) {
+      setWechatSaveModal({
+        isOpen: true,
+        imageSrc,
+        title,
+        fileName
+      });
+    } else {
+      const link = document.createElement('a');
+      link.href = imageSrc;
+      link.download = fileName;
+      link.click();
+      showToast('已开始下载文件！');
+    }
+  };
   
   // AI Copywriting States
   const [copyStyle, setCopyStyle] = useState('探店'); // '探店', '旅行心情', '自定义'
@@ -1033,10 +1103,8 @@ function App() {
         exif: target.exif
       });
 
-      const link = document.createElement('a');
-      link.href = dataUri;
-      link.download = `xhs-cover-${coverStyle}-${Date.now()}.jpg`;
-      link.click();
+      const fileName = `xhs-cover-${coverStyle}-${Date.now()}.jpg`;
+      handleSaveOrDownloadImage(dataUri, fileName, `小红书封面 (${coverStyle})`);
     } catch (err) {
       console.error('Download cover image failed:', err);
       setErrorMsg('导出封面标题图失败，请重试');
@@ -1294,14 +1362,13 @@ function App() {
       ctx.textAlign = 'right';
       ctx.fillText('你拍照 · 我生文 · 记录美好生活', width - 40, currentY);
 
-      // Trigger download
-      const link = document.createElement('a');
-      link.href = canvas.toDataURL('image/jpeg', 0.95);
-      link.download = `shantie-ai-report-${Date.now()}.jpg`;
-      link.click();
+      // Trigger download or save modal
+      const dataUri = canvas.toDataURL('image/jpeg', 0.95);
+      const fileName = `shantie-ai-report-${Date.now()}.jpg`;
+      handleSaveOrDownloadImage(dataUri, fileName, '智能图文分析报告');
     } catch (err) {
       console.error('Failed to export report card:', err);
-      alert('导出报告卡片失败，请重试');
+      showToast('导出报告卡片失败，请重试');
     } finally {
       setIsLoading(false);
       setAiOperationName('');
@@ -2563,10 +2630,8 @@ function App() {
     if (!activeImage) return;
 
     const displaySrc = activeImage.styledSrc || activeImage.src;
-    const link = document.createElement('a');
-    link.href = displaySrc;
-    link.download = `xhs-style-${activeImage.activeStyle || 'original'}-${activeIdx + 1}-${Date.now()}.jpg`;
-    link.click();
+    const fileName = `xhs-style-${activeImage.activeStyle || 'original'}-${activeIdx + 1}-${Date.now()}.jpg`;
+    handleSaveOrDownloadImage(displaySrc, fileName, `风格化效果图 (${activeImage.activeStyle || '原图'})`);
   };
 
   const activeImage = uploadedImages[activeIdx];
@@ -2666,9 +2731,17 @@ function App() {
             </div>
           )}
 
-          {/* 1. Upload Section */}
           <div className="card">
             <h2 className="card-title">📸 上传照片 (最多4张)</h2>
+
+            {/* WeChat EXIF Guide Tip Banner */}
+            <div className="wechat-exif-banner">
+              <div className="wechat-exif-badge">💡 微信选图小技巧</div>
+              <div className="wechat-exif-desc">
+                从微信相册选取照片时，请在右下角勾选<strong>【原图】</strong>，完整保留拍摄时间与GPS地点，AI才能精准提炼真实打卡文案！
+              </div>
+            </div>
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
               {uploadedImages.length < 4 && (
                 <div 
@@ -3518,7 +3591,7 @@ function App() {
         </section>
 
         {/* Right Preview & Result Column */}
-        <section className="preview-panel" style={{ flex: '1.4' }}>
+        <section id="preview-panel-anchor" className="preview-panel" style={{ flex: '1.4' }}>
           {uploadedImages.length > 0 && activeImage ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%' }}>
 
@@ -3561,20 +3634,41 @@ function App() {
               {activePreviewTab === 'cover' ? (
                 /* Cover Title Card Preview Card */
                 <div className="card" style={{ padding: '1rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                     <div>
                       <h3 style={{ fontSize: '1rem', fontWeight: 700, display: 'inline-block', marginRight: '8px' }}>🏷️ 封面标题图效果</h3>
                       <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                         ({coverStyle === 'giant' ? '💥 巨幕穿插风' : coverStyle === 'cinema' ? '🎬 电影大片风' : coverStyle === 'collage' ? '🎨 撞色拼贴风' : coverStyle === 'magazine' ? '📸 杂志速报风' : coverStyle === 'minimal' ? '🖼️ 极简质感风' : '⚡ 潮酷贴纸风'})
                       </span>
                     </div>
-                    <button 
-                      className="btn btn-primary" 
-                      style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #ff2442, #ff4d66)', border: 'none', fontWeight: '600' }} 
-                      onClick={downloadCoverImage}
-                    >
-                      📥 导出高清封面图
-                    </button>
+                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                      <button 
+                        className="btn btn-secondary" 
+                        style={{ padding: '0.4rem 0.65rem', fontSize: '0.75rem', fontWeight: '600' }} 
+                        onClick={() => {
+                          if (coverPreviewUri) {
+                            setWechatSaveModal({
+                              isOpen: true,
+                              imageSrc: coverPreviewUri,
+                              title: `小红书封面图 (${coverStyle})`,
+                              fileName: `xhs-cover-${coverStyle}-${Date.now()}.jpg`
+                            });
+                          } else {
+                            downloadCoverImage();
+                          }
+                        }}
+                        title="在微信内长按即可保存到手机相册"
+                      >
+                        📱 微信长按保存
+                      </button>
+                      <button 
+                        className="btn btn-primary" 
+                        style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #ff2442, #ff4d66)', border: 'none', fontWeight: '600' }} 
+                        onClick={downloadCoverImage}
+                      >
+                        📥 导出高清封面图
+                      </button>
+                    </div>
                   </div>
                   
                   <div style={{ position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#0e1117', borderRadius: 'var(--radius-md)', overflow: 'hidden', padding: '0.75rem', minHeight: '380px' }}>
@@ -3616,15 +3710,35 @@ function App() {
               ) : (
                 /* Image Preview Card (Style Transfer) */
                 <div className="card" style={{ padding: '1rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                     <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>🖼️ 风格化效果预览</h3>
-                    <button 
-                      className="btn btn-primary" 
-                      style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #ff2442, #ff4d66)', border: 'none', fontWeight: '600' }} 
-                      onClick={downloadActiveImage}
-                    >
-                      📥 导出当前图片
-                    </button>
+                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                      <button 
+                        className="btn btn-secondary" 
+                        style={{ padding: '0.4rem 0.65rem', fontSize: '0.75rem', fontWeight: '600' }} 
+                        onClick={() => {
+                          const src = activeImage?.styledSrc || activeImage?.src;
+                          if (src) {
+                            setWechatSaveModal({
+                              isOpen: true,
+                              imageSrc: src,
+                              title: `风格化效果图 (${activeImage?.activeStyle || '原图'})`,
+                              fileName: `xhs-style-${activeImage?.activeStyle || 'original'}-${activeIdx + 1}-${Date.now()}.jpg`
+                            });
+                          }
+                        }}
+                        title="在微信内长按即可保存到手机相册"
+                      >
+                        📱 微信长按保存
+                      </button>
+                      <button 
+                        className="btn btn-primary" 
+                        style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #ff2442, #ff4d66)', border: 'none', fontWeight: '600' }} 
+                        onClick={downloadActiveImage}
+                      >
+                        📥 导出当前图片
+                      </button>
+                    </div>
                   </div>
                   
                   <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#f3f4f6', borderRadius: 'var(--radius-md)', overflow: 'hidden', padding: '1rem', minHeight: '300px' }}>
@@ -3666,9 +3780,8 @@ function App() {
                           style={{ padding: '0.2rem 0.5rem', fontSize: '0.7rem' }}
                           onClick={() => {
                             const opt = generatedCopyOptions[activeCopyOptionIdx];
-                            const fullText = `【${opt.title}】\n\n${opt.body}\n\n${opt.tags}`;
-                            navigator.clipboard.writeText(fullText);
-                            alert('文案已复制！');
+                            const fullText = `【${aiTitle || opt.title}】\n\n${aiBody || opt.body}\n\n${opt.tags}`;
+                            copyToClipboard(fullText, '✅ 文案已复制到剪贴板！');
                           }}
                         >
                           📋 复制文案
@@ -3755,14 +3868,143 @@ function App() {
               )}
             </div>
           ) : (
-            <div className="card" style={{ width: '100%', height: '350px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6c757d' }}>
-              <span>🌅 请先在左侧上传并选择照片进行风格重绘</span>
+            <div className="card" style={{ width: '100%', height: '240px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6c757d', textAlign: 'center', padding: '1rem' }}>
+              <span>🌅 请先上传并勾选照片，开启艺术画风重绘与封面排版</span>
             </div>
           )}
         </section>
 
       </main>
 
+      {/* Mobile Floating Bottom Action Bar */}
+      {uploadedImages.length > 0 && (
+        <div className="mobile-bottom-bar">
+          <button 
+            type="button"
+            className="mobile-bar-btn secondary"
+            onClick={() => {
+              const nextTab = activePreviewTab === 'cover' ? 'styled' : 'cover';
+              setActivePreviewTab(nextTab);
+              document.getElementById('preview-panel-anchor')?.scrollIntoView({ behavior: 'smooth' });
+            }}
+          >
+            {activePreviewTab === 'cover' ? '🖼️ 看画风' : '🏷️ 看封面'}
+          </button>
+
+          <button 
+            type="button"
+            className="mobile-bar-btn secondary"
+            onClick={() => {
+              document.getElementById('preview-panel-anchor')?.scrollIntoView({ behavior: 'smooth' });
+            }}
+          >
+            👁️ 效果预览
+          </button>
+
+          {generatedCopyOptions.length > 0 && (
+            <button 
+              type="button"
+              className="mobile-bar-btn secondary"
+              onClick={() => {
+                const opt = generatedCopyOptions[activeCopyOptionIdx];
+                const fullText = `【${aiTitle || opt.title}】\n\n${aiBody || opt.body}\n\n${opt.tags}`;
+                copyToClipboard(fullText, '✅ 文案已复制到剪贴板！');
+              }}
+              title="一键复制文案"
+            >
+              📋 复制文案
+            </button>
+          )}
+
+          <button 
+            type="button"
+            className="mobile-bar-btn primary"
+            onClick={() => {
+              if (activePreviewTab === 'cover') {
+                downloadCoverImage();
+              } else {
+                downloadActiveImage();
+              }
+            }}
+          >
+            📸 导出保存
+          </button>
+        </div>
+      )}
+
+      {/* WeChat Long-Press Save Modal */}
+      {wechatSaveModal.isOpen && (
+        <div 
+          className="wechat-modal-overlay" 
+          onClick={() => setWechatSaveModal({ isOpen: false, imageSrc: '', title: '', fileName: '' })}
+        >
+          <div className="wechat-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="wechat-modal-header">
+              <div className="wechat-modal-title">
+                <span>📱 {wechatSaveModal.title || '保存图片'}</span>
+              </div>
+              <button 
+                type="button"
+                className="wechat-modal-close" 
+                onClick={() => setWechatSaveModal({ isOpen: false, imageSrc: '', title: '', fileName: '' })}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="wechat-save-tip-pulse">
+              <span className="tip-hand">👆</span>
+              <span>长按下方图片，选择<strong>【保存到手机 / 存储图像】</strong></span>
+            </div>
+
+            <div className="wechat-modal-img-wrapper">
+              <img 
+                src={wechatSaveModal.imageSrc} 
+                alt={wechatSaveModal.title} 
+                className="wechat-modal-img"
+              />
+            </div>
+
+            <div className="wechat-modal-actions">
+              {generatedCopyOptions.length > 0 && (
+                <button 
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ flex: 1, padding: '0.6rem', fontSize: '0.82rem', fontWeight: 600 }}
+                  onClick={() => {
+                    const opt = generatedCopyOptions[activeCopyOptionIdx];
+                    const fullText = `【${aiTitle || opt.title}】\n\n${aiBody || opt.body}\n\n${opt.tags}`;
+                    copyToClipboard(fullText, '✅ 文案已复制！可直接粘贴发布');
+                  }}
+                >
+                  📋 复制发文文案
+                </button>
+              )}
+              <button 
+                type="button"
+                className="btn btn-secondary"
+                style={{ flex: 1, padding: '0.6rem', fontSize: '0.82rem', fontWeight: 600 }}
+                onClick={() => {
+                  const link = document.createElement('a');
+                  link.href = wechatSaveModal.imageSrc;
+                  link.download = wechatSaveModal.fileName || `xhs-${Date.now()}.jpg`;
+                  link.click();
+                  showToast('已开始下载文件！');
+                }}
+              >
+                📥 直接下载文件
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Toast Notification */}
+      {toastMsg && (
+        <div className="toast-notification">
+          {toastMsg}
+        </div>
+      )}
 
     </div>
   );
