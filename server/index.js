@@ -622,6 +622,83 @@ app.post('/api/ai/style-transfer', async (req, res) => {
   }
 });
 
+/**
+ * Helper to call Volcano Engine (Ark) Chat Completions with automatic model fallback.
+ * Uses deepseek-v4-flash-ga-260731 by default, falling back to doubao-seed-2-1-turbo-260628 and doubao-seed-2-1-pro-260628.
+ */
+async function callVolcanoChat(apiKey, messages, options = {}) {
+  const envModel = process.env.VOLC_CHAT_MODEL;
+  const defaultModels = [
+    'deepseek-v4-flash-ga-260731',
+    'doubao-seed-2-1-turbo-260628',
+    'doubao-seed-2-1-pro-260628'
+  ];
+  const candidateModels = envModel
+    ? [envModel, ...defaultModels.filter(m => m !== envModel)]
+    : defaultModels;
+
+  let lastError = null;
+
+  for (const model of candidateModels) {
+    try {
+      console.log(`[Volcano Chat] Requesting model: ${model}...`);
+      const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          ...options
+        })
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errText}`);
+      }
+
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content?.trim();
+      if (!content) {
+        throw new Error('Empty response content from model');
+      }
+
+      console.log(`[Volcano Chat] Model ${model} succeeded (${content.length} chars).`);
+      return content;
+    } catch (err) {
+      console.warn(`[Volcano Chat] Model ${model} failed: ${err.message}. Trying next candidate...`);
+      lastError = err;
+    }
+  }
+
+  throw new Error(`All Volcano chat models failed. Last error: ${lastError?.message}`);
+}
+
+/**
+ * Helper to parse JSON from AI model response cleanly, handling markdown code blocks and wrapping text.
+ */
+function parseModelJson(rawText) {
+  if (!rawText) throw new Error('Cannot parse empty text as JSON');
+  let cleaned = rawText.trim();
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
+  }
+  try {
+    return JSON.parse(cleaned);
+  } catch (err) {
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      const extracted = cleaned.substring(firstBrace, lastBrace + 1);
+      return JSON.parse(extracted);
+    }
+    throw err;
+  }
+}
+
 // AI Copywriting Generator
 app.post('/api/ai/generate-copy', async (req, res) => {
   try {
@@ -825,18 +902,7 @@ ${combinedDescriptions}
     }
 
     console.log(`Generating Xiaohongshu copy for style [${style}] and keywords [${keywords}] using Volcano...`);
-    const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${volcKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: 'deepseek-v4-flash-260425',
-        messages: [
-          {
-            role: 'user',
-            content: `你是一个小红书运营大师与视觉策划博主。请根据用户选择的风格和给出的关键词，为用户生成3款不同情感路线的小红书爆款文案。每一款文案必须包含：
+    const promptContent = `你是一个小红书运营大师与视觉策划博主。请根据用户选择的风格和给出的关键词，为用户生成3款不同情感路线的小红书爆款文案。每一款文案必须包含：
 1. 【爆款标题】（包含吸睛的Emoji，字数在20字以内）
 2. 【笔记正文】（包含Emoji排版，空行，内容活泼，适合社交分享，字数在150字左右）
 3. 【推荐话题标签】（例如 #日常碎片 #我的日常）
@@ -878,29 +944,17 @@ ${visualGuidance}
     }
   ]
 }
-注意：JSON 中的字段值应当是完全纯净的文案本身，千万不要在其内容中夹杂 '【爆款标题】'、'【笔记正文】' 或 '【推荐话题标签】' 这些起提示作用的汉字字符标签！不要输出任何 Markdown 格式包裹（如 \`\`\`json 标记），不要输出任何解释性话语，直接返回纯 JSON 对象。`
-          }
-        ]
-      })
-    });
+注意：JSON 中的字段值应当是完全纯净的文案本身，千万不要在其内容中夹杂 '【爆款标题】'、'【笔记正文】' 或 '【推荐话题标签】' 这些起提示作用的汉字字符标签！不要输出任何 Markdown 格式包裹（如 \`\`\`json 标记），不要输出任何解释性话语，直接返回纯 JSON 对象。`;
 
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Volcano API failed: ${response.status} - ${errText}`);
-    }
-
-    const data = await response.json();
-    let text = data.choices?.[0]?.message?.content?.trim();
-    if (!text) {
-      throw new Error('Empty response from Volcano model.');
-    }
-
-    if (text.startsWith('```')) {
-      text = text.replace(/^```(?:json)?\n/, '').replace(/\n```$/, '').trim();
-    }
+    const text = await callVolcanoChat(volcKey, [
+      {
+        role: 'user',
+        content: promptContent
+      }
+    ]);
 
     try {
-      const parsed = JSON.parse(text);
+      const parsed = parseModelJson(text);
       let coverOptions = parsed.coverOptions || [];
       if (!Array.isArray(coverOptions) || coverOptions.length === 0) {
         const firstOpt = parsed.options?.[0] || {};
@@ -999,35 +1053,14 @@ ${visualDescriptions ? `- 画面视觉细节：${visualDescriptions.slice(0, 150
   ]
 }`;
 
-    const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${volcKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: 'deepseek-v4-flash-260425',
-        messages: [
-          {
-            role: 'user',
-            content: prompt
-          }
-        ]
-      })
-    });
+    const text = await callVolcanoChat(volcKey, [
+      {
+        role: 'user',
+        content: prompt
+      }
+    ]);
 
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Volcano API error: ${response.status} - ${errText}`);
-    }
-
-    const data = await response.json();
-    let text = data.choices?.[0]?.message?.content?.trim();
-    if (text.startsWith('```')) {
-      text = text.replace(/^```(?:json)?\n/, '').replace(/\n```$/, '').trim();
-    }
-
-    const parsed = JSON.parse(text);
+    const parsed = parseModelJson(text);
     res.json({
       coverOptions: parsed.coverOptions || []
     });
