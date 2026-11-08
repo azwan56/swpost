@@ -5,8 +5,13 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   // In production, set VITE_BASE_PATH=/swpost/ for subpath deployment
-  base: process.env.VITE_BASE_PATH || '/',
+  base: process.env.FIGMA_PUBLIC_URL || process.env.VITE_BASE_PATH || '/',
   server: {
+    ...(process.env.FIGMA ? {
+      port: Number(process.env.PORT) || 5173,
+      host: process.env.FIGMA_DEV_SERVER_HOST || '0.0.0.0',
+      strictPort: true,
+    } : {}),
     proxy: {
       '/api': {
         target: 'http://localhost:5001',

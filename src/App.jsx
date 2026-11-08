@@ -263,7 +263,9 @@ function App() {
   const [showWelcome, setShowWelcome] = useState(true);
   const [uploadedImages, setUploadedImages] = useState([]); // [{ id, file, src, styledSrc, activeStyle }]
   const [activeIdx, setActiveIdx] = useState(0); 
-  const [activeTab, setActiveTab] = useState('style'); // 'style', 'ai-copy'
+  const [activeTab, setActiveTab] = useState('photos'); // 'photos' | 'style' | 'cover' | 'copy'
+  const [coverSubTab, setCoverSubTab] = useState('template'); // 'template' | 'text' | 'depth'
+  const [h5FrameMode, setH5FrameMode] = useState(true); // Mobile H5 shell preview on desktop
 
   // WeChat Save Modal & Toast States
   const [wechatSaveModal, setWechatSaveModal] = useState({
@@ -765,6 +767,11 @@ function App() {
     if (newImages.length > 0) {
       setUploadedImages(prev => [...prev, ...newImages]);
       setActiveIdx(uploadedImages.length);
+      setShowWelcome(false);
+      if (activeTab === 'photos' && uploadedImages.length === 0) {
+        setActiveTab('style');
+      }
+      showToast(`✨ 已添加 ${newImages.length} 张照片`);
     }
 
     if (fileInputRef.current) {
@@ -773,6 +780,151 @@ function App() {
     if (e.target) {
       e.target.value = '';
     }
+  };
+
+  // Generate a high-resolution sample portrait/travel photo + mask + EXIF + sample AI copy for 1-tap H5 Demo
+  const handleLoadDemoPhoto = () => {
+    const w = 900;
+    const h = 1200;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+
+    // 1. Sunset golden hour sky gradient
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, h);
+    skyGrad.addColorStop(0, '#1e3a5f');
+    skyGrad.addColorStop(0.35, '#d97757');
+    skyGrad.addColorStop(0.65, '#f6bd60');
+    skyGrad.addColorStop(1, '#2b2d42');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, w, h);
+
+    // 2. Glowing sun disk
+    const sunGrad = ctx.createRadialGradient(w * 0.72, h * 0.34, 10, w * 0.72, h * 0.34, 240);
+    sunGrad.addColorStop(0, 'rgba(255, 248, 220, 0.95)');
+    sunGrad.addColorStop(0.4, 'rgba(255, 183, 3, 0.45)');
+    sunGrad.addColorStop(1, 'rgba(255, 183, 3, 0)');
+    ctx.fillStyle = sunGrad;
+    ctx.fillRect(0, 0, w, h);
+
+    // 3. Distant layered mountains
+    ctx.fillStyle = 'rgba(61, 64, 91, 0.75)';
+    ctx.beginPath();
+    ctx.moveTo(0, h * 0.66);
+    ctx.lineTo(w * 0.25, h * 0.52);
+    ctx.lineTo(w * 0.55, h * 0.61);
+    ctx.lineTo(w * 0.85, h * 0.49);
+    ctx.lineTo(w, h * 0.57);
+    ctx.lineTo(w, h);
+    ctx.lineTo(0, h);
+    ctx.closePath();
+    ctx.fill();
+
+    // 4. Foreground hiker/traveler portrait silhouette & mask for 3D depth occlusion demo
+    const maskCanvas = document.createElement('canvas');
+    maskCanvas.width = w;
+    maskCanvas.height = h;
+    const mctx = maskCanvas.getContext('2d');
+
+    const drawTraveler = (c, isMask) => {
+      c.save();
+      c.fillStyle = isMask ? '#FFFFFF' : '#1b263b';
+      // Head & sun hat
+      c.beginPath();
+      c.arc(w * 0.48, h * 0.42, 68, 0, Math.PI * 2);
+      c.fill();
+      c.beginPath();
+      c.ellipse(w * 0.48, h * 0.41, 118, 26, -0.08, 0, Math.PI * 2);
+      c.fill();
+      // Shoulders & jacket torso
+      c.beginPath();
+      c.moveTo(w * 0.31, h);
+      c.quadraticCurveTo(w * 0.33, h * 0.53, w * 0.48, h * 0.50);
+      c.quadraticCurveTo(w * 0.64, h * 0.53, w * 0.67, h);
+      c.closePath();
+      c.fill();
+      // Camera held up
+      c.beginPath();
+      c.roundRect(w * 0.54, h * 0.54, 86, 62, 12);
+      c.fill();
+      if (!isMask) {
+        // Warm rim light accent on traveler
+        c.strokeStyle = 'rgba(255, 214, 102, 0.75)';
+        c.lineWidth = 5;
+        c.stroke();
+      }
+      c.restore();
+    };
+
+    drawTraveler(ctx, false);
+    drawTraveler(mctx, true);
+
+    const demoDataUrl = canvas.toDataURL('image/jpeg', 0.92);
+    const demoExif = {
+      dateTime: '2026:10:05 17:42:18',
+      device: 'iPhone 16 Pro',
+      make: 'Apple',
+      gps: {
+        lat: '31.2304',
+        lon: '121.4737',
+        latRef: 'N',
+        lonRef: 'E'
+      }
+    };
+
+    const demoItem = {
+      id: 'demo-h5-photo',
+      file: null,
+      src: demoDataUrl,
+      styledSrc: null,
+      activeStyle: null,
+      selected: true,
+      width: w,
+      height: h,
+      exif: demoExif
+    };
+
+    const sampleCopy = [
+      {
+        title: '日落时分的浪漫出逃🌅这组巨幕封面直接封神！',
+        body: '趁着周末好天气去追了一场橘子海日落✨\n随手拍的原图用 AI 一键生成了 3D 穿插大字封面，氛围感直接拉满！\n\n📍 打卡坐标：31.2304°N, 121.4737°E\n📷 拍摄设备：iPhone 16 Pro 原图直出\n💡 拍照机位建议：下午五点半逆光侧拍，开启人像描边超出片！',
+        tags: '#小红书爆款封面 #落日氛围感 #旅行随手拍 #你拍照我生文 #OOTD穿搭'
+      },
+      {
+        title: '被问爆的胶片感封面！3秒搞定大刊排版📸',
+        body: '不用熬夜修图排版啦！上传原图自动读取拍摄时间与地点，无论是东方国风浅绛山水，还是杂志速报风封面，一键就能搞定～',
+        tags: '#拍照姿势不重样 #手机摄影技巧 #小红书排版 #周末去哪儿'
+      },
+      {
+        title: '秋日山野徒步日记⛰️把风景装进画里',
+        body: '山野的风吹散了一周的疲惫，用白描与没骨画风重绘照片，每一帧都像东方美学的诗意留白。',
+        tags: '#徒步丈量世界 #户外运动日常 #国风插画 #治愈系风景'
+      }
+    ];
+
+    const sampleCovers = [
+      { tag: '⚡ 落日速报', title: '氛围感彻底封神', subtitle: '2026 追光机位指南 · 建议先马后看' },
+      { tag: '📸 机位实测', title: '橘子海日落大片', subtitle: 'iPhone 原图直出 · 零门槛出片' },
+      { tag: '🏔️ 周末出逃', title: '旷野追风日记', subtitle: '31.23°N 城市边缘私藏观景台' }
+    ];
+
+    setUploadedImages([demoItem]);
+    setActiveIdx(0);
+    setCoverImageIdx(0);
+    setOutlineMasks({ 0: maskCanvas });
+    setGeneratedCopyOptions(sampleCopy);
+    setActiveCopyOptionIdx(0);
+    setAiTitle(sampleCopy[0].title);
+    setAiBody(`${sampleCopy[0].body}\n\n${sampleCopy[0].tags}`);
+    setCoverCandidates(sampleCovers);
+    setCoverTag(sampleCovers[0].tag);
+    setCoverTitle(sampleCovers[0].title);
+    setCoverSubtitle(sampleCovers[0].subtitle);
+    setShowWelcome(false);
+    setActivePreviewTab('cover');
+    setActiveTab('cover');
+    showToast('✨ 已载入示例大片与 3D 人像蒙版，可自由切换体验！');
   };
 
   // Remove uploaded image
@@ -798,6 +950,7 @@ function App() {
     setCoverCandidates([]);
     setCoverPreviewUri('');
     setCoverImageIdx(0);
+    setActiveTab('photos');
   };
 
   // Call Doubao style transfer model via backend (supporting multi-image parallel processing)
@@ -2635,1291 +2788,1247 @@ function App() {
   };
 
   const activeImage = uploadedImages[activeIdx];
+  const selectedBatchCount = uploadedImages.filter(img => img.selected !== false).length;
+
+  const styleNameBadgeMap = {
+    'oriental-tale': '🏮 东方故事风',
+    'baimiao': '✒️ 传统白描风',
+    'qianjiang': '🏔️ 浅绛山水风',
+    'mogu': '🪷 没骨画风',
+    'cartoon': '🎨 治愈吉卜力',
+    'clay': '🧸 软萌泥塑风',
+    'japanese-film': '🎞️ 日式胶片风'
+  };
+
+  const coverStyleBadgeMap = {
+    'giant': '💥 巨幕穿插风',
+    'cinema': '🎬 电影大片风',
+    'collage': '🎨 撞色拼贴风',
+    'magazine': '📸 杂志速报风',
+    'minimal': '🖼️ 极简质感风',
+    'sticker': '⚡ 潮酷贴纸风'
+  };
 
   if (showWelcome) {
     return (
-      <div className="welcome-screen">
-        <div className="welcome-container">
-          <div className="welcome-logo-section">
-            <img src={`${(import.meta.env.BASE_URL || '/').replace(/\/$/, '')}/logo.jpg`} alt="闪贴 AI" className="welcome-logo-img" />
+      <div className={`h5-outer-backdrop ${h5FrameMode ? 'framed-mode' : 'full-mode'}`}>
+        {/* Hidden global file input so Welcome Screen can trigger upload directly */}
+        <input
+          type="file"
+          ref={fileInputRef}
+          style={{ display: 'none' }}
+          accept="image/*"
+          multiple
+          onChange={handlePhotosUpload}
+        />
+
+        <div className="h5-device-shell welcome-shell">
+          {/* iOS / H5 Top Status Pill Bar */}
+          <div className="h5-status-bar">
+            <span className="h5-status-time">SHANTIE AI</span>
+            <div className="h5-dynamic-island">
+              <span className="island-dot" />
+              <span>小红书爆款图文 H5</span>
+            </div>
+            <button
+              type="button"
+              className="h5-frame-toggle-mini"
+              onClick={() => setH5FrameMode(!h5FrameMode)}
+              title="切换手机壳/全屏视图"
+            >
+              {h5FrameMode ? '📲 全屏' : '📱 手机壳'}
+            </button>
           </div>
-          <h1 className="welcome-title">你拍照我生文</h1>
-          <p className="welcome-subtitle">AI 智能画风转换与爆款文案助手</p>
-          
-          <div className="welcome-workflow">
-            <h3 className="workflow-title" style={{ textAlign: 'center', justifyContent: 'center' }}>✨ 四步体验：拍、生、变、标！</h3>
-            <div className="workflow-steps">
-              <div className="workflow-step">
-                <span className="step-num">1</span>
-                <div className="step-content">
-                  <strong>📸 上传照片（拍）</strong>
-                  <span>随手添加 1-4 张照片，系统自动解析并提取 EXIF 拍摄时间与 GPS 地点。</span>
-                </div>
+
+          <div className="h5-welcome-scroll">
+            {/* Hero Visual Banner */}
+            <div className="h5-welcome-hero">
+              <div className="h5-hero-glow" />
+              <div className="h5-logo-wrap">
+                <img
+                  src={`${(import.meta.env.BASE_URL || '/').replace(/\/$/, '')}/logo.jpg`}
+                  alt="闪贴 AI"
+                  className="h5-welcome-logo"
+                />
+                <span className="h5-brand-tag">✨ 2026 视觉创作工作台</span>
               </div>
-              <div className="workflow-step">
-                <span className="step-num">2</span>
-                <div className="step-content">
-                  <strong>✍️ 一键生成（生）</strong>
-                  <span>AI 结合画面时空智能撰写 3 款不同风格的社交爆款文案，复制即可去发文！</span>
-                </div>
+
+              <h1 className="h5-welcome-title">你拍照 · 我生文</h1>
+              <p className="h5-welcome-subtitle">
+                随手拍 1–4 张日常照片，AI 自动解析拍摄时空，一键生成国风插画、3D 穿插巨幕封面与高赞笔记文案
+              </p>
+
+              {/* Floating Feature Pills */}
+              <div className="h5-feature-pills">
+                <span className="h5-pill">📍 EXIF 真实坐标</span>
+                <span className="h5-pill">🏮 7大艺术画风</span>
+                <span className="h5-pill">👤 3D人物穿插大字</span>
+                <span className="h5-pill">🔥 爆款笔记生成</span>
               </div>
-              <div className="workflow-step">
-                <span className="step-num">3</span>
-                <div className="step-content">
-                  <strong>🎨 艺术重绘（变）</strong>
-                  <span>一键转换为东方故事、传统白描、浅绛山水、没骨画风或吉卜力等 7 款艺术画风，保存高清原图。</span>
-                </div>
+            </div>
+
+            {/* 4-Step H5 Bento Grid */}
+            <div className="h5-steps-section">
+              <div className="h5-section-header">
+                <span className="h5-section-title">⚡ 四步成片工作流</span>
+                <span className="h5-section-sub">拍 · 变 · 标 · 生</span>
               </div>
-              <div className="workflow-step">
-                <span className="step-num">4</span>
-                <div className="step-content">
-                  <strong>🏷️ 标题大片（标）</strong>
-                  <span>智能提炼高号召力大字，提供杂志速报、极简质感、潮酷贴纸 3 种爆款封面！</span>
+
+              <div className="h5-bento-grid">
+                <div className="h5-bento-card">
+                  <div className="h5-bento-top">
+                    <span className="h5-bento-icon">📸</span>
+                    <span className="h5-bento-step">STEP 01</span>
+                  </div>
+                  <h3>原图时空解析</h3>
+                  <p>支持 1–4 张连传，自动提取拍摄时间、机型与 GPS 打卡坐标</p>
+                </div>
+
+                <div className="h5-bento-card">
+                  <div className="h5-bento-top">
+                    <span className="h5-bento-icon">🎨</span>
+                    <span className="h5-bento-step">STEP 02</span>
+                  </div>
+                  <h3>东方与潮流重绘</h3>
+                  <p>东方故事、白描、浅绛山水、没骨画及吉卜力/泥塑/胶片 7 大画风</p>
+                </div>
+
+                <div className="h5-bento-card">
+                  <div className="h5-bento-top">
+                    <span className="h5-bento-icon">🏷️</span>
+                    <span className="h5-bento-step">STEP 03</span>
+                  </div>
+                  <h3>3D 巨幕标题大片</h3>
+                  <p>AI 识别人像前景遮挡大字，6 款大刊封面版式 + 自由荧光手绘涂鸦</p>
+                </div>
+
+                <div className="h5-bento-card">
+                  <div className="h5-bento-top">
+                    <span className="h5-bento-icon">✍️</span>
+                    <span className="h5-bento-step">STEP 04</span>
+                  </div>
+                  <h3>多模态爆款文案</h3>
+                  <p>融合画面细节与真实地点，生成 3 套小红书高互动标题、正文与标签</p>
                 </div>
               </div>
             </div>
           </div>
-          
-          <button className="btn btn-primary welcome-enter-btn" onClick={() => setShowWelcome(false)}>
-            开始体验 🚀
-          </button>
+
+          {/* Sticky Bottom Launch Dock */}
+          <div className="h5-welcome-dock">
+            <button
+              type="button"
+              className="h5-cta-primary"
+              onClick={() => {
+                setShowWelcome(false);
+                setActiveTab('photos');
+              }}
+            >
+              <span>🚀 进入 H5 创作工作台</span>
+            </button>
+            <div className="h5-welcome-subactions">
+              <button
+                type="button"
+                className="h5-cta-ghost"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                📸 直接从相册选图
+              </button>
+              <button
+                type="button"
+                className="h5-cta-demo"
+                onClick={handleLoadDemoPhoto}
+              >
+                ✨ 载入示例大片体验
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="app-container">
-      {/* Header */}
-      <header className="app-header">
-        <div className="logo-section">
-          <div className="logo-badge">书</div>
-          <div className="logo-text">
-            <h1>你拍照我生文</h1>
-            <p>AI 一键卡通化 / 泥塑风 / 胶片风 · 智能爆款文案生成</p>
-          </div>
-        </div>
-        
-        {uploadedImages.length > 0 && (
-          <button 
-            className="btn btn-secondary"
-            style={{ fontWeight: 600, fontSize: '0.85rem' }}
-            onClick={clearAllImages}
-          >
-            🧹 清空全部
-          </button>
-        )}
-      </header>
+    <div className={`h5-outer-backdrop ${h5FrameMode ? 'framed-mode' : 'full-mode'}`}>
+      {/* Global Hidden File Input */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        style={{ display: 'none' }}
+        accept="image/*"
+        multiple
+        onChange={handlePhotosUpload}
+      />
 
-      {/* Loading Overlay */}
-      {isLoading && (
-        <div className="loading-overlay" style={{ position: 'fixed', width: '100vw', height: '100vh', top: 0, left: 0, zIndex: 1000 }}>
-          <div className="spinner"></div>
-          <div className="loading-text" style={{ fontSize: '1.2rem', fontWeight: 600 }}>{aiOperationName}... 请稍候...</div>
-        </div>
-      )}
-
-      {/* Main Workspace */}
-      <main className={`workspace ${uploadedImages.length > 0 ? 'has-images' : ''}`}>
-        
-        {/* Left Control Panel */}
-        <section className="editor-panel">
-          {errorMsg && (
-            <div className="error-banner">
-              <span>⚠️ {errorMsg}</span>
-              <span className="error-close" onClick={() => setErrorMsg('')}>×</span>
-            </div>
-          )}
-
-          <div className="card">
-            <h2 className="card-title">📸 上传照片 (最多4张)</h2>
-
-            {/* WeChat EXIF Guide Tip Banner */}
-            <div className="wechat-exif-banner">
-              <div className="wechat-exif-badge">💡 微信选图小技巧</div>
-              <div className="wechat-exif-desc">
-                从微信相册选取照片时，请在右下角勾选<strong>【原图】</strong>，完整保留拍摄时间与GPS地点，AI才能精准提炼真实打卡文案！
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              {uploadedImages.length < 4 && (
-                <div 
-                  className="upload-zone"
-                  onClick={() => fileInputRef.current?.click()}
-                  style={{ padding: '1.5rem 1rem' }}
-                >
-                  <div className="upload-icon" style={{ fontSize: '2rem' }}>📤</div>
-                  <p style={{ fontSize: '0.9rem' }}>添加 1-4 张图片</p>
-                  <input 
-                    type="file" 
-                    ref={fileInputRef} 
-                    style={{ display: 'none' }} 
-                    accept="image/*"
-                    multiple
-                    onChange={handlePhotosUpload}
-                  />
-                </div>
-              )}
-
-               {/* Uploaded Thumbnails Manager */}
-              {uploadedImages.length > 0 && (
-                <div>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>勾选需要重绘的图片（支持多选同时处理，点击图片可预览）：</p>
-                  <div className="uploaded-images-list">
-                    {uploadedImages.map((img, idx) => (
-                      <div 
-                        key={img.id}
-                        className={`uploaded-image-thumbnail ${activeIdx === idx ? 'active' : ''}`}
-                        onClick={() => setActiveIdx(idx)}
-                        style={{ position: 'relative' }}
-                      >
-                        {/* Checkbox overlay for batch style-transfer selection */}
-                        <input 
-                          type="checkbox"
-                          checked={img.selected !== false}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) => {
-                            setUploadedImages(prev => prev.map((item) => 
-                              item.id === img.id ? { ...item, selected: e.target.checked } : item
-                            ));
-                          }}
-                          style={{
-                            position: 'absolute',
-                            top: '6px',
-                            left: '6px',
-                            zIndex: 10,
-                            cursor: 'pointer',
-                            width: '18px',
-                            height: '18px',
-                            accentColor: 'var(--primary-color)'
-                          }}
-                        />
-                        <img src={img.styledSrc || img.src} alt={`Thumbnail ${idx}`} />
-                        <button 
-                          className="uploaded-image-remove"
-                          onClick={(e) => removeUploadedImage(img.id, e)}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* 2. AI Copy Generator Tab */}
-          {uploadedImages.length > 0 && (
-            <div className="card">
-              <h2 className="card-title">✍️ 第二步：小红书爆款文案生成</h2>
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-                让 AI 智能识别内容风格，撰写文案与热门标签：
-              </p>
-
-              <div style={{ marginBottom: '0.75rem' }}>
-                <label className="form-label" style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.25rem', fontWeight: 600 }}>文案风格：</label>
-                <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                  {['探店', '旅行心情', '运动'].map((style) => (
-                    <button
-                      key={style}
-                      className="btn"
-                      style={{
-                        padding: '0.35rem 0.75rem',
-                        fontSize: '0.75rem',
-                        borderRadius: '20px',
-                        border: copyStyle === style ? 'none' : '1px solid var(--border-color)',
-                        background: copyStyle === style ? 'linear-gradient(135deg, #ff2442, #ff4d66)' : 'var(--bg-card)',
-                        color: copyStyle === style ? '#fff' : 'var(--text-secondary)',
-                        fontWeight: copyStyle === style ? '600' : 'normal',
-                        cursor: 'pointer',
-                      }}
-                      onClick={() => setCopyStyle(style)}
-                    >
-                      {style === '探店' && '🛍️ 探店'}
-                      {style === '旅行心情' && '✈️ 旅行心情'}
-                      {style === '运动' && '🏃 运动'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div style={{ marginBottom: '0.75rem' }}>
-                <label className="form-label" style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.25rem', fontWeight: 600 }}>亮点描述（选填）：</label>
-                <textarea
-                  className="form-control"
-                  placeholder="可简述图片拍摄的主题、天气或想表达的亮点描述..."
-                  rows="2"
-                  style={{ width: '100%', padding: '0.4rem 0.5rem', fontSize: '0.8rem', resize: 'none', boxSizing: 'border-box' }}
-                  value={copyKeywords}
-                  onChange={(e) => setCopyKeywords(e.target.value)}
-                />
-              </div>
-
-              <button
-                className="btn btn-primary"
-                style={{ width: '100%', background: 'linear-gradient(135deg, #6366f1, #4f46e5)' }}
-                onClick={handleGenerateAICopy}
-                disabled={isGeneratingCopy}
-              >
-                {isGeneratingCopy ? '🤖 智能撰写中...' : '一键生成小红书文案'}
-              </button>
-            </div>
-          )}
-
-          {/* 3. Image Style Control Tab */}
-          {uploadedImages.length > 0 && activeImage && (
-            <div className="card">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
-                <h2 className="card-title" style={{ margin: 0 }}>🎨 第三步：豆包 AI 画风重绘</h2>
-                <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
-                  已勾选 <strong>{uploadedImages.filter(img => img.selected !== false).length}</strong> 张同步处理
+      <div className="h5-device-shell studio-shell">
+        {/* 1. Native H5 Top Status & Navigation Bar */}
+        <header className="h5-topbar">
+          <div className="h5-topbar-left">
+            <button
+              type="button"
+              className="h5-back-btn"
+              onClick={() => setShowWelcome(true)}
+              title="返回首页"
+            >
+              ‹
+            </button>
+            <div className="h5-brand-group" onClick={() => setShowWelcome(true)}>
+              <div className="h5-logo-badge">书</div>
+              <div className="h5-brand-titles">
+                <h1>你拍照我生文</h1>
+                <span>
+                  {activeTab === 'photos' && 'Step 1/4 · 原图与时空元数据'}
+                  {activeTab === 'style' && 'Step 2/4 · AI 艺术画风重绘'}
+                  {activeTab === 'cover' && 'Step 3/4 · 3D 巨幕封面大片'}
+                  {activeTab === 'copy' && 'Step 4/4 · 爆款笔记文案'}
                 </span>
               </div>
-              <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '0.85rem' }}>
-                选择一种艺术画风，一键将实拍照片转换为高清艺术插画与国风意境图：
-              </p>
+            </div>
+          </div>
 
-              {/* Category 1: 东方国风美学 */}
-              <div style={{ marginBottom: '1rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '0.5rem' }}>
-                  <span style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    🇨🇳 东方国风意境
-                  </span>
-                  <span style={{ fontSize: '0.62rem', background: '#fef3c7', color: '#92400e', padding: '1px 6px', borderRadius: '10px', fontWeight: 700, border: '1px solid #fde68a' }}>
-                    全新上线
-                  </span>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '0.6rem' }}>
-                  {[
-                    {
-                      id: 'oriental-tale',
-                      icon: '🏮',
-                      name: '东方故事风格',
-                      scene: '建筑',
-                      sceneColor: '#b45309',
-                      sceneBg: '#fef3c7',
-                      highlight: '暖象牙白底 · 朱砂青蓝 · 诗意留白',
-                      desc: '原本硬朗的现代建筑被暖色调包裹，多了呼吸感与诗意。'
-                    },
-                    {
-                      id: 'baimiao',
-                      icon: '✒️',
-                      name: '白描画风格',
-                      scene: '建筑',
-                      sceneColor: '#374151',
-                      sceneBg: '#f3f4f6',
-                      highlight: '极简工笔墨线 · 书法韵律 · 减到极致',
-                      desc: '最简洁线条勾勒轮廓，无阴影无色彩，线条轻重顿挫更耐看。'
-                    },
-                    {
-                      id: 'qianjiang',
-                      icon: '🏔️',
-                      name: '浅绛山水风格',
-                      scene: '风景',
-                      sceneColor: '#047857',
-                      sceneBg: '#d1fae5',
-                      highlight: '水墨为骨 · 赭石花青 · 宁静淡泊',
-                      desc: '淡雅设色，文人画中最雅致的一支，清秀淡泊，宁静致远。'
-                    },
-                    {
-                      id: 'mogu',
-                      icon: '🪷',
-                      name: '没骨画风格',
-                      scene: '风景',
-                      sceneColor: '#0369a1',
-                      sceneBg: '#e0f2fe',
-                      highlight: '无墨线勾勒 · 晨雾柔和 · 温润色彩',
-                      desc: '直接用色彩渲染成形，中国画最温柔技法，如晨雾中的城市与山峦。'
-                    }
-                  ].map((s) => {
-                    const isActive = activeImage.activeStyle === s.id;
-                    return (
-                      <button
-                        key={s.id}
-                        type="button"
-                        className="btn"
-                        disabled={isLoading}
-                        onClick={() => handleAIStyleTransfer(s.id)}
-                        style={{
-                          textAlign: 'left',
-                          padding: '0.65rem 0.75rem',
-                          borderRadius: '12px',
-                          border: isActive ? '2px solid var(--xhs-red)' : '1px solid var(--border-color)',
-                          background: isActive ? 'var(--xhs-red-light)' : 'var(--bg-card)',
-                          boxShadow: isActive ? '0 3px 10px rgba(255, 36, 66, 0.12)' : '0 1px 3px rgba(0, 0, 0, 0.03)',
-                          cursor: isLoading ? 'not-allowed' : 'pointer',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '4px',
-                          transition: 'all 0.2s ease',
-                          position: 'relative'
-                        }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <span style={{ fontSize: '1.2rem' }}>{s.icon}</span>
-                            <span style={{ fontSize: '0.82rem', fontWeight: 800, color: isActive ? 'var(--xhs-red)' : 'var(--text-primary)' }}>
-                              {s.name}
-                            </span>
-                          </div>
-                          <span style={{
-                            fontSize: '0.62rem',
-                            fontWeight: 700,
-                            padding: '1px 6px',
-                            borderRadius: '4px',
-                            background: s.sceneBg,
-                            color: s.sceneColor
-                          }}>
-                            {s.scene}
-                          </span>
-                        </div>
-                        <div style={{ fontSize: '0.68rem', fontWeight: 700, color: isActive ? 'var(--xhs-red)' : 'var(--text-primary)', marginTop: '2px' }}>
-                          {s.highlight}
-                        </div>
-                        <div style={{ fontSize: '0.64rem', color: 'var(--text-secondary)', lineHeight: 1.25 }}>
-                          {s.desc}
-                        </div>
-                        {isActive && (
-                          <div style={{
-                            position: 'absolute',
-                            top: '6px',
-                            right: '6px',
-                            fontSize: '0.65rem',
-                            background: 'var(--xhs-red)',
-                            color: '#fff',
-                            borderRadius: '50%',
-                            width: '14px',
-                            height: '14px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontWeight: 900
-                          }}>
-                            ✓
-                          </div>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Category 2: 经典流行画风 */}
-              <div style={{ marginBottom: '0.85rem' }}>
-                <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.45rem' }}>
-                  ✨ 经典潮流画风
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.5rem' }}>
-                  {[
-                    { id: 'cartoon', icon: '🎨', name: '治愈吉卜力', desc: '宫崎骏水彩手绘光影', gradient: 'linear-gradient(135deg, #4f46e5, #6366f1)' },
-                    { id: 'clay', icon: '🧸', name: '软萌泥塑风', desc: '3D橡皮泥立体质感', gradient: 'linear-gradient(135deg, #ec4899, #d946ef)' },
-                    { id: 'japanese-film', icon: '🎞️', name: '日式胶片风', desc: '富士颗粒复古色调', gradient: 'linear-gradient(135deg, #d97706, #92400e)' }
-                  ].map((s) => {
-                    const isActive = activeImage.activeStyle === s.id;
-                    return (
-                      <button
-                        key={s.id}
-                        type="button"
-                        className="btn btn-primary"
-                        disabled={isLoading}
-                        onClick={() => handleAIStyleTransfer(s.id)}
-                        style={{
-                          padding: '0.55rem 0.4rem',
-                          borderRadius: '10px',
-                          background: s.gradient,
-                          border: isActive ? '2px solid #fff' : 'none',
-                          boxShadow: isActive ? '0 0 0 2px var(--xhs-red)' : 'none',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          gap: '2px',
-                          cursor: isLoading ? 'not-allowed' : 'pointer',
-                          position: 'relative'
-                        }}
-                      >
-                        <span style={{ fontSize: '1.1rem' }}>{s.icon}</span>
-                        <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#fff' }}>{s.name}</span>
-                        <span style={{ fontSize: '0.62rem', color: 'rgba(255, 255, 255, 0.85)', lineHeight: 1.15 }}>{s.desc}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {activeImage.styledSrc && (
+          <div className="h5-topbar-right">
+            {uploadedImages.length === 0 ? (
+              <button
+                type="button"
+                className="h5-top-pill accent"
+                onClick={handleLoadDemoPhoto}
+              >
+                ✨ 示例图
+              </button>
+            ) : (
+              <>
+                {uploadedImages.length < 4 && (
+                  <button
+                    type="button"
+                    className="h5-top-pill"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    ➕ 加图 ({uploadedImages.length}/4)
+                  </button>
+                )}
                 <button
-                  className="btn btn-secondary"
-                  style={{ width: '100%', fontSize: '0.8rem', padding: '0.5rem', marginTop: '0.25rem' }}
-                  onClick={restoreToOriginal}
+                  type="button"
+                  className="h5-top-pill danger"
+                  onClick={clearAllImages}
+                  title="清空全部图片"
                 >
-                  ↩️ 恢复原图
+                  🧹 重置
                 </button>
-              )}
+              </>
+            )}
+            <button
+              type="button"
+              className="h5-frame-toggle-mini"
+              onClick={() => setH5FrameMode(!h5FrameMode)}
+              title="切换手机壳/全屏模式"
+            >
+              {h5FrameMode ? '📲' : '📱'}
+            </button>
+          </div>
+        </header>
+
+        {/* Global Loading Overlay */}
+        {isLoading && (
+          <div className="h5-loading-modal">
+            <div className="h5-loading-card">
+              <div className="spinner" />
+              <div className="h5-loading-title">{aiOperationName || 'AI 正在创作中'}...</div>
+              <div className="h5-loading-sub">请稍候，正在为您生成高清视觉大片</div>
+            </div>
+          </div>
+        )}
+
+        {/* Main Scrollable H5 Content Area */}
+        <main className="h5-main-scroll">
+          {errorMsg && (
+            <div className="h5-error-banner">
+              <span>⚠️ {errorMsg}</span>
+              <button type="button" onClick={() => setErrorMsg('')}>✕</button>
             </div>
           )}
 
-          {/* 4. Cover Title Card Generator Tab */}
-          {uploadedImages.length > 0 && (
-            <div className="card">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                <h2 className="card-title" style={{ margin: 0 }}>🏷️ 第四步：爆款封面标题图</h2>
-                <button
-                  className="btn"
-                  style={{
-                    fontSize: '0.72rem',
-                    padding: '0.25rem 0.6rem',
-                    borderRadius: '14px',
-                    background: 'linear-gradient(135deg, #ff2442, #ff6584)',
-                    color: '#fff',
-                    border: 'none',
-                    fontWeight: 700,
-                    cursor: 'pointer'
-                  }}
-                  onClick={handleGenerateCoverTitles}
-                  disabled={isGeneratingCoverTitles}
-                >
-                  {isGeneratingCoverTitles ? '✨ 生成中...' : '✨ AI 提炼标题'}
-                </button>
+          {/* 2. Interactive H5 Canvas Stage (Always visible when photos exist) */}
+          {uploadedImages.length > 0 && activeImage && (
+            <section id="preview-panel-anchor" className="h5-stage-section">
+              {/* Stage Mode Switcher & Save Bar */}
+              <div className="h5-stage-topbar">
+                <div className="h5-segmented-control">
+                  <button
+                    type="button"
+                    className={`h5-seg-btn ${activePreviewTab === 'styled' ? 'active' : ''}`}
+                    onClick={() => setActivePreviewTab('styled')}
+                  >
+                    🖼️ 画风预览
+                  </button>
+                  <button
+                    type="button"
+                    className={`h5-seg-btn ${activePreviewTab === 'cover' ? 'active' : ''}`}
+                    onClick={() => setActivePreviewTab('cover')}
+                  >
+                    🏷️ 封面大片
+                  </button>
+                </div>
+
+                <div className="h5-stage-actions">
+                  <button
+                    type="button"
+                    className="h5-stage-action-btn"
+                    onClick={() => {
+                      if (activePreviewTab === 'cover') {
+                        if (coverPreviewUri) {
+                          setWechatSaveModal({
+                            isOpen: true,
+                            imageSrc: coverPreviewUri,
+                            title: `小红书封面图 (${coverStyle})`,
+                            fileName: `xhs-cover-${coverStyle}-${Date.now()}.jpg`
+                          });
+                        } else {
+                          downloadCoverImage();
+                        }
+                      } else {
+                        const src = activeImage?.styledSrc || activeImage?.src;
+                        if (src) {
+                          setWechatSaveModal({
+                            isOpen: true,
+                            imageSrc: src,
+                            title: `风格化效果图 (${activeImage?.activeStyle || '原图'})`,
+                            fileName: `xhs-style-${activeImage?.activeStyle || 'original'}-${activeIdx + 1}-${Date.now()}.jpg`
+                          });
+                        }
+                      }
+                    }}
+                  >
+                    📱 长按存图
+                  </button>
+                  <button
+                    type="button"
+                    className="h5-stage-action-btn primary"
+                    onClick={() => {
+                      if (activePreviewTab === 'cover') {
+                        downloadCoverImage();
+                      } else {
+                        downloadActiveImage();
+                      }
+                    }}
+                  >
+                    📥 导出
+                  </button>
+                </div>
               </div>
 
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-                选择底图与风格，生成醒目有吸引力的高号召力文字封面：
-              </p>
+              {/* Main Interactive Canvas Viewport */}
+              <div className="h5-canvas-viewport">
+                {/* Floating Mode Status Chip */}
+                <div className="h5-canvas-chip top-left">
+                  {activePreviewTab === 'cover' ? (
+                    <>
+                      <span>{coverStyleBadgeMap[coverStyle] || '🏷️ 封面大片'}</span>
+                      {subjectOcclusion && <span className="chip-accent">3D穿插</span>}
+                    </>
+                  ) : (
+                    <span>
+                      {activeImage.activeStyle
+                        ? (styleNameBadgeMap[activeImage.activeStyle] || '🎨 已重绘')
+                        : '📷 原始实拍图'}
+                    </span>
+                  )}
+                </div>
 
-              {/* 1. Pick Base Image */}
-              <div style={{ marginBottom: '0.75rem' }}>
-                <label className="form-label" style={{ fontSize: '0.78rem', display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>
-                  1. 选择封面底图：
-                </label>
-                <div style={{ display: 'flex', gap: '0.5rem', overflowX: 'auto', paddingBottom: '0.25rem' }}>
-                  {uploadedImages.map((img, idx) => (
-                    <div
-                      key={img.id}
-                      onClick={() => {
-                        setCoverImageIdx(idx);
-                        setActivePreviewTab('cover');
-                        if (subjectOcclusion && !outlineMasks[idx] && !isDetectingOutline) {
-                          handleDetectSubjectOutline(idx);
-                        }
-                      }}
-                      style={{
-                        position: 'relative',
-                        width: '56px',
-                        height: '56px',
-                        borderRadius: '8px',
-                        overflow: 'hidden',
-                        cursor: 'pointer',
-                        border: coverImageIdx === idx ? '2.5px solid var(--xhs-red)' : '1.5px solid var(--border-color)',
-                        boxShadow: coverImageIdx === idx ? '0 0 0 2px rgba(255, 36, 66, 0.25)' : 'none',
-                        flexShrink: 0
-                      }}
-                    >
-                      <img src={img.styledSrc || img.src} alt={`Cover base ${idx}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      {coverImageIdx === idx && (
-                        <span style={{ position: 'absolute', bottom: '2px', right: '2px', background: 'var(--xhs-red)', color: '#fff', fontSize: '9px', padding: '0 3px', borderRadius: '4px', fontWeight: 800 }}>
-                          底图
-                        </span>
+                {/* Floating Doodle Mode Indicator */}
+                {activePreviewTab === 'cover' && isDoodleMode && (
+                  <div className="h5-canvas-chip top-right active-doodle" onClick={() => setIsDoodleMode(false)}>
+                    ✍️ 手绘涂鸦中 · 点击完成
+                  </div>
+                )}
+
+                {activePreviewTab === 'cover' ? (
+                  coverPreviewUri ? (
+                    <div className="h5-canvas-img-wrap">
+                      <img
+                        ref={previewImgRef}
+                        src={coverPreviewUri}
+                        alt="Cover Preview"
+                        className="h5-stage-img"
+                      />
+                      {isDoodleMode && (
+                        <canvas
+                          ref={doodleCanvasRef}
+                          onPointerDown={handleDoodlePointerDown}
+                          onPointerMove={handleDoodlePointerMove}
+                          onPointerUp={handleDoodlePointerUp}
+                          onPointerLeave={handleDoodlePointerUp}
+                          width={previewImgRef.current ? previewImgRef.current.clientWidth : 400}
+                          height={previewImgRef.current ? previewImgRef.current.clientHeight : 533}
+                          className="h5-doodle-canvas"
+                        />
                       )}
                     </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* 2. Choose 6 Styles */}
-              <div style={{ marginBottom: '0.75rem' }}>
-                <label className="form-label" style={{ fontSize: '0.78rem', display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>
-                  2. 选择封面风格（6款不同版式）：
-                </label>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(88px, 1fr))', gap: '0.4rem' }}>
-                  {[
-                    { id: 'giant', name: '巨幕穿插', desc: '30-50%大字·人物遮挡', icon: '💥' },
-                    { id: 'cinema', name: '电影大片', desc: '巨幅大字·克莱因蓝', icon: '🎬' },
-                    { id: 'collage', name: '撞色拼贴', desc: '牛油果绿·错落色块', icon: '🎨' },
-                    { id: 'magazine', name: '杂志速报', desc: '渐变暗角·亮黄标', icon: '📸' },
-                    { id: 'minimal', name: '极简质感', desc: '白底卡片·质感留白', icon: '🖼️' },
-                    { id: 'sticker', name: '潮酷贴纸', desc: '荧光纸带·斜角徽章', icon: '⚡' }
-                  ].map((s) => (
-                    <button
-                      key={s.id}
-                      onClick={() => {
-                        setCoverStyle(s.id);
-                        setActivePreviewTab('cover');
-                        if (s.id === 'giant') {
-                          setSubjectOcclusion(true);
-                          if (!outlineMasks[coverImageIdx] && !isDetectingOutline) {
-                            handleDetectSubjectOutline(coverImageIdx);
-                          }
-                        }
-                      }}
-                      style={{
-                        padding: '0.45rem 0.2rem',
-                        borderRadius: '10px',
-                        border: coverStyle === s.id ? '2px solid var(--xhs-red)' : '1px solid var(--border-color)',
-                        background: coverStyle === s.id ? 'var(--xhs-red-light)' : 'var(--bg-card)',
-                        color: coverStyle === s.id ? 'var(--xhs-red)' : 'var(--text-primary)',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        gap: '2px'
-                      }}
-                    >
-                      <span style={{ fontSize: '1.05rem' }}>{s.icon}</span>
-                      <span style={{ fontSize: '0.72rem', fontWeight: 700 }}>{s.name}</span>
-                      <span style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', textAlign: 'center', lineHeight: 1.15 }}>
-                        {s.desc}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* 2.5 Subject Occlusion (3D Depth Layering) */}
-              <div style={{
-                marginBottom: '0.75rem',
-                padding: '0.6rem 0.75rem',
-                background: subjectOcclusion ? 'rgba(99, 102, 241, 0.08)' : 'var(--bg-main)',
-                borderRadius: '10px',
-                border: subjectOcclusion ? '1.5px solid #6366f1' : '1px solid var(--border-color)',
-                transition: 'all 0.2s ease'
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '1.2rem' }}>👤</span>
-                    <div>
-                      <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        画面主人公遮挡大字
-                        <span style={{ fontSize: '0.65rem', background: '#6366f1', color: '#fff', padding: '1px 5px', borderRadius: '4px', fontWeight: 800 }}>
-                          3D穿插
-                        </span>
-                      </div>
-                      <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>
-                        超大标题位于人物身后，营造顶级大刊穿插视觉
-                      </div>
-                    </div>
+                  ) : (
+                    <div className="spinner" />
+                  )
+                ) : (
+                  <div className="h5-canvas-img-wrap">
+                    <img
+                      src={activeImage.styledSrc || activeImage.src}
+                      alt="Styled Preview"
+                      className="h5-stage-img"
+                    />
                   </div>
+                )}
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => {
-                        const next = !subjectOcclusion;
-                        setSubjectOcclusion(next);
-                        if (next && !outlineMasks[coverImageIdx] && !isDetectingOutline) {
-                          handleDetectSubjectOutline(coverImageIdx);
-                        }
-                      }}
-                      style={{
-                        fontSize: '0.74rem',
-                        padding: '0.22rem 0.65rem',
-                        borderRadius: '14px',
-                        background: subjectOcclusion ? '#6366f1' : 'var(--bg-card)',
-                        color: subjectOcclusion ? '#ffffff' : 'var(--text-primary)',
-                        fontWeight: 700,
-                        border: subjectOcclusion ? '1.5px solid #6366f1' : '1.5px solid #cbd5e1',
-                        boxShadow: subjectOcclusion ? '0 2px 6px rgba(99, 102, 241, 0.3)' : '0 1px 2px rgba(0, 0, 0, 0.05)',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '5px',
-                        transition: 'all 0.2s ease'
-                      }}
-                    >
-                      <span style={{
-                        width: '6px',
-                        height: '6px',
-                        borderRadius: '50%',
-                        background: subjectOcclusion ? '#ffffff' : '#64748b'
-                      }} />
-                      {subjectOcclusion ? '已开启' : '已关闭'}
-                    </button>
-                  </div>
-                </div>
-                {subjectOcclusion && !outlineMasks[coverImageIdx] && (
-                  <div style={{ marginTop: '0.45rem', padding: '0.35rem 0.5rem', background: 'rgba(99, 102, 241, 0.12)', borderRadius: '6px', fontSize: '0.68rem', color: '#6366f1', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span>{isDetectingOutline ? '⏳ 正在提取人物主体蒙版...' : '💡 需先识别人像主体以开启遮挡'}</span>
-                    {!isDetectingOutline && (
-                      <button
-                        type="button"
-                        onClick={() => handleDetectSubjectOutline(coverImageIdx)}
-                        style={{ background: '#6366f1', color: '#fff', border: 'none', borderRadius: '4px', padding: '2px 8px', fontSize: '0.65rem', fontWeight: 700, cursor: 'pointer' }}
-                      >
-                        立即识别
-                      </button>
+                {/* Bottom EXIF Quick Pill */}
+                {activeImage.exif && (
+                  <div className="h5-canvas-chip bottom-left">
+                    {activeImage.exif.device && <span>📱 {activeImage.exif.device}</span>}
+                    {activeImage.exif.gps && <span>📍 含GPS坐标</span>}
+                    {activeImage.exif.dateTime && (
+                      <span>🕒 {String(activeImage.exif.dateTime).split(' ')[0].replace(/:/g, '.')}</span>
                     )}
                   </div>
                 )}
               </div>
 
-              {/* 3. Subject Hand-drawn Outline & Doodle Section */}
-              <div style={{ marginBottom: '0.75rem', padding: '0.6rem', background: 'var(--bg-main)', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span style={{ fontSize: '0.8rem', fontWeight: 700 }}>✨ 主人公手绘外轮廓线</span>
+              {/* Horizontal Filmstrip Thumbnail Bar */}
+              <div className="h5-filmstrip-bar">
+                <div className="h5-filmstrip-thumbs">
+                  {uploadedImages.map((img, idx) => {
+                    const isSelected = activePreviewTab === 'cover' ? coverImageIdx === idx : activeIdx === idx;
+                    return (
+                      <div
+                        key={img.id}
+                        className={`h5-thumb-item ${isSelected ? 'active' : ''}`}
+                        onClick={() => {
+                          setActiveIdx(idx);
+                          setCoverImageIdx(idx);
+                          if (activePreviewTab === 'cover' && subjectOcclusion && !outlineMasks[idx] && !isDetectingOutline) {
+                            handleDetectSubjectOutline(idx);
+                          }
+                        }}
+                      >
+                        <img src={img.styledSrc || img.src} alt={`照片 ${idx + 1}`} />
+                        <button
+                          type="button"
+                          className={`h5-thumb-check ${img.selected !== false ? 'checked' : ''}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setUploadedImages(prev => prev.map((item) =>
+                              item.id === img.id ? { ...item, selected: item.selected === false ? true : false } : item
+                            ));
+                          }}
+                          title="勾选参与批量画风重绘"
+                        >
+                          ✓
+                        </button>
+                        <button
+                          type="button"
+                          className="h5-thumb-del"
+                          onClick={(e) => removeUploadedImage(img.id, e)}
+                          title="移除此图"
+                        >
+                          ✕
+                        </button>
+                        <span className="h5-thumb-index">{idx + 1}</span>
+                      </div>
+                    );
+                  })}
+
+                  {uploadedImages.length < 4 && (
                     <button
                       type="button"
-                      className="btn"
-                      onClick={() => setOutlineEnabled(!outlineEnabled)}
-                      style={{
-                        fontSize: '0.74rem',
-                        padding: '0.22rem 0.65rem',
-                        borderRadius: '14px',
-                        background: outlineEnabled ? '#10b981' : 'var(--bg-card)',
-                        color: outlineEnabled ? '#ffffff' : 'var(--text-primary)',
-                        fontWeight: 700,
-                        border: outlineEnabled ? '1.5px solid #10b981' : '1.5px solid #cbd5e1',
-                        boxShadow: outlineEnabled ? '0 2px 6px rgba(16, 185, 129, 0.3)' : '0 1px 2px rgba(0, 0, 0, 0.05)',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '5px',
-                        transition: 'all 0.2s ease'
+                      className="h5-thumb-add"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <span>＋</span>
+                      <small>加图</small>
+                    </button>
+                  )}
+                </div>
+
+                <div className="h5-filmstrip-meta">
+                  <span>已勾 <strong>{selectedBatchCount}</strong> 张重绘</span>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* 3. Tabbed H5 Workbench Panels */}
+          <section className="h5-workbench">
+            {/* TAB 1: PHOTOS & EXIF */}
+            {(activeTab === 'photos' || uploadedImages.length === 0) && (
+              <div className="h5-panel-card">
+                <div className="h5-panel-header">
+                  <div>
+                    <h2 className="h5-panel-title">📸 照片管理与时空解析</h2>
+                    <p className="h5-panel-desc">支持上传 1–4 张照片，自动提取 EXIF 拍摄时间与 GPS 经纬度</p>
+                  </div>
+                  <span className="h5-badge-count">{uploadedImages.length}/4 张</span>
+                </div>
+
+                {/* WeChat EXIF Tip */}
+                <div className="wechat-exif-banner">
+                  <div className="wechat-exif-badge">💡 微信 H5 选图小贴士</div>
+                  <div className="wechat-exif-desc">
+                    在微信相册选图时请勾选底部<strong>【原图】</strong>，完整保留拍摄时间与 GPS 地点，AI 才能为您生成真实打卡坐标文案！
+                  </div>
+                </div>
+
+                {uploadedImages.length < 4 && (
+                  <div
+                    className="h5-upload-dropzone"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <div className="h5-upload-icon">📤</div>
+                    <div className="h5-upload-title">点击从手机相册选择照片</div>
+                    <div className="h5-upload-sub">支持 JPG / PNG / HEIC 原图 · 最多 4 张连传</div>
+                  </div>
+                )}
+
+                {uploadedImages.length === 0 && (
+                  <button
+                    type="button"
+                    className="h5-demo-banner-btn"
+                    onClick={handleLoadDemoPhoto}
+                  >
+                    <span>✨ 还没选好照片？点击一键载入示例大片体验全流程</span>
+                    <span>立即体验 ➔</span>
+                  </button>
+                )}
+
+                {/* Active Image EXIF Inspector Bento */}
+                {activeImage && (
+                  <div className="h5-exif-inspector">
+                    <div className="h5-sub-label">🔍 当前选中照片 (第 {activeIdx + 1} 张) EXIF 元数据</div>
+                    <div className="h5-exif-grid">
+                      <div className="h5-exif-cell">
+                        <span className="exif-k">📱 拍摄设备</span>
+                        <span className="exif-v">{activeImage.exif?.device || '未检测到机型'}</span>
+                      </div>
+                      <div className="h5-exif-cell">
+                        <span className="exif-k">🕒 拍摄时间</span>
+                        <span className="exif-v">
+                          {activeImage.exif?.dateTime
+                            ? String(activeImage.exif.dateTime).replace(/:/g, '.').slice(0, 16)
+                            : '未含时间信息'}
+                        </span>
+                      </div>
+                      <div className="h5-exif-cell">
+                        <span className="exif-k">📍 GPS 坐标</span>
+                        <span className="exif-v">
+                          {activeImage.exif?.gps
+                            ? `${parseFloat(activeImage.exif.gps.lat).toFixed(3)}°${activeImage.exif.gps.latRef || 'N'}, ${parseFloat(activeImage.exif.gps.lon).toFixed(3)}°${activeImage.exif.gps.lonRef || 'E'}`
+                            : '未含位置坐标'}
+                        </span>
+                      </div>
+                      <div className="h5-exif-cell">
+                        <span className="exif-k">📐 图像尺寸</span>
+                        <span className="exif-v">{activeImage.width || 1024} × {activeImage.height || 1024}</span>
+                      </div>
+                    </div>
+
+                    <div className="h5-next-step-row">
+                      <button
+                        type="button"
+                        className="h5-primary-action-btn"
+                        onClick={() => {
+                          setActiveTab('style');
+                          setActivePreviewTab('styled');
+                        }}
+                      >
+                        🎨 下一步：挑选 AI 艺术画风重绘 ➔
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 2: AI ART STYLE TRANSFER */}
+            {uploadedImages.length > 0 && activeImage && activeTab === 'style' && (
+              <div className="h5-panel-card">
+                <div className="h5-panel-header">
+                  <div>
+                    <h2 className="h5-panel-title">🎨 豆包 AI 艺术画风重绘</h2>
+                    <p className="h5-panel-desc">点击任意画风即可对已勾选的 <strong>{selectedBatchCount}</strong> 张照片同步重绘并叠加徕卡白边水印</p>
+                  </div>
+                  {activeImage.styledSrc && (
+                    <button
+                      type="button"
+                      className="h5-mini-outline-btn"
+                      onClick={restoreToOriginal}
+                    >
+                      ↩️ 恢复原图
+                    </button>
+                  )}
+                </div>
+
+                {/* Category 1: Oriental Aesthetics */}
+                <div className="h5-style-group">
+                  <div className="h5-group-label-row">
+                    <span className="h5-group-title">🇨🇳 东方国风意境</span>
+                    <span className="h5-group-tag gold">建筑 / 风景特调</span>
+                  </div>
+
+                  <div className="h5-oriental-grid">
+                    {[
+                      {
+                        id: 'oriental-tale',
+                        icon: '🏮',
+                        name: '东方故事风',
+                        scene: '建筑',
+                        sceneColor: '#b45309',
+                        sceneBg: '#fef3c7',
+                        highlight: '暖象牙白 · 朱砂青蓝',
+                        desc: '现代建筑包裹暖调诗意留白'
+                      },
+                      {
+                        id: 'baimiao',
+                        icon: '✒️',
+                        name: '传统白描风',
+                        scene: '建筑',
+                        sceneColor: '#374151',
+                        sceneBg: '#f3f4f6',
+                        highlight: '极简墨线 · 书法韵律',
+                        desc: '纯粹工笔线条勾勒飞檐轮廓'
+                      },
+                      {
+                        id: 'qianjiang',
+                        icon: '🏔️',
+                        name: '浅绛山水风',
+                        scene: '风景',
+                        sceneColor: '#047857',
+                        sceneBg: '#d1fae5',
+                        highlight: '水墨为骨 · 赭石花青',
+                        desc: '文人画淡雅设色，清秀宁静'
+                      },
+                      {
+                        id: 'mogu',
+                        icon: '🪷',
+                        name: '没骨画风格',
+                        scene: '风景',
+                        sceneColor: '#0369a1',
+                        sceneBg: '#e0f2fe',
+                        highlight: '无骨晕染 · 晨雾温润',
+                        desc: '直接色彩渲染，如晨雾山峦'
+                      }
+                    ].map((s) => {
+                      const isActive = activeImage.activeStyle === s.id;
+                      return (
+                        <button
+                          key={s.id}
+                          type="button"
+                          className={`h5-style-card oriental ${isActive ? 'active' : ''}`}
+                          disabled={isLoading}
+                          onClick={() => {
+                            setActivePreviewTab('styled');
+                            handleAIStyleTransfer(s.id);
+                          }}
+                        >
+                          <div className="h5-style-card-top">
+                            <span className="h5-style-emoji">{s.icon}</span>
+                            <span
+                              className="h5-style-scene"
+                              style={{ background: s.sceneBg, color: s.sceneColor }}
+                            >
+                              {s.scene}
+                            </span>
+                          </div>
+                          <div className="h5-style-name">{s.name}</div>
+                          <div className="h5-style-hi">{s.highlight}</div>
+                          <div className="h5-style-desc">{s.desc}</div>
+                          {isActive && <span className="h5-style-check">✓</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Category 2: Pop & Film Styles */}
+                <div className="h5-style-group">
+                  <div className="h5-group-label-row">
+                    <span className="h5-group-title">✨ 经典潮流画风</span>
+                    <span className="h5-group-tag">人像 / 日常百搭</span>
+                  </div>
+
+                  <div className="h5-pop-grid">
+                    {[
+                      { id: 'cartoon', icon: '🎨', name: '治愈吉卜力', desc: '宫崎骏水彩光影', gradient: 'linear-gradient(135deg, #4f46e5, #6366f1)' },
+                      { id: 'clay', icon: '🧸', name: '软萌泥塑风', desc: '3D定格黏土质感', gradient: 'linear-gradient(135deg, #ec4899, #d946ef)' },
+                      { id: 'japanese-film', icon: '🎞️', name: '日式胶片风', desc: '富士颗粒复古感', gradient: 'linear-gradient(135deg, #d97706, #92400e)' }
+                    ].map((s) => {
+                      const isActive = activeImage.activeStyle === s.id;
+                      return (
+                        <button
+                          key={s.id}
+                          type="button"
+                          className={`h5-pop-card ${isActive ? 'active' : ''}`}
+                          style={{ background: s.gradient }}
+                          disabled={isLoading}
+                          onClick={() => {
+                            setActivePreviewTab('styled');
+                            handleAIStyleTransfer(s.id);
+                          }}
+                        >
+                          <span className="h5-pop-icon">{s.icon}</span>
+                          <span className="h5-pop-name">{s.name}</span>
+                          <span className="h5-pop-desc">{s.desc}</span>
+                          {isActive && <span className="h5-pop-active-dot">✓</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 3: COVER TITLE GENERATOR */}
+            {uploadedImages.length > 0 && activeTab === 'cover' && (
+              <div className="h5-panel-card">
+                <div className="h5-panel-header">
+                  <div>
+                    <h2 className="h5-panel-title">🏷️ 爆款封面标题图工作台</h2>
+                    <p className="h5-panel-desc">6 款高点击率封面版式 · 支持 AI 人像前景 3D 穿插大字</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="h5-ai-sparkle-btn"
+                    onClick={handleGenerateCoverTitles}
+                    disabled={isGeneratingCoverTitles}
+                  >
+                    {isGeneratingCoverTitles ? '⏳ 提炼中...' : '✨ AI 提炼标题'}
+                  </button>
+                </div>
+
+                {/* H5 Sub-Navigation Pills inside Cover Studio */}
+                <div className="h5-subtab-bar">
+                  {[
+                    { id: 'template', label: '🎨 封面版式' },
+                    { id: 'text', label: '✍️ 标题排版' },
+                    { id: 'depth', label: '👤 3D穿插/描边' }
+                  ].map((st) => (
+                    <button
+                      key={st.id}
+                      type="button"
+                      className={`h5-subtab-pill ${coverSubTab === st.id ? 'active' : ''}`}
+                      onClick={() => {
+                        setCoverSubTab(st.id);
+                        setActivePreviewTab('cover');
                       }}
                     >
-                      <span style={{
-                        width: '6px',
-                        height: '6px',
-                        borderRadius: '50%',
-                        background: outlineEnabled ? '#ffffff' : '#64748b'
-                      }} />
-                      {outlineEnabled ? '已开启' : '已关闭'}
+                      {st.label}
                     </button>
+                  ))}
+                </div>
+
+                {/* Sub-tab 1: 6 Cover Templates & AI Candidates */}
+                {coverSubTab === 'template' && (
+                  <div className="h5-subtab-content">
+                    <div className="h5-cover-style-grid">
+                      {[
+                        { id: 'giant', name: '巨幕穿插', desc: '44%巨字·人物遮挡', icon: '💥' },
+                        { id: 'cinema', name: '电影大片', desc: '克莱因蓝·大刊感', icon: '🎬' },
+                        { id: 'collage', name: '撞色拼贴', desc: '牛油果绿·纸带风', icon: '🎨' },
+                        { id: 'magazine', name: '杂志速报', desc: '荧光黄标·暗角感', icon: '📸' },
+                        { id: 'minimal', name: '极简质感', desc: '毛玻璃卡·呼吸留白', icon: '🖼️' },
+                        { id: 'sticker', name: '潮酷贴纸', desc: '斜角徽章·荧光条', icon: '⚡' }
+                      ].map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          className={`h5-cover-tpl-card ${coverStyle === s.id ? 'active' : ''}`}
+                          onClick={() => {
+                            setCoverStyle(s.id);
+                            setActivePreviewTab('cover');
+                            if (s.id === 'giant') {
+                              setSubjectOcclusion(true);
+                              if (!outlineMasks[coverImageIdx] && !isDetectingOutline) {
+                                handleDetectSubjectOutline(coverImageIdx);
+                              }
+                            }
+                          }}
+                        >
+                          <span className="tpl-icon">{s.icon}</span>
+                          <span className="tpl-name">{s.name}</span>
+                          <span className="tpl-desc">{s.desc}</span>
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* AI Recommended Cover Titles */}
+                    {coverCandidates.length > 0 && (
+                      <div className="h5-candidates-box">
+                        <div className="h5-sub-label">🔥 点击一键套用 AI 爆款封面文案：</div>
+                        <div className="h5-candidates-list">
+                          {coverCandidates.map((cand, cIdx) => (
+                            <button
+                              key={cIdx}
+                              type="button"
+                              className={`h5-candidate-item ${coverTitle === cand.title ? 'active' : ''}`}
+                              onClick={() => {
+                                if (cand.tag) setCoverTag(cand.tag);
+                                if (cand.title) setCoverTitle(cand.title);
+                                if (cand.subtitle) setCoverSubtitle(cand.subtitle);
+                                setActivePreviewTab('cover');
+                              }}
+                            >
+                              <div className="cand-main">
+                                <span className="cand-tag">[{cand.tag}]</span>
+                                <span className="cand-title">{cand.title}</span>
+                              </div>
+                              <span className="cand-apply">套用 ➔</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Sub-tab 2: Text Inputs & Position Pills */}
+                {coverSubTab === 'text' && (
+                  <div className="h5-subtab-content">
+                    <div className="h5-form-stack">
+                      <div className="h5-field">
+                        <label>🏷️ 胶囊角标</label>
+                        <input
+                          type="text"
+                          className="h5-input"
+                          value={coverTag}
+                          onChange={(e) => setCoverTag(e.target.value)}
+                          placeholder="如：⚡ BREAKING 速报"
+                        />
+                      </div>
+
+                      <div className="h5-field">
+                        <label>🔥 号召力主标题（醒目大字）</label>
+                        <input
+                          type="text"
+                          className="h5-input bold"
+                          value={coverTitle}
+                          onChange={(e) => setCoverTitle(e.target.value)}
+                          placeholder="如：氛围感彻底封神"
+                        />
+                      </div>
+
+                      <div className="h5-field">
+                        <label>📝 关键副标题（补充说明）</label>
+                        <input
+                          type="text"
+                          className="h5-input"
+                          value={coverSubtitle}
+                          onChange={(e) => setCoverSubtitle(e.target.value)}
+                          placeholder="如：2026 视觉精选指南 · 建议先马后看"
+                        />
+                      </div>
+
+                      <div className="h5-pos-grid">
+                        <div className="h5-field">
+                          <label>↕️ 纵向位置</label>
+                          <div className="h5-pill-group">
+                            {[
+                              { id: 'top', label: '⬆️ 顶部' },
+                              { id: 'center', label: '⏺️ 居中' },
+                              { id: 'bottom', label: '⬇️ 底部' }
+                            ].map((p) => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                className={`h5-choice-pill ${coverPosition === p.id ? 'active' : ''}`}
+                                onClick={() => setCoverPosition(p.id)}
+                              >
+                                {p.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="h5-field">
+                          <label>↔️ 横向对齐</label>
+                          <div className="h5-pill-group">
+                            {[
+                              { id: 'left', label: '⬅️ 居左' },
+                              { id: 'center', label: '⏺️ 居中' },
+                              { id: 'right', label: '➡️ 居右' }
+                            ].map((a) => (
+                              <button
+                                key={a.id}
+                                type="button"
+                                className={`h5-choice-pill ${coverAlign === a.id ? 'active' : ''}`}
+                                onClick={() => setCoverAlign(a.id)}
+                              >
+                                {a.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Sub-tab 3: 3D Subject Occlusion & Hand-drawn Outline / Doodle */}
+                {coverSubTab === 'depth' && (
+                  <div className="h5-subtab-content">
+                    {/* 3D Subject Occlusion Card */}
+                    <div className={`h5-feature-toggle-card ${subjectOcclusion ? 'active-indigo' : ''}`}>
+                      <div className="h5-toggle-row">
+                        <div className="h5-toggle-info">
+                          <div className="h5-toggle-title">
+                            <span>👤 画面主人公遮挡大字</span>
+                            <span className="h5-mini-badge indigo">3D穿插</span>
+                          </div>
+                          <p>超大标题位于人物身后，营造杂志大刊空间穿插层次感</p>
+                        </div>
+                        <button
+                          type="button"
+                          className={`h5-switch-pill ${subjectOcclusion ? 'on' : 'off'}`}
+                          onClick={() => {
+                            const next = !subjectOcclusion;
+                            setSubjectOcclusion(next);
+                            if (next && !outlineMasks[coverImageIdx] && !isDetectingOutline) {
+                              handleDetectSubjectOutline(coverImageIdx);
+                            }
+                          }}
+                        >
+                          <span className="switch-dot" />
+                          <span>{subjectOcclusion ? '已开启' : '已关闭'}</span>
+                        </button>
+                      </div>
+
+                      {subjectOcclusion && !outlineMasks[coverImageIdx] && (
+                        <div className="h5-occlusion-hint">
+                          <span>{isDetectingOutline ? '⏳ 正在提取高精度人像蒙版...' : '💡 需识别人像主体以开启 3D 遮挡效果'}</span>
+                          {!isDetectingOutline && (
+                            <button
+                              type="button"
+                              onClick={() => handleDetectSubjectOutline(coverImageIdx)}
+                            >
+                              立即识别
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Subject Outline & Doodle Card */}
+                    <div className={`h5-feature-toggle-card ${outlineEnabled ? 'active-emerald' : ''}`}>
+                      <div className="h5-toggle-row">
+                        <div className="h5-toggle-info">
+                          <div className="h5-toggle-title">
+                            <span>✨ 主人公手绘外轮廓线</span>
+                          </div>
+                          <p>支持 AI 自动人像描边与自由荧光手绘涂鸦</p>
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                          <button
+                            type="button"
+                            className="h5-ai-mini-btn"
+                            disabled={isDetectingOutline}
+                            onClick={() => handleDetectSubjectOutline(coverImageIdx, true)}
+                          >
+                            {isDetectingOutline ? '⏳ 识别中' : '🤖 AI 描边'}
+                          </button>
+                          <button
+                            type="button"
+                            className={`h5-switch-pill emerald ${outlineEnabled ? 'on' : 'off'}`}
+                            onClick={() => setOutlineEnabled(!outlineEnabled)}
+                          >
+                            <span className="switch-dot" />
+                            <span>{outlineEnabled ? '已开启' : '已关闭'}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {outlineEnabled && (
+                        <div className="h5-outline-controls">
+                          <div className="h5-control-line">
+                            <span className="ctrl-label">线条质感</span>
+                            <div className="h5-pill-group">
+                              {[
+                                { id: 'dashed', name: '涂鸦虚线' },
+                                { id: 'smooth', name: '实线手绘' },
+                                { id: 'glow', name: '霓虹发光' }
+                              ].map((t) => (
+                                <button
+                                  key={t.id}
+                                  type="button"
+                                  className={`h5-choice-pill ${outlineType === t.id ? 'active' : ''}`}
+                                  onClick={() => setOutlineType(t.id)}
+                                >
+                                  {t.name}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="h5-control-line">
+                            <span className="ctrl-label">轮廓配色</span>
+                            <div className="h5-color-swatches">
+                              {[
+                                { color: '#FFFFFF', name: '经典白', border: '#cbd5e1' },
+                                { color: '#FFE600', name: '荧光黄', border: '#eab308' },
+                                { color: '#FF2E93', name: '芭比粉', border: '#db2777' },
+                                { color: '#00F0FF', name: '电光蓝', border: '#06b6d4' },
+                                { color: '#A3E635', name: '牛油果绿', border: '#84cc16' }
+                              ].map((c) => (
+                                <button
+                                  key={c.color}
+                                  type="button"
+                                  title={c.name}
+                                  className={`h5-swatch ${outlineColor === c.color ? 'active' : ''}`}
+                                  style={{ backgroundColor: c.color, borderColor: c.border }}
+                                  onClick={() => setOutlineColor(c.color)}
+                                />
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="h5-control-line">
+                            <span className="ctrl-label">线条粗细</span>
+                            <div className="h5-pill-group">
+                              {[
+                                { val: 6, label: '细 6px' },
+                                { val: 10, label: '中 10px' },
+                                { val: 16, label: '粗 16px' }
+                              ].map((w) => (
+                                <button
+                                  key={w.val}
+                                  type="button"
+                                  className={`h5-choice-pill ${outlineWidth === w.val ? 'active' : ''}`}
+                                  onClick={() => setOutlineWidth(w.val)}
+                                >
+                                  {w.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="h5-doodle-bar">
+                            <button
+                              type="button"
+                              className={`h5-doodle-toggle ${isDoodleMode ? 'active' : ''}`}
+                              onClick={() => {
+                                setIsDoodleMode(!isDoodleMode);
+                                setActivePreviewTab('cover');
+                              }}
+                            >
+                              {isDoodleMode ? '✍️ 涂鸦绘制中 (点击完成)' : '✍️ 开启自由手绘画笔'}
+                            </button>
+                            <button type="button" className="h5-doodle-sub" onClick={undoLastDoodle}>↩️ 撤销</button>
+                            <button type="button" className="h5-doodle-sub" onClick={clearDoodles}>🧹 清空</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  className="h5-primary-action-btn"
+                  style={{ marginTop: '0.75rem' }}
+                  onClick={() => {
+                    setActivePreviewTab('cover');
+                    downloadCoverImage();
+                  }}
+                >
+                  📥 立即导出高清封面标题图
+                </button>
+              </div>
+            )}
+
+            {/* TAB 4: AI XIAOHONGSHU COPYWRITING */}
+            {uploadedImages.length > 0 && activeTab === 'copy' && (
+              <div className="h5-panel-card">
+                <div className="h5-panel-header">
+                  <div>
+                    <h2 className="h5-panel-title">✍️ 小红书爆款笔记生成</h2>
+                    <p className="h5-panel-desc">结合照片视觉细节与 EXIF 真实坐标，智能撰写 3 套高赞笔记</p>
+                  </div>
+                </div>
+
+                <div className="h5-copy-controls">
+                  <div className="h5-field">
+                    <label>笔记风格定位</label>
+                    <div className="h5-pill-group">
+                      {[
+                        { id: '探店', label: '🛍️ 探店打卡' },
+                        { id: '旅行心情', label: '✈️ 旅行心情' },
+                        { id: '运动', label: '🏃 户外运动' }
+                      ].map((st) => (
+                        <button
+                          key={st.id}
+                          type="button"
+                          className={`h5-choice-pill ${copyStyle === st.id ? 'active' : ''}`}
+                          onClick={() => setCopyStyle(st.id)}
+                        >
+                          {st.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="h5-field">
+                    <label>补充亮点或心情关键词（选填）</label>
+                    <textarea
+                      className="h5-textarea"
+                      rows={2}
+                      placeholder="例如：周末看海、偶遇绝美日落、出片机位分享..."
+                      value={copyKeywords}
+                      onChange={(e) => setCopyKeywords(e.target.value)}
+                    />
                   </div>
 
                   <button
                     type="button"
-                    className="btn btn-primary"
-                    disabled={isDetectingOutline}
-                    onClick={() => handleDetectSubjectOutline(coverImageIdx)}
-                    style={{
-                      fontSize: '0.7rem',
-                      padding: '0.2rem 0.6rem',
-                      borderRadius: '12px',
-                      background: 'linear-gradient(135deg, #6366f1, #a855f7)',
-                      border: 'none',
-                      fontWeight: 600,
-                      cursor: 'pointer'
-                    }}
+                    className="h5-primary-action-btn indigo"
+                    onClick={handleGenerateAICopy}
+                    disabled={isGeneratingCopy}
                   >
-                    {isDetectingOutline ? '⏳ 智能识别中...' : '🤖 AI 智能描边'}
+                    {isGeneratingCopy ? '🤖 多模态视觉分析撰写中...' : '✨ 一键生成 3 套小红书爆款文案'}
                   </button>
                 </div>
 
-                {outlineEnabled && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.35rem' }}>
-                    {/* Outline line styles */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                      <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', width: '56px', flexShrink: 0 }}>线条质感:</span>
-                      {[
-                        { id: 'dashed', name: '涂鸦虚线' },
-                        { id: 'smooth', name: '实线手绘' },
-                        { id: 'glow', name: '霓虹发光' }
-                      ].map(t => (
+                {/* Generated Copywriting Note Card */}
+                {generatedCopyOptions.length > 0 && (
+                  <div className="h5-xhs-note-card">
+                    <div className="h5-note-card-header">
+                      <div className="h5-note-tabs">
+                        {generatedCopyOptions.map((opt, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            className={`h5-note-tab ${activeCopyOptionIdx === idx ? 'active' : ''}`}
+                            onClick={() => applyCopyOption(idx)}
+                          >
+                            方案 {idx + 1}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="h5-note-actions">
                         <button
-                          key={t.id}
                           type="button"
-                          onClick={() => setOutlineType(t.id)}
-                          style={{
-                            flex: 1,
-                            padding: '0.2rem 0.35rem',
-                            fontSize: '0.7rem',
-                            borderRadius: '6px',
-                            border: outlineType === t.id ? '1.5px solid var(--xhs-red)' : '1px solid var(--border-color)',
-                            background: outlineType === t.id ? 'rgba(255, 36, 66, 0.12)' : 'var(--bg-card)',
-                            color: outlineType === t.id ? 'var(--xhs-red)' : 'var(--text-primary)',
-                            fontWeight: outlineType === t.id ? 700 : 500,
-                            cursor: 'pointer'
+                          className="h5-note-act-btn primary"
+                          onClick={() => {
+                            const opt = generatedCopyOptions[activeCopyOptionIdx];
+                            const fullText = `【${aiTitle || opt.title}】\n\n${aiBody || opt.body}\n\n${opt.tags}`;
+                            copyToClipboard(fullText, '✅ 爆款文案已复制，可直接去小红书粘贴发布！');
                           }}
                         >
-                          {t.name}
+                          📋 复制全文
                         </button>
-                      ))}
-                    </div>
-
-                    {/* Outline colors */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                      <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', width: '56px', flexShrink: 0 }}>轮廓配色:</span>
-                      <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
-                        {[
-                          { color: '#FFFFFF', name: '经典白', border: '#cbd5e1' },
-                          { color: '#FFE600', name: '荧光黄', border: '#eab308' },
-                          { color: '#FF2E93', name: '芭比粉', border: '#db2777' },
-                          { color: '#00F0FF', name: '电光蓝', border: '#06b6d4' },
-                          { color: '#A3E635', name: '牛油果绿', border: '#84cc16' }
-                        ].map(c => (
-                          <button
-                            key={c.color}
-                            type="button"
-                            onClick={() => setOutlineColor(c.color)}
-                            title={c.name}
-                            style={{
-                              width: '22px',
-                              height: '22px',
-                              borderRadius: '50%',
-                              backgroundColor: c.color,
-                              border: outlineColor === c.color ? '2.5px solid #1e293b' : `1.5px solid ${c.border}`,
-                              boxShadow: outlineColor === c.color ? '0 0 0 2px #fff, 0 0 0 4px var(--xhs-red)' : 'none',
-                              cursor: 'pointer',
-                              padding: 0
-                            }}
-                          />
-                        ))}
+                        <button
+                          type="button"
+                          className="h5-note-act-btn"
+                          onClick={exportReportCard}
+                        >
+                          📸 导出报告卡
+                        </button>
                       </div>
                     </div>
 
-                    {/* Outline thickness */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                      <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', width: '56px', flexShrink: 0 }}>线条粗细:</span>
-                      {[
-                        { val: 6, label: '细 (6px)' },
-                        { val: 10, label: '中 (10px)' },
-                        { val: 16, label: '粗 (16px)' }
-                      ].map(w => (
-                        <button
-                          key={w.val}
-                          type="button"
-                          onClick={() => setOutlineWidth(w.val)}
-                          style={{
-                            flex: 1,
-                            padding: '0.2rem 0.35rem',
-                            fontSize: '0.7rem',
-                            borderRadius: '6px',
-                            border: outlineWidth === w.val ? '1.5px solid var(--xhs-red)' : '1px solid var(--border-color)',
-                            background: outlineWidth === w.val ? 'rgba(255, 36, 66, 0.12)' : 'var(--bg-card)',
-                            color: outlineWidth === w.val ? 'var(--xhs-red)' : 'var(--text-primary)',
-                            fontWeight: outlineWidth === w.val ? 700 : 500,
-                            cursor: 'pointer'
-                          }}
-                        >
-                          {w.label}
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Doodle Brush Controls */}
-                    <div style={{ display: 'flex', gap: '0.35rem', paddingTop: '0.25rem', borderTop: '1px dashed var(--border-color)' }}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsDoodleMode(!isDoodleMode);
-                          setActivePreviewTab('cover');
-                        }}
-                        style={{
-                          flex: 1.3,
-                          padding: '0.25rem 0.4rem',
-                          fontSize: '0.7rem',
-                          borderRadius: '6px',
-                          border: isDoodleMode ? '1.5px solid #6366f1' : '1px solid var(--border-color)',
-                          background: isDoodleMode ? '#6366f1' : 'var(--bg-card)',
-                          color: isDoodleMode ? '#fff' : 'var(--text-primary)',
-                          fontWeight: 700,
-                          cursor: 'pointer'
-                        }}
-                      >
-                        {isDoodleMode ? '✍️ 涂鸦绘制中 (点击完成)' : '✍️ 自由手绘画笔'}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={undoLastDoodle}
-                        style={{
-                          padding: '0.25rem 0.45rem',
-                          fontSize: '0.7rem',
-                          borderRadius: '6px',
-                          border: '1px solid var(--border-color)',
-                          background: 'var(--bg-card)',
-                          color: 'var(--text-secondary)',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        ↩️ 撤销
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={clearDoodles}
-                        style={{
-                          padding: '0.25rem 0.45rem',
-                          fontSize: '0.7rem',
-                          borderRadius: '6px',
-                          border: '1px solid var(--border-color)',
-                          background: 'var(--bg-card)',
-                          color: 'var(--text-secondary)',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        🧹 清空
-                      </button>
+                    <div className="h5-note-editor">
+                      <div className="h5-note-title-row">
+                        <span className="note-tag-badge">标题</span>
+                        <input
+                          type="text"
+                          value={aiTitle}
+                          onChange={(e) => setAiTitle(e.target.value)}
+                          placeholder="在此编辑笔记标题..."
+                        />
+                      </div>
+                      <textarea
+                        value={aiBody}
+                        onChange={(e) => setAiBody(e.target.value)}
+                        rows={8}
+                        placeholder="在此编辑笔记正文与话题标签..."
+                      />
                     </div>
                   </div>
                 )}
               </div>
+            )}
+          </section>
+        </main>
 
-              {/* 3. AI Generated Candidates Chips (if available) */}
-              {coverCandidates.length > 0 && (
-                <div style={{ marginBottom: '0.75rem', padding: '0.5rem', background: 'var(--bg-main)', borderRadius: '8px' }}>
-                  <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
-                    ✨ 点击快速套用推荐文案：
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                    {coverCandidates.map((cand, cIdx) => (
-                      <div
-                        key={cIdx}
-                        onClick={() => {
-                          if (cand.tag) setCoverTag(cand.tag);
-                          if (cand.title) setCoverTitle(cand.title);
-                          if (cand.subtitle) setCoverSubtitle(cand.subtitle);
-                          setActivePreviewTab('cover');
-                        }}
-                        style={{
-                          padding: '0.35rem 0.5rem',
-                          borderRadius: '6px',
-                          background: (coverTitle === cand.title) ? 'rgba(255, 36, 66, 0.1)' : 'var(--bg-card)',
-                          border: (coverTitle === cand.title) ? '1px solid var(--xhs-red)' : '1px solid var(--border-color)',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          fontSize: '0.75rem'
-                        }}
-                      >
-                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          <span style={{ fontWeight: 800, color: 'var(--xhs-red)', marginRight: '4px' }}>[{cand.tag}]</span>
-                          <span style={{ fontWeight: 600 }}>{cand.title}</span>
-                        </div>
-                        <span style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', marginLeft: '6px', flexShrink: 0 }}>套用 ➔</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* 4. Title Customization Inputs */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                <div>
-                  <label style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>
-                    🏷️ 胶囊角标
-                  </label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={coverTag}
-                    onChange={(e) => setCoverTag(e.target.value)}
-                    placeholder="如：⚡ BREAKING 速报"
-                    style={{ width: '100%', fontSize: '0.78rem', padding: '0.35rem 0.5rem', boxSizing: 'border-box' }}
-                  />
-                </div>
-
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>
-                      ↕️ 纵向位置
-                    </label>
-                    <select
-                      className="form-control"
-                      value={coverPosition}
-                      onChange={(e) => setCoverPosition(e.target.value)}
-                      style={{ width: '100%', fontSize: '0.78rem', padding: '0.35rem 0.35rem', boxSizing: 'border-box' }}
-                    >
-                      <option value="top">⬆️ 顶部</option>
-                      <option value="center">⏺️ 居中</option>
-                      <option value="bottom">⬇️ 底部</option>
-                    </select>
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <label style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>
-                      ↔️ 横向位置
-                    </label>
-                    <select
-                      className="form-control"
-                      value={coverAlign}
-                      onChange={(e) => setCoverAlign(e.target.value)}
-                      style={{ width: '100%', fontSize: '0.78rem', padding: '0.35rem 0.35rem', boxSizing: 'border-box' }}
-                    >
-                      <option value="left">⬅️ 居左</option>
-                      <option value="center">⏺️ 居中</option>
-                      <option value="right">➡️ 居右</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>
-                    ✍️ 号召力主标题（醒目大字）
-                  </label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={coverTitle}
-                    onChange={(e) => setCoverTitle(e.target.value)}
-                    placeholder="如：3秒极限绝杀！/ 辛芷蕾同款装备"
-                    style={{ width: '100%', fontSize: '0.82rem', fontWeight: 700, padding: '0.35rem 0.5rem', boxSizing: 'border-box' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>
-                    📝 关键副标题（补充说明）
-                  </label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={coverSubtitle}
-                    onChange={(e) => setCoverSubtitle(e.target.value)}
-                    placeholder="如：2026 UTMB OCC 女子前三 / 亲测不踩雷"
-                    style={{ width: '100%', fontSize: '0.78rem', padding: '0.35rem 0.5rem', boxSizing: 'border-box' }}
-                  />
-                </div>
-              </div>
-
-              <button
-                className="btn btn-primary"
-                style={{ width: '100%', padding: '0.55rem', fontSize: '0.82rem', background: 'linear-gradient(135deg, #ff2442, #e01b38)', border: 'none', fontWeight: 700 }}
-                onClick={() => {
-                  setActivePreviewTab('cover');
-                  downloadCoverImage();
-                }}
-              >
-                📥 立即导出高清封面标题图
-              </button>
-            </div>
-          )}
-        </section>
-
-        {/* Right Preview & Result Column */}
-        <section id="preview-panel-anchor" className="preview-panel" style={{ flex: '1.4' }}>
-          {uploadedImages.length > 0 && activeImage ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%' }}>
-
-              {/* View Switcher Tabs */}
-              <div style={{ display: 'flex', gap: '0.5rem', background: 'var(--bg-card)', padding: '0.35rem', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-                <button
-                  className={`btn ${activePreviewTab === 'styled' ? 'btn-primary' : 'btn-secondary'}`}
-                  style={{
-                    flex: 1,
-                    padding: '0.45rem',
-                    fontSize: '0.82rem',
-                    fontWeight: 700,
-                    borderRadius: '8px',
-                    background: activePreviewTab === 'styled' ? 'linear-gradient(135deg, #4f46e5, #6366f1)' : 'transparent',
-                    border: 'none',
-                    color: activePreviewTab === 'styled' ? '#fff' : 'var(--text-secondary)'
-                  }}
-                  onClick={() => setActivePreviewTab('styled')}
-                >
-                  🖼️ 画风重绘预览
-                </button>
-                <button
-                  className={`btn ${activePreviewTab === 'cover' ? 'btn-primary' : 'btn-secondary'}`}
-                  style={{
-                    flex: 1,
-                    padding: '0.45rem',
-                    fontSize: '0.82rem',
-                    fontWeight: 700,
-                    borderRadius: '8px',
-                    background: activePreviewTab === 'cover' ? 'linear-gradient(135deg, #ff2442, #ff4d66)' : 'transparent',
-                    border: 'none',
-                    color: activePreviewTab === 'cover' ? '#fff' : 'var(--text-secondary)'
-                  }}
-                  onClick={() => setActivePreviewTab('cover')}
-                >
-                  🏷️ 封面标题图预览
-                </button>
-              </div>
-
-              {activePreviewTab === 'cover' ? (
-                /* Cover Title Card Preview Card */
-                <div className="card" style={{ padding: '1rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-                    <div>
-                      <h3 style={{ fontSize: '1rem', fontWeight: 700, display: 'inline-block', marginRight: '8px' }}>🏷️ 封面标题图效果</h3>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                        ({coverStyle === 'giant' ? '💥 巨幕穿插风' : coverStyle === 'cinema' ? '🎬 电影大片风' : coverStyle === 'collage' ? '🎨 撞色拼贴风' : coverStyle === 'magazine' ? '📸 杂志速报风' : coverStyle === 'minimal' ? '🖼️ 极简质感风' : '⚡ 潮酷贴纸风'})
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-                      <button 
-                        className="btn btn-secondary" 
-                        style={{ padding: '0.4rem 0.65rem', fontSize: '0.75rem', fontWeight: '600' }} 
-                        onClick={() => {
-                          if (coverPreviewUri) {
-                            setWechatSaveModal({
-                              isOpen: true,
-                              imageSrc: coverPreviewUri,
-                              title: `小红书封面图 (${coverStyle})`,
-                              fileName: `xhs-cover-${coverStyle}-${Date.now()}.jpg`
-                            });
-                          } else {
-                            downloadCoverImage();
-                          }
-                        }}
-                        title="在微信内长按即可保存到手机相册"
-                      >
-                        📱 微信长按保存
-                      </button>
-                      <button 
-                        className="btn btn-primary" 
-                        style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #ff2442, #ff4d66)', border: 'none', fontWeight: '600' }} 
-                        onClick={downloadCoverImage}
-                      >
-                        📥 导出高清封面图
-                      </button>
-                    </div>
-                  </div>
-                  
-                  <div style={{ position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#0e1117', borderRadius: 'var(--radius-md)', overflow: 'hidden', padding: '0.75rem', minHeight: '380px' }}>
-                    {coverPreviewUri ? (
-                      <div style={{ position: 'relative', display: 'inline-block', lineHeight: 0, maxWidth: '100%', maxHeight: '520px' }}>
-                        <img 
-                          ref={previewImgRef}
-                          src={coverPreviewUri} 
-                          alt="Cover Preview" 
-                          style={{ maxWidth: '100%', maxHeight: '520px', objectFit: 'contain', borderRadius: 'var(--radius-sm)', boxShadow: '0 8px 24px rgba(0,0,0,0.35)', display: 'block' }}
-                        />
-                        {isDoodleMode && (
-                          <canvas
-                            ref={doodleCanvasRef}
-                            onPointerDown={handleDoodlePointerDown}
-                            onPointerMove={handleDoodlePointerMove}
-                            onPointerUp={handleDoodlePointerUp}
-                            onPointerLeave={handleDoodlePointerUp}
-                            width={previewImgRef.current ? previewImgRef.current.clientWidth : 400}
-                            height={previewImgRef.current ? previewImgRef.current.clientHeight : 533}
-                            style={{
-                              position: 'absolute',
-                              top: 0,
-                              left: 0,
-                              width: '100%',
-                              height: '100%',
-                              cursor: 'crosshair',
-                              touchAction: 'none',
-                              zIndex: 10
-                            }}
-                          />
-                        )}
-                      </div>
-                    ) : (
-                      <div className="spinner"></div>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                /* Image Preview Card (Style Transfer) */
-                <div className="card" style={{ padding: '1rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-                    <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>🖼️ 风格化效果预览</h3>
-                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-                      <button 
-                        className="btn btn-secondary" 
-                        style={{ padding: '0.4rem 0.65rem', fontSize: '0.75rem', fontWeight: '600' }} 
-                        onClick={() => {
-                          const src = activeImage?.styledSrc || activeImage?.src;
-                          if (src) {
-                            setWechatSaveModal({
-                              isOpen: true,
-                              imageSrc: src,
-                              title: `风格化效果图 (${activeImage?.activeStyle || '原图'})`,
-                              fileName: `xhs-style-${activeImage?.activeStyle || 'original'}-${activeIdx + 1}-${Date.now()}.jpg`
-                            });
-                          }
-                        }}
-                        title="在微信内长按即可保存到手机相册"
-                      >
-                        📱 微信长按保存
-                      </button>
-                      <button 
-                        className="btn btn-primary" 
-                        style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #ff2442, #ff4d66)', border: 'none', fontWeight: '600' }} 
-                        onClick={downloadActiveImage}
-                      >
-                        📥 导出当前图片
-                      </button>
-                    </div>
-                  </div>
-                  
-                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#f3f4f6', borderRadius: 'var(--radius-md)', overflow: 'hidden', padding: '1rem', minHeight: '300px' }}>
-                    <img 
-                      src={activeImage.styledSrc || activeImage.src} 
-                      alt="Preview" 
-                      style={{ maxWidth: '100%', maxHeight: '500px', objectFit: 'contain', borderRadius: 'var(--radius-sm)', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Copywriting Result Card */}
-              {generatedCopyOptions.length > 0 && (
-                <div className="card" style={{ padding: '1rem' }}>
-                  <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.75rem' }}>✍️ AI 生成文案</h3>
-                  
-                  <div style={{ display: 'flex', gap: '0.25rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem', marginBottom: '0.75rem' }}>
-                    {generatedCopyOptions.map((opt, idx) => (
-                      <button
-                        key={idx}
-                        className={`btn ${activeCopyOptionIdx === idx ? 'btn-primary' : 'btn-secondary'}`}
-                        style={{ flex: 1, padding: '0.4rem 0.25rem', fontSize: '0.75rem' }}
-                        onClick={() => applyCopyOption(idx)}
-                      >
-                        方案 {idx + 1}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div style={{ background: 'var(--bg-main)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', position: 'relative', marginBottom: '0.75rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                      <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
-                        ✨ 效果预览：
-                      </span>
-                      <div style={{ display: 'flex', gap: '0.4rem' }}>
-                        <button
-                          className="btn btn-secondary"
-                          style={{ padding: '0.2rem 0.5rem', fontSize: '0.7rem' }}
-                          onClick={() => {
-                            const opt = generatedCopyOptions[activeCopyOptionIdx];
-                            const fullText = `【${aiTitle || opt.title}】\n\n${aiBody || opt.body}\n\n${opt.tags}`;
-                            copyToClipboard(fullText, '✅ 文案已复制到剪贴板！');
-                          }}
-                        >
-                          📋 复制文案
-                        </button>
-                        <button
-                          className="btn btn-secondary"
-                          style={{ padding: '0.2rem 0.5rem', fontSize: '0.7rem' }}
-                          onClick={exportReportCard}
-                        >
-                          📸 导出报告卡片
-                        </button>
-
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px dotted var(--border-color)' }}>
-                      <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>标题：</span>
-                      <input 
-                        type="text" 
-                        value={aiTitle} 
-                        onChange={(e) => setAiTitle(e.target.value)}
-                        style={{
-                          flex: 1,
-                          border: 'none',
-                          outline: 'none',
-                          background: 'transparent',
-                          fontFamily: 'inherit',
-                          fontSize: '0.85rem',
-                          fontWeight: 800,
-                          color: 'var(--text-primary)',
-                          padding: '2px 4px',
-                          borderRadius: '4px',
-                          transition: 'background 0.2s',
-                          borderBottom: '1px dashed transparent'
-                        }}
-                        placeholder="在此输入标题..."
-                        onMouseEnter={(e) => e.target.style.borderBottom = '1px dashed var(--text-secondary)'}
-                        onMouseLeave={(e) => e.target.style.borderBottom = '1px dashed transparent'}
-                        onFocus={(e) => {
-                          e.target.style.backgroundColor = 'var(--bg-main)';
-                          e.target.style.borderBottom = '1px dashed var(--text-secondary)';
-                        }}
-                        onBlur={(e) => {
-                          e.target.style.backgroundColor = 'transparent';
-                          e.target.style.borderBottom = '1px dashed transparent';
-                        }}
-                      />
-                    </div>
-                    <div style={{ position: 'relative' }}>
-                      <textarea 
-                        value={aiBody} 
-                        onChange={(e) => setAiBody(e.target.value)}
-                        rows={10}
-                        style={{
-                          width: '100%',
-                          outline: 'none',
-                          background: 'transparent',
-                          fontFamily: 'inherit',
-                          fontSize: '0.8rem',
-                          color: 'var(--text-primary)',
-                          lineHeight: '1.5',
-                          resize: 'vertical',
-                          padding: '4px',
-                          boxSizing: 'border-box',
-                          borderRadius: '4px',
-                          transition: 'background 0.2s',
-                          border: '1px dashed transparent'
-                        }}
-                        placeholder="在此输入文案正文与标签..."
-                        onMouseEnter={(e) => e.target.style.border = '1px dashed var(--text-secondary)'}
-                        onMouseLeave={(e) => e.target.style.border = '1px dashed transparent'}
-                        onFocus={(e) => {
-                          e.target.style.backgroundColor = 'var(--bg-main)';
-                          e.target.style.border = '1px dashed var(--text-secondary)';
-                        }}
-                        onBlur={(e) => {
-                          e.target.style.backgroundColor = 'transparent';
-                          e.target.style.border = '1px dashed transparent';
-                        }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="card" style={{ width: '100%', height: '240px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6c757d', textAlign: 'center', padding: '1rem' }}>
-              <span>🌅 请先上传并勾选照片，开启艺术画风重绘与封面排版</span>
-            </div>
-          )}
-        </section>
-
-      </main>
-
-      {/* Mobile Floating Bottom Action Bar */}
-      {uploadedImages.length > 0 && (
-        <div className="mobile-bottom-bar">
-          <button 
-            type="button"
-            className="mobile-bar-btn secondary"
-            onClick={() => {
-              const nextTab = activePreviewTab === 'cover' ? 'styled' : 'cover';
-              setActivePreviewTab(nextTab);
-              document.getElementById('preview-panel-anchor')?.scrollIntoView({ behavior: 'smooth' });
-            }}
-          >
-            {activePreviewTab === 'cover' ? '🖼️ 看画风' : '🏷️ 看封面'}
-          </button>
-
-          <button 
-            type="button"
-            className="mobile-bar-btn secondary"
-            onClick={() => {
-              document.getElementById('preview-panel-anchor')?.scrollIntoView({ behavior: 'smooth' });
-            }}
-          >
-            👁️ 效果预览
-          </button>
-
-          {generatedCopyOptions.length > 0 && (
-            <button 
+        {/* 4. Fixed Native H5 Bottom Navigation & Action Dock */}
+        <nav className="h5-bottom-dock">
+          <div className="h5-dock-tabs">
+            <button
               type="button"
-              className="mobile-bar-btn secondary"
-              onClick={() => {
-                const opt = generatedCopyOptions[activeCopyOptionIdx];
-                const fullText = `【${aiTitle || opt.title}】\n\n${aiBody || opt.body}\n\n${opt.tags}`;
-                copyToClipboard(fullText, '✅ 文案已复制到剪贴板！');
-              }}
-              title="一键复制文案"
+              className={`h5-dock-tab ${activeTab === 'photos' ? 'active' : ''}`}
+              onClick={() => setActiveTab('photos')}
             >
-              📋 复制文案
+              <span className="dock-icon">📸</span>
+              <span className="dock-label">选图</span>
+              {uploadedImages.length > 0 && (
+                <span className="dock-badge">{uploadedImages.length}</span>
+              )}
             </button>
-          )}
 
-          <button 
+            <button
+              type="button"
+              className={`h5-dock-tab ${activeTab === 'style' ? 'active' : ''}`}
+              onClick={() => {
+                if (uploadedImages.length === 0) {
+                  showToast('请先上传或载入示例照片哦！');
+                  setActiveTab('photos');
+                  return;
+                }
+                setActiveTab('style');
+                setActivePreviewTab('styled');
+              }}
+            >
+              <span className="dock-icon">🎨</span>
+              <span className="dock-label">画风</span>
+              {activeImage?.activeStyle && <span className="dock-dot" />}
+            </button>
+
+            <button
+              type="button"
+              className={`h5-dock-tab ${activeTab === 'cover' ? 'active' : ''}`}
+              onClick={() => {
+                if (uploadedImages.length === 0) {
+                  showToast('请先上传或载入示例照片哦！');
+                  setActiveTab('photos');
+                  return;
+                }
+                setActiveTab('cover');
+                setActivePreviewTab('cover');
+              }}
+            >
+              <span className="dock-icon">🏷️</span>
+              <span className="dock-label">封面</span>
+            </button>
+
+            <button
+              type="button"
+              className={`h5-dock-tab ${activeTab === 'copy' ? 'active' : ''}`}
+              onClick={() => {
+                if (uploadedImages.length === 0) {
+                  showToast('请先上传或载入示例照片哦！');
+                  setActiveTab('photos');
+                  return;
+                }
+                setActiveTab('copy');
+              }}
+            >
+              <span className="dock-icon">✍️</span>
+              <span className="dock-label">文案</span>
+              {generatedCopyOptions.length > 0 && (
+                <span className="dock-badge">{generatedCopyOptions.length}</span>
+              )}
+            </button>
+          </div>
+
+          <button
             type="button"
-            className="mobile-bar-btn primary"
+            className="h5-dock-cta"
             onClick={() => {
+              if (uploadedImages.length === 0) {
+                fileInputRef.current?.click();
+                return;
+              }
               if (activePreviewTab === 'cover') {
                 downloadCoverImage();
               } else {
@@ -3927,85 +4036,86 @@ function App() {
               }
             }}
           >
-            📸 导出保存
+            {uploadedImages.length === 0
+              ? '📤 上传照片'
+              : (activePreviewTab === 'cover' ? '📥 存封面' : '📥 存美图')}
           </button>
-        </div>
-      )}
+        </nav>
 
-      {/* WeChat Long-Press Save Modal */}
-      {wechatSaveModal.isOpen && (
-        <div 
-          className="wechat-modal-overlay" 
-          onClick={() => setWechatSaveModal({ isOpen: false, imageSrc: '', title: '', fileName: '' })}
-        >
-          <div className="wechat-modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="wechat-modal-header">
-              <div className="wechat-modal-title">
-                <span>📱 {wechatSaveModal.title || '保存图片'}</span>
+        {/* WeChat Long-Press Save Modal */}
+        {wechatSaveModal.isOpen && (
+          <div
+            className="wechat-modal-overlay"
+            onClick={() => setWechatSaveModal({ isOpen: false, imageSrc: '', title: '', fileName: '' })}
+          >
+            <div className="wechat-modal-card" onClick={(e) => e.stopPropagation()}>
+              <div className="wechat-modal-header">
+                <div className="wechat-modal-title">
+                  <span>📱 {wechatSaveModal.title || '保存图片'}</span>
+                </div>
+                <button
+                  type="button"
+                  className="wechat-modal-close"
+                  onClick={() => setWechatSaveModal({ isOpen: false, imageSrc: '', title: '', fileName: '' })}
+                >
+                  ✕
+                </button>
               </div>
-              <button 
-                type="button"
-                className="wechat-modal-close" 
-                onClick={() => setWechatSaveModal({ isOpen: false, imageSrc: '', title: '', fileName: '' })}
-              >
-                ✕
-              </button>
-            </div>
 
-            <div className="wechat-save-tip-pulse">
-              <span className="tip-hand">👆</span>
-              <span>长按下方图片，选择<strong>【保存到手机 / 存储图像】</strong></span>
-            </div>
+              <div className="wechat-save-tip-pulse">
+                <span className="tip-hand">👆</span>
+                <span>长按下方图片，选择<strong>【保存到手机 / 存储图像】</strong></span>
+              </div>
 
-            <div className="wechat-modal-img-wrapper">
-              <img 
-                src={wechatSaveModal.imageSrc} 
-                alt={wechatSaveModal.title} 
-                className="wechat-modal-img"
-              />
-            </div>
+              <div className="wechat-modal-img-wrapper">
+                <img
+                  src={wechatSaveModal.imageSrc}
+                  alt={wechatSaveModal.title}
+                  className="wechat-modal-img"
+                />
+              </div>
 
-            <div className="wechat-modal-actions">
-              {generatedCopyOptions.length > 0 && (
-                <button 
+              <div className="wechat-modal-actions">
+                {generatedCopyOptions.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ flex: 1, padding: '0.6rem', fontSize: '0.82rem', fontWeight: 600 }}
+                    onClick={() => {
+                      const opt = generatedCopyOptions[activeCopyOptionIdx];
+                      const fullText = `【${aiTitle || opt.title}】\n\n${aiBody || opt.body}\n\n${opt.tags}`;
+                      copyToClipboard(fullText, '✅ 文案已复制！可直接粘贴发布');
+                    }}
+                  >
+                    📋 复制发文文案
+                  </button>
+                )}
+                <button
                   type="button"
                   className="btn btn-secondary"
                   style={{ flex: 1, padding: '0.6rem', fontSize: '0.82rem', fontWeight: 600 }}
                   onClick={() => {
-                    const opt = generatedCopyOptions[activeCopyOptionIdx];
-                    const fullText = `【${aiTitle || opt.title}】\n\n${aiBody || opt.body}\n\n${opt.tags}`;
-                    copyToClipboard(fullText, '✅ 文案已复制！可直接粘贴发布');
+                    const link = document.createElement('a');
+                    link.href = wechatSaveModal.imageSrc;
+                    link.download = wechatSaveModal.fileName || `xhs-${Date.now()}.jpg`;
+                    link.click();
+                    showToast('已开始下载文件！');
                   }}
                 >
-                  📋 复制发文文案
+                  📥 直接下载文件
                 </button>
-              )}
-              <button 
-                type="button"
-                className="btn btn-secondary"
-                style={{ flex: 1, padding: '0.6rem', fontSize: '0.82rem', fontWeight: 600 }}
-                onClick={() => {
-                  const link = document.createElement('a');
-                  link.href = wechatSaveModal.imageSrc;
-                  link.download = wechatSaveModal.fileName || `xhs-${Date.now()}.jpg`;
-                  link.click();
-                  showToast('已开始下载文件！');
-                }}
-              >
-                📥 直接下载文件
-              </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Floating Toast Notification */}
-      {toastMsg && (
-        <div className="toast-notification">
-          {toastMsg}
-        </div>
-      )}
-
+        {/* Floating Toast Notification */}
+        {toastMsg && (
+          <div className="toast-notification">
+            {toastMsg}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
