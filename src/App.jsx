@@ -1,6 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import piexif from 'piexifjs';
 import ExifReader from 'exifreader';
+import { FilmDarkroomPanel } from './spektra/FilmDarkroomPanel.jsx';
+import { SPEKTRA_UI_DEFAULTS } from './spektra/defaults.js';
+import { renderSpektraImage } from './spektra/spektraClient.js';
+import './spektra/spektra.css';
 
 const getPiexif = () => (piexif?.load ? piexif : (piexif?.default || piexif));
 
@@ -374,12 +378,21 @@ function App() {
   const [aiOperationName, setAiOperationName] = useState(''); 
   const [errorMsg, setErrorMsg] = useState('');
 
+  // SpektraLab Film Darkroom States
+  const [styleMode, setStyleMode] = useState('spektra'); // 'spektra' | 'ai'
+  const [spektraParams, setSpektraParams] = useState(() => ({ ...SPEKTRA_UI_DEFAULTS }));
+  const [isRenderingSpektra, setIsRenderingSpektra] = useState(false);
+  const [isBatchSpektra, setIsBatchSpektra] = useState(false);
+  const [isComparingOriginal, setIsComparingOriginal] = useState(false);
+
   // Refs
   const fileInputRef = useRef(null);
   const previewImgRef = useRef(null);
   const doodleCanvasRef = useRef(null);
   const isDrawingRef = useRef(false);
   const currentStrokeRef = useRef(null);
+  const spektraLiveTimerRef = useRef(null);
+  const spektraPreviewReqIdRef = useRef(0);
 
   // Helper: Dynamically load MediaPipe SelfieSegmentation from CDN
   const loadMediaPipe = () => {
@@ -974,7 +987,7 @@ function App() {
       'mogu': '没骨画风（风景）'
     };
     const styleLabel = styleLabelMap[styleName] || '画风重绘';
-    setAiOperationName(`豆包模型 ${styleLabel} (${targets.length}张)`);
+    setAiOperationName(`画风重绘 · ${styleLabel} (${targets.length}张)`);
     setErrorMsg('');
 
     try {
@@ -1025,8 +1038,11 @@ function App() {
           if (img.id === targetImage.id) {
             return { 
               ...img, 
+              aiRawSrc: result.image,
               styledSrc: watermarkedImage,
-              activeStyle: styleName
+              activeStyle: styleName,
+              activeStyleLabel: null,
+              spektraApplied: false
             };
           }
           return img;
@@ -1054,6 +1070,8 @@ function App() {
 
   // Restore styled image to original
   const restoreToOriginal = () => {
+    clearTimeout(spektraLiveTimerRef.current);
+    spektraPreviewReqIdRef.current += 1;
     let targets = uploadedImages.filter(img => img.selected !== false);
     if (targets.length === 0) {
       targets = [uploadedImages[activeIdx]].filter(Boolean);
@@ -1064,7 +1082,9 @@ function App() {
         return { 
           ...img, 
           styledSrc: null,
-          activeStyle: null
+          activeStyle: null,
+          activeStyleLabel: null,
+          spektraApplied: false
         };
       }
       return img;
@@ -1080,6 +1100,148 @@ function App() {
       });
       return next;
     });
+  };
+
+  // Live preview SpektraLab film simulation / edge perforations / date back on active image
+  const triggerLiveSpektraPreview = async (nextParams, targetImage) => {
+    if (!targetImage) return;
+    const reqId = ++spektraPreviewReqIdRef.current;
+    setIsRenderingSpektra(true);
+    setErrorMsg('');
+
+    try {
+      const inputSrc = (nextParams.sourceType === 'ai' && targetImage.aiRawSrc)
+        ? targetImage.aiRawSrc
+        : targetImage.src;
+      const res = await renderSpektraImage(inputSrc, nextParams, targetImage.exif, {
+        maxEdge: 1200,
+        frameOffset: 0
+      });
+      if (reqId !== spektraPreviewReqIdRef.current) return;
+
+      let finalImage = res.dataUrl;
+      if (!nextParams.border && nextParams.withLeicaWatermark) {
+        finalImage = await applyVisualWatermark(res.dataUrl, nextParams.film, 'SpektraLab Spectral', targetImage.exif);
+        if (reqId !== spektraPreviewReqIdRef.current) return;
+      }
+
+      const targetIdx = uploadedImages.findIndex((img) => img.id === targetImage.id);
+      setUploadedImages((prev) =>
+        prev.map((img) => {
+          if (img.id === targetImage.id) {
+            return {
+              ...img,
+              styledSrc: finalImage,
+              activeStyle: `spektra:${nextParams.film}`,
+              activeStyleLabel: res.filmLabel,
+              spektraApplied: true
+            };
+          }
+          return img;
+        })
+      );
+
+      if (targetIdx !== -1) {
+        setOutlineMasks((prev) => {
+          if (!prev[targetIdx]) return prev;
+          const next = { ...prev };
+          delete next[targetIdx];
+          return next;
+        });
+      }
+    } catch (err) {
+      if (reqId === spektraPreviewReqIdRef.current) {
+        console.error('[SpektraPreview]', err);
+        setErrorMsg(`胶片显影预览失败: ${err.message}`);
+      }
+    } finally {
+      if (reqId === spektraPreviewReqIdRef.current) {
+        setIsRenderingSpektra(false);
+      }
+    }
+  };
+
+  const handleUpdateSpektraParams = (patch) => {
+    const nextParams = { ...spektraParams, ...patch };
+    setSpektraParams(nextParams);
+    setActivePreviewTab('styled');
+    const target = uploadedImages[activeIdx];
+    if (!target) return;
+    clearTimeout(spektraLiveTimerRef.current);
+    spektraLiveTimerRef.current = setTimeout(() => {
+      triggerLiveSpektraPreview(nextParams, target);
+    }, 180);
+  };
+
+  const handleBatchSpektraDevelop = async () => {
+    let targets = uploadedImages.filter((img) => img.selected !== false);
+    if (targets.length === 0) {
+      const current = uploadedImages[activeIdx];
+      if (current) targets = [current];
+    }
+    if (targets.length === 0) return;
+
+    clearTimeout(spektraLiveTimerRef.current);
+    spektraPreviewReqIdRef.current += 1;
+    setIsBatchSpektra(true);
+    setIsLoading(true);
+    setAiOperationName(`SpektraLab 物理胶片冲印 (${targets.length}张)`);
+    setErrorMsg('');
+    setActivePreviewTab('styled');
+
+    try {
+      const updates = new Map();
+      const indicesToInvalidate = [];
+
+      for (let i = 0; i < targets.length; i++) {
+        const target = targets[i];
+        const inputSrc = (spektraParams.sourceType === 'ai' && target.aiRawSrc)
+          ? target.aiRawSrc
+          : target.src;
+        const res = await renderSpektraImage(inputSrc, spektraParams, target.exif, {
+          maxEdge: 2200,
+          frameOffset: i
+        });
+
+        let finalImage = res.dataUrl;
+        if (!spektraParams.border && spektraParams.withLeicaWatermark) {
+          finalImage = await applyVisualWatermark(res.dataUrl, spektraParams.film, 'SpektraLab Spectral', target.exif);
+        }
+
+        updates.set(target.id, {
+          styledSrc: finalImage,
+          activeStyle: `spektra:${spektraParams.film}`,
+          activeStyleLabel: res.filmLabel
+        });
+
+        const idx = uploadedImages.findIndex((img) => img.id === target.id);
+        if (idx !== -1) indicesToInvalidate.push(idx);
+      }
+
+      setUploadedImages((prev) =>
+        prev.map((img) => {
+          const patch = updates.get(img.id);
+          return patch ? { ...img, ...patch, spektraApplied: true } : img;
+        })
+      );
+
+      if (indicesToInvalidate.length > 0) {
+        setOutlineMasks((prev) => {
+          const next = { ...prev };
+          for (const idx of indicesToInvalidate) delete next[idx];
+          return next;
+        });
+      }
+
+      showToast(`🎞️ 已完成 ${targets.length} 张照片的物理胶片高清冲印！`);
+    } catch (err) {
+      console.error('[SpektraBatch]', err);
+      setErrorMsg(`胶片冲印失败: ${err.message}`);
+    } finally {
+      setIsBatchSpektra(false);
+      setIsLoading(false);
+      setAiOperationName('');
+    }
   };
 
   // Generate copywriting via backend LLM
@@ -1592,9 +1754,11 @@ function App() {
         ctx.fillStyle = '#1a1a1a';
         ctx.font = `bold ${fontSizeMain}px sans-serif`;
         
-        let rightTitle = 'Doubao Seedream 5.0';
+        let rightTitle = 'AI Style Studio';
         if (modelName === 'dashscope-wanx') {
           rightTitle = 'DashScope Wanx 2.1';
+        } else if (modelName === 'SpektraLab Spectral') {
+          rightTitle = 'SpektraLab Spectral';
         }
         ctx.fillText(rightTitle, canvas.width - paddingX, img.height + watermarkHeight * 0.42);
         
@@ -2861,9 +3025,9 @@ function App() {
               {/* Floating Feature Pills */}
               <div className="h5-feature-pills">
                 <span className="h5-pill">📍 EXIF 真实坐标</span>
+                <span className="h5-pill">🎞️ 物理胶片暗房</span>
                 <span className="h5-pill">🏮 7大艺术画风</span>
                 <span className="h5-pill">👤 3D人物穿插大字</span>
-                <span className="h5-pill">🔥 爆款笔记生成</span>
               </div>
             </div>
 
@@ -2886,11 +3050,11 @@ function App() {
 
                 <div className="h5-bento-card">
                   <div className="h5-bento-top">
-                    <span className="h5-bento-icon">🎨</span>
+                    <span className="h5-bento-icon">🎞️</span>
                     <span className="h5-bento-step">STEP 02</span>
                   </div>
-                  <h3>东方与潮流重绘</h3>
-                  <p>东方故事、白描、浅绛山水、没骨画及吉卜力/泥塑/胶片 7 大画风</p>
+                  <h3>物理胶片暗房 &amp; AI 重绘</h3>
+                  <p>SpektraLab 81波段胶片模拟、135/120齿孔片边、EXIF日期戳及7大AI画风</p>
                 </div>
 
                 <div className="h5-bento-card">
@@ -2978,7 +3142,7 @@ function App() {
                 <h1>你拍照我生文</h1>
                 <span>
                   {activeTab === 'photos' && 'Step 1/4 · 原图与时空元数据'}
-                  {activeTab === 'style' && 'Step 2/4 · AI 艺术画风重绘'}
+                  {activeTab === 'style' && 'Step 2/4 · 物理胶片暗房 & AI 画风'}
                   {activeTab === 'cover' && 'Step 3/4 · 3D 巨幕封面大片'}
                   {activeTab === 'copy' && 'Step 4/4 · 爆款笔记文案'}
                 </span>
@@ -3127,9 +3291,10 @@ function App() {
                     </>
                   ) : (
                     <span>
-                      {activeImage.activeStyle
-                        ? (styleNameBadgeMap[activeImage.activeStyle] || '🎨 已重绘')
-                        : '📷 原始实拍图'}
+                      {activeImage.activeStyleLabel ||
+                        (activeImage.activeStyle
+                          ? (styleNameBadgeMap[activeImage.activeStyle] || '🎨 已重绘')
+                          : '📷 原始实拍图')}
                     </span>
                   )}
                 </div>
@@ -3139,6 +3304,24 @@ function App() {
                   <div className="h5-canvas-chip top-right active-doodle" onClick={() => setIsDoodleMode(false)}>
                     ✍️ 手绘涂鸦中 · 点击完成
                   </div>
+                )}
+
+                {/* Press-and-hold Original Comparison Button */}
+                {activePreviewTab === 'styled' && activeImage.styledSrc && (
+                  <button
+                    type="button"
+                    className={`spk-compare-btn ${isComparingOriginal ? 'active' : ''}`}
+                    onPointerDown={() => setIsComparingOriginal(true)}
+                    onPointerUp={() => setIsComparingOriginal(false)}
+                    onPointerLeave={() => setIsComparingOriginal(false)}
+                    onPointerCancel={() => setIsComparingOriginal(false)}
+                  >
+                    {isComparingOriginal ? '📷 原图对比中' : '👁️ 按住看原图'}
+                  </button>
+                )}
+
+                {activePreviewTab === 'styled' && isRenderingSpektra && (
+                  <div className="spk-preview-badge">⏳ 光谱显影中…</div>
                 )}
 
                 {activePreviewTab === 'cover' ? (
@@ -3169,7 +3352,7 @@ function App() {
                 ) : (
                   <div className="h5-canvas-img-wrap">
                     <img
-                      src={activeImage.styledSrc || activeImage.src}
+                      src={isComparingOriginal ? activeImage.src : (activeImage.styledSrc || activeImage.src)}
                       alt="Styled Preview"
                       className="h5-stage-img"
                     />
@@ -3334,7 +3517,7 @@ function App() {
                           setActivePreviewTab('styled');
                         }}
                       >
-                        🎨 下一步：挑选 AI 艺术画风重绘 ➔
+                        🎨 下一步：进入胶片暗房 &amp; AI 画风 ➔
                       </button>
                     </div>
                   </div>
@@ -3342,12 +3525,49 @@ function App() {
               </div>
             )}
 
-            {/* TAB 2: AI ART STYLE TRANSFER */}
+            {/* TAB 2: SPEKTRALAB FILM DARKROOM & AI ART STYLE TRANSFER */}
             {uploadedImages.length > 0 && activeImage && activeTab === 'style' && (
+              <>
+                <div className="spk-mode-switcher">
+                  <button
+                    type="button"
+                    className={`spk-mode-btn ${styleMode === 'spektra' ? 'active' : ''}`}
+                    onClick={() => {
+                      setStyleMode('spektra');
+                      setActivePreviewTab('styled');
+                    }}
+                  >
+                    <span>🎞️ 物理胶片暗房</span>
+                    <span className="spk-mode-badge">SpektraLab</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`spk-mode-btn ai-tab ${styleMode === 'ai' ? 'active' : ''}`}
+                    onClick={() => {
+                      setStyleMode('ai');
+                      setActivePreviewTab('styled');
+                    }}
+                  >
+                    <span>🎨 画风重绘</span>
+                  </button>
+                </div>
+
+                {styleMode === 'spektra' ? (
+                  <FilmDarkroomPanel
+                    params={spektraParams}
+                    onUpdateParams={handleUpdateSpektraParams}
+                    activeImage={activeImage}
+                    selectedBatchCount={selectedBatchCount}
+                    isRenderingPreview={isRenderingSpektra}
+                    isBatchProcessing={isBatchSpektra}
+                    onBatchDevelop={handleBatchSpektraDevelop}
+                    onRestoreOriginal={restoreToOriginal}
+                  />
+                ) : (
               <div className="h5-panel-card">
                 <div className="h5-panel-header">
                   <div>
-                    <h2 className="h5-panel-title">🎨 豆包 AI 艺术画风重绘</h2>
+                    <h2 className="h5-panel-title">🎨 画风重绘</h2>
                     <p className="h5-panel-desc">点击任意画风即可对已勾选的 <strong>{selectedBatchCount}</strong> 张照片同步重绘并叠加徕卡白边水印</p>
                   </div>
                   {activeImage.styledSrc && (
@@ -3478,6 +3698,8 @@ function App() {
                   </div>
                 </div>
               </div>
+                )}
+              </>
             )}
 
             {/* TAB 3: COVER TITLE GENERATOR */}
