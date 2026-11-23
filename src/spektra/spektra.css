@@ -87,6 +87,23 @@
   color: #b45309;
 }
 
+.spk-raw-pill {
+  font-size: 0.6rem;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  color: #4f46e5;
+}
+
+.spk-export-res-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 2px;
+}
+
 .spk-section-stack {
   display: flex;
   flex-direction: column;

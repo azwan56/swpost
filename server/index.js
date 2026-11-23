@@ -22,6 +22,12 @@ const port = process.env.PORT || 5001;
 
 // Enable CORS for all origins and increase body size limit for base64 image uploads
 app.use(cors());
+app.use((req, res, next) => {
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+  next();
+});
 app.use(express.json({ limit: '50mb' }));
 
 // Serve static frontend assets from parent directory (for single-server deployments)

@@ -4,8 +4,10 @@ import { findFilm, loadSpektraCatalog, normalizeBaseUrl } from './catalog.js';
 import { buildEngineParams } from './defaults.js';
 import {
   applyExposureLeaks,
+  applyLinearOverlayFromCanvas,
   decorateFilmEdge,
   prepareFilmGateCanvas,
+  resampleRawGate,
   stampDate
 } from './presentation.js';
 
@@ -180,36 +182,58 @@ function injectExifToDataUrl(dataUrl, exif) {
 
 export async function renderSpektraImage(imageSrc, uiParams, exif = null, options = {}) {
   const {
-    maxEdge = 1280,
+    maxEdge = 1600,
     frameOffset = 0,
     preferInstant = false,
-    quality = 0.94
+    quality = 0.96,
+    rawData = null
   } = options;
 
-  const [img, catalog] = await Promise.all([
-    loadImageElement(imageSrc),
-    loadSpektraCatalog(import.meta.env.BASE_URL || '/')
-  ]);
-
+  const catalog = await loadSpektraCatalog(import.meta.env.BASE_URL || '/');
   const stockInfo = findFilm(catalog, uiParams.film);
-  const gateCanvas = prepareFilmGateCanvas(img, uiParams, maxEdge);
 
-  // Physical darkroom exposure order: expose date back & light leaks onto negative BEFORE film simulation
-  stampDate(gateCanvas, uiParams, exif);
-  applyExposureLeaks(gateCanvas, uiParams);
+  let w;
+  let h;
+  let floatRGB;
+  let sourceMeta;
 
-  const w = gateCanvas.width;
-  const h = gateCanvas.height;
-  const srcCtx = gateCanvas.getContext('2d', { willReadFrequently: true });
-  const imgData = srcCtx.getImageData(0, 0, w, h).data;
-  const floatRGB = new Float32Array(w * h * 3);
-  for (let i = 0; i < w * h; i++) {
-    floatRGB[i * 3] = imgData[i * 4] / 255;
-    floatRGB[i * 3 + 1] = imgData[i * 4 + 1] / 255;
-    floatRGB[i * 3 + 2] = imgData[i * 4 + 2] / 255;
+  if (rawData?.rgb16) {
+    const resampled = resampleRawGate(rawData, uiParams, maxEdge);
+    w = resampled.width;
+    h = resampled.height;
+    floatRGB = resampled.floatRGB;
+    applyLinearOverlayFromCanvas(floatRGB, w, h, uiParams, exif);
+    sourceMeta = {
+      sourceColorSpace: rawData.sourceColorSpace || 'ProPhoto RGB',
+      sourceEncoded: rawData.sourceEncoded !== undefined ? rawData.sourceEncoded : false,
+      origLongEdge: Math.max(rawData.width, rawData.height)
+    };
+  } else {
+    const img = await loadImageElement(imageSrc);
+    const gateCanvas = prepareFilmGateCanvas(img, uiParams, maxEdge);
+
+    // Physical darkroom exposure order: expose date back & light leaks onto negative BEFORE film simulation
+    stampDate(gateCanvas, uiParams, exif);
+    applyExposureLeaks(gateCanvas, uiParams);
+
+    w = gateCanvas.width;
+    h = gateCanvas.height;
+    const srcCtx = gateCanvas.getContext('2d', { willReadFrequently: true });
+    const imgData = srcCtx.getImageData(0, 0, w, h).data;
+    floatRGB = new Float32Array(w * h * 3);
+    for (let i = 0; i < w * h; i++) {
+      floatRGB[i * 3] = imgData[i * 4] / 255;
+      floatRGB[i * 3 + 1] = imgData[i * 4 + 1] / 255;
+      floatRGB[i * 3 + 2] = imgData[i * 4 + 2] / 255;
+    }
+    sourceMeta = {
+      sourceColorSpace: 'sRGB',
+      sourceEncoded: true,
+      origLongEdge: Math.max(img.naturalWidth || img.width, img.naturalHeight || img.height)
+    };
   }
 
-  const engineParams = buildEngineParams(uiParams, w, h, stockInfo);
+  const engineParams = buildEngineParams(uiParams, w, h, stockInfo, sourceMeta);
   const absBaseUrl = getAbsBaseUrl();
   const res = await callWorker(
     {
@@ -251,6 +275,7 @@ export async function renderSpektraImage(imageSrc, uiParams, exif = null, option
     engine: res.engine,
     width: framedCanvas.width,
     height: framedCanvas.height,
+    renderedMaxEdge: maxEdge,
     filmLabel: stockInfo ? (stockInfo.id === 'none' ? '📷 胶片边框/日期' : `🎞️ ${stockInfo.shortName || stockInfo.name}`) : '🎞️ 胶片模拟'
   };
 }

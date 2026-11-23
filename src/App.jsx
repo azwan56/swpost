@@ -3,6 +3,7 @@ import piexif from 'piexifjs';
 import ExifReader from 'exifreader';
 import { FilmDarkroomPanel } from './spektra/FilmDarkroomPanel.jsx';
 import { SPEKTRA_UI_DEFAULTS } from './spektra/defaults.js';
+import { isRawFile, decodeRawFile } from './spektra/rawDecoder.js';
 import { renderSpektraImage } from './spektra/spektraClient.js';
 import './spektra/spektra.css';
 
@@ -409,6 +410,7 @@ function App() {
       }
       const script = document.createElement('script');
       script.id = 'mediapipe-selfie-script';
+      script.crossOrigin = 'anonymous';
       script.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js';
       script.onload = () => resolve(window.SelfieSegmentation);
       script.onerror = (err) => reject(err);
@@ -735,45 +737,95 @@ function App() {
     }
     const filesToProcess = files.slice(0, availableSlots);
     const newImages = [];
-    
-    for (const file of filesToProcess) {
-      try {
-        const id = Math.random().toString(36).substring(2, 9);
-        const src = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = (event) => resolve(event.target.result);
-          reader.onerror = (err) => reject(err);
-          reader.readAsDataURL(file);
-        });
+    const hasRaw = filesToProcess.some(isRawFile);
+    if (hasRaw) {
+      setIsLoading(true);
+      setAiOperationName('正在 16 位线性解码 RAW 原片');
+    }
 
-        const dimensions = await new Promise((resolve) => {
-          const tempImg = new Image();
-          tempImg.onload = () => resolve({ w: tempImg.width, h: tempImg.height });
-          tempImg.onerror = () => resolve({ w: 1024, h: 1024 });
-          tempImg.src = src;
-        });
-
-        // Extract EXIF directly from the File object (supports HEIC, JPEG, PNG, TIFF)
-        let exif = null;
+    try {
+      for (const file of filesToProcess) {
         try {
-          exif = (await extractExifClient(file)) || (await extractExifClient(src));
-        } catch (exifErr) {
-          console.warn('[Upload] Failed to parse EXIF for image:', exifErr);
-        }
+          const id = Math.random().toString(36).substring(2, 9);
 
-        newImages.push({
-          id,
-          file,
-          src,
-          styledSrc: null,
-          activeStyle: null,
-          width: dimensions.w,
-          height: dimensions.h,
-          exif
-        });
-      } catch (fileErr) {
-        console.error('[Upload] Error processing file:', file?.name, fileErr);
-        setErrorMsg('部分图片处理失败，请重试');
+          if (isRawFile(file)) {
+            setAiOperationName(`正在 16 位线性解码 RAW 原片 (${file.name})`);
+            const decoded = await decodeRawFile(file, {
+              full: false,
+              baseUrl: import.meta.env.BASE_URL || '/'
+            });
+            let readerExif = null;
+            try {
+              readerExif = await extractExifClient(file);
+            } catch {
+              // ignore ExifReader fallback failure on proprietary RAW
+            }
+            const mergedExif = {
+              ...(readerExif || {}),
+              ...(decoded.exif || {}),
+              dateTime: decoded.exif?.dateTime || readerExif?.dateTime || null,
+              device: decoded.exif?.device || readerExif?.device || null,
+              make: decoded.exif?.make || readerExif?.make || null,
+              gps: readerExif?.gps || decoded.exif?.gps || null
+            };
+            newImages.push({
+              id,
+              file,
+              src: decoded.previewSrc,
+              styledSrc: null,
+              activeStyle: null,
+              width: decoded.width,
+              height: decoded.height,
+              exif: mergedExif,
+              isRaw: true,
+              rawData: decoded.rawData
+            });
+            continue;
+          }
+
+          const src = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (event) => resolve(event.target.result);
+            reader.onerror = (err) => reject(err);
+            reader.readAsDataURL(file);
+          });
+
+          const dimensions = await new Promise((resolve) => {
+            const tempImg = new Image();
+            tempImg.onload = () => resolve({ w: tempImg.width, h: tempImg.height });
+            tempImg.onerror = () => resolve({ w: 1024, h: 1024 });
+            tempImg.src = src;
+          });
+
+          // Extract EXIF directly from the File object (supports HEIC, JPEG, PNG, TIFF)
+          let exif = null;
+          try {
+            exif = (await extractExifClient(file)) || (await extractExifClient(src));
+          } catch (exifErr) {
+            console.warn('[Upload] Failed to parse EXIF for image:', exifErr);
+          }
+
+          newImages.push({
+            id,
+            file,
+            src,
+            styledSrc: null,
+            activeStyle: null,
+            width: dimensions.w,
+            height: dimensions.h,
+            exif,
+            isRaw: false,
+            rawData: null
+          });
+        } catch (fileErr) {
+          console.error('[Upload] Error processing file:', file?.name, fileErr);
+          setErrorMsg(fileErr?.message || '部分图片处理失败，请重试');
+        }
+      }
+    } finally {
+      if (hasRaw) {
+        setIsLoading(false);
+        setAiOperationName('');
       }
     }
 
@@ -1084,7 +1136,8 @@ function App() {
           styledSrc: null,
           activeStyle: null,
           activeStyleLabel: null,
-          spektraApplied: false
+          spektraApplied: false,
+          spektraRenderedEdge: 0
         };
       }
       return img;
@@ -1102,6 +1155,50 @@ function App() {
     });
   };
 
+  // Shared helper: develop a single photo via SpektraLab (handles full-sensor RAW upgrade for HD export)
+  const developSingleSpektraTarget = async (targetImage, paramsSnapshot, targetEdge, frameOffset = 0) => {
+    const useAiInput = paramsSnapshot.sourceType === 'ai' && targetImage.aiRawSrc;
+    let activeRawData = useAiInput ? null : (targetImage.rawData || null);
+
+    if (
+      !useAiInput &&
+      targetImage.isRaw &&
+      targetImage.file &&
+      targetEdge > Math.max(activeRawData?.width || 0, activeRawData?.height || 0) &&
+      !activeRawData?.isFullRaw
+    ) {
+      const fullDecoded = await decodeRawFile(targetImage.file, {
+        full: true,
+        baseUrl: import.meta.env.BASE_URL || '/'
+      });
+      activeRawData = fullDecoded.rawData;
+    }
+
+    const inputSrc = useAiInput ? targetImage.aiRawSrc : targetImage.src;
+    const res = await renderSpektraImage(inputSrc, paramsSnapshot, targetImage.exif, {
+      maxEdge: targetEdge,
+      frameOffset,
+      rawData: activeRawData
+    });
+
+    let finalImage = res.dataUrl;
+    if (!paramsSnapshot.border && paramsSnapshot.withLeicaWatermark) {
+      finalImage = await applyVisualWatermark(
+        res.dataUrl,
+        paramsSnapshot.film,
+        'SpektraLab Spectral',
+        targetImage.exif
+      );
+    }
+
+    return {
+      finalImage,
+      filmLabel: res.filmLabel,
+      renderedEdge: res.renderedMaxEdge || targetEdge,
+      upgradedRawData: activeRawData && activeRawData !== targetImage.rawData ? activeRawData : null
+    };
+  };
+
   // Live preview SpektraLab film simulation / edge perforations / date back on active image
   const triggerLiveSpektraPreview = async (nextParams, targetImage) => {
     if (!targetImage) return;
@@ -1110,20 +1207,8 @@ function App() {
     setErrorMsg('');
 
     try {
-      const inputSrc = (nextParams.sourceType === 'ai' && targetImage.aiRawSrc)
-        ? targetImage.aiRawSrc
-        : targetImage.src;
-      const res = await renderSpektraImage(inputSrc, nextParams, targetImage.exif, {
-        maxEdge: 1200,
-        frameOffset: 0
-      });
+      const result = await developSingleSpektraTarget(targetImage, nextParams, 1600, 0);
       if (reqId !== spektraPreviewReqIdRef.current) return;
-
-      let finalImage = res.dataUrl;
-      if (!nextParams.border && nextParams.withLeicaWatermark) {
-        finalImage = await applyVisualWatermark(res.dataUrl, nextParams.film, 'SpektraLab Spectral', targetImage.exif);
-        if (reqId !== spektraPreviewReqIdRef.current) return;
-      }
 
       const targetIdx = uploadedImages.findIndex((img) => img.id === targetImage.id);
       setUploadedImages((prev) =>
@@ -1131,10 +1216,11 @@ function App() {
           if (img.id === targetImage.id) {
             return {
               ...img,
-              styledSrc: finalImage,
+              styledSrc: result.finalImage,
               activeStyle: `spektra:${nextParams.film}`,
-              activeStyleLabel: res.filmLabel,
-              spektraApplied: true
+              activeStyleLabel: result.filmLabel,
+              spektraApplied: true,
+              spektraRenderedEdge: result.renderedEdge
             };
           }
           return img;
@@ -1164,6 +1250,10 @@ function App() {
   const handleUpdateSpektraParams = (patch) => {
     const nextParams = { ...spektraParams, ...patch };
     setSpektraParams(nextParams);
+    const keys = Object.keys(patch);
+    if (keys.length === 1 && keys[0] === 'exportMaxEdge') {
+      return;
+    }
     setActivePreviewTab('styled');
     const target = uploadedImages[activeIdx];
     if (!target) return;
@@ -1181,11 +1271,12 @@ function App() {
     }
     if (targets.length === 0) return;
 
+    const targetEdge = spektraParams.exportMaxEdge || 3600;
     clearTimeout(spektraLiveTimerRef.current);
     spektraPreviewReqIdRef.current += 1;
     setIsBatchSpektra(true);
     setIsLoading(true);
-    setAiOperationName(`SpektraLab 物理胶片冲印 (${targets.length}张)`);
+    setAiOperationName(`SpektraLab 物理胶片冲印 ${targetEdge}px (${targets.length}张)`);
     setErrorMsg('');
     setActivePreviewTab('styled');
 
@@ -1195,23 +1286,20 @@ function App() {
 
       for (let i = 0; i < targets.length; i++) {
         const target = targets[i];
-        const inputSrc = (spektraParams.sourceType === 'ai' && target.aiRawSrc)
-          ? target.aiRawSrc
-          : target.src;
-        const res = await renderSpektraImage(inputSrc, spektraParams, target.exif, {
-          maxEdge: 2200,
-          frameOffset: i
-        });
-
-        let finalImage = res.dataUrl;
-        if (!spektraParams.border && spektraParams.withLeicaWatermark) {
-          finalImage = await applyVisualWatermark(res.dataUrl, spektraParams.film, 'SpektraLab Spectral', target.exif);
-        }
+        const result = await developSingleSpektraTarget(target, spektraParams, targetEdge, i);
 
         updates.set(target.id, {
-          styledSrc: finalImage,
+          styledSrc: result.finalImage,
           activeStyle: `spektra:${spektraParams.film}`,
-          activeStyleLabel: res.filmLabel
+          activeStyleLabel: result.filmLabel,
+          spektraRenderedEdge: result.renderedEdge,
+          ...(result.upgradedRawData
+            ? {
+                rawData: result.upgradedRawData,
+                width: result.upgradedRawData.width,
+                height: result.upgradedRawData.height
+              }
+            : {})
         });
 
         const idx = uploadedImages.findIndex((img) => img.id === target.id);
@@ -1233,12 +1321,54 @@ function App() {
         });
       }
 
-      showToast(`🎞️ 已完成 ${targets.length} 张照片的物理胶片高清冲印！`);
+      showToast(`🎞️ 已完成 ${targets.length} 张照片的 ${targetEdge}px 高清暗房冲印！`);
     } catch (err) {
       console.error('[SpektraBatch]', err);
       setErrorMsg(`胶片冲印失败: ${err.message}`);
     } finally {
       setIsBatchSpektra(false);
+      setIsLoading(false);
+      setAiOperationName('');
+    }
+  };
+
+  // Ensure export / long-press save uses full exportMaxEdge rather than 1600px live preview
+  const ensureHighResSpektraImage = async (targetImage, frameOffset = 0) => {
+    if (!targetImage) return '';
+    const targetEdge = spektraParams.exportMaxEdge || 3600;
+    const origLong = Math.max(targetImage.width || 0, targetImage.height || 0);
+    const alreadyFullNative = !targetImage.isRaw && origLong > 0 && origLong <= (targetImage.spektraRenderedEdge || 0);
+    if (!targetImage.spektraApplied || alreadyFullNative || (targetImage.spektraRenderedEdge || 0) >= targetEdge) {
+      return targetImage.styledSrc || targetImage.src;
+    }
+
+    setIsLoading(true);
+    setAiOperationName(`正在生成 ${targetEdge}px 超清胶片成片`);
+    try {
+      const result = await developSingleSpektraTarget(targetImage, spektraParams, targetEdge, frameOffset);
+      setUploadedImages((prev) =>
+        prev.map((img) =>
+          img.id === targetImage.id
+            ? {
+                ...img,
+                styledSrc: result.finalImage,
+                activeStyle: `spektra:${spektraParams.film}`,
+                activeStyleLabel: result.filmLabel,
+                spektraApplied: true,
+                spektraRenderedEdge: result.renderedEdge,
+                ...(result.upgradedRawData
+                  ? {
+                      rawData: result.upgradedRawData,
+                      width: result.upgradedRawData.width,
+                      height: result.upgradedRawData.height
+                    }
+                  : {})
+              }
+            : img
+        )
+      );
+      return result.finalImage;
+    } finally {
       setIsLoading(false);
       setAiOperationName('');
     }
@@ -2941,14 +3071,19 @@ function App() {
 
 
 
-  // Download the currently displayed styled (or original) active image
-  const downloadActiveImage = () => {
+  // Download the currently displayed styled (or original) active image at full HD resolution
+  const downloadActiveImage = async () => {
     const activeImage = uploadedImages[activeIdx];
     if (!activeImage) return;
 
-    const displaySrc = activeImage.styledSrc || activeImage.src;
-    const fileName = `xhs-style-${activeImage.activeStyle || 'original'}-${activeIdx + 1}-${Date.now()}.jpg`;
-    handleSaveOrDownloadImage(displaySrc, fileName, `风格化效果图 (${activeImage.activeStyle || '原图'})`);
+    try {
+      const displaySrc = await ensureHighResSpektraImage(activeImage, activeIdx);
+      const fileName = `xhs-style-${activeImage.activeStyle || 'original'}-${activeIdx + 1}-${Date.now()}.jpg`;
+      handleSaveOrDownloadImage(displaySrc, fileName, `风格化效果图 (${activeImage.activeStyleLabel || activeImage.activeStyle || '原图'})`);
+    } catch (err) {
+      console.error('Export image failed:', err);
+      setErrorMsg(`高清导出失败: ${err.message}`);
+    }
   };
 
   const activeImage = uploadedImages[activeIdx];
@@ -2981,7 +3116,7 @@ function App() {
           type="file"
           ref={fileInputRef}
           style={{ display: 'none' }}
-          accept="image/*"
+          accept="image/*,.dng,.arw,.cr2,.cr3,.nef,.nrw,.raf,.rw2,.orf,.pef,.srw,.raw"
           multiple
           onChange={handlePhotosUpload}
         />
@@ -3119,7 +3254,7 @@ function App() {
         type="file"
         ref={fileInputRef}
         style={{ display: 'none' }}
-        accept="image/*"
+        accept="image/*,.dng,.arw,.cr2,.cr3,.nef,.nrw,.raf,.rw2,.orf,.pef,.srw,.raw"
         multiple
         onChange={handlePhotosUpload}
       />
@@ -3237,7 +3372,7 @@ function App() {
                   <button
                     type="button"
                     className="h5-stage-action-btn"
-                    onClick={() => {
+                    onClick={async () => {
                       if (activePreviewTab === 'cover') {
                         if (coverPreviewUri) {
                           setWechatSaveModal({
@@ -3250,14 +3385,19 @@ function App() {
                           downloadCoverImage();
                         }
                       } else {
-                        const src = activeImage?.styledSrc || activeImage?.src;
-                        if (src) {
-                          setWechatSaveModal({
-                            isOpen: true,
-                            imageSrc: src,
-                            title: `风格化效果图 (${activeImage?.activeStyle || '原图'})`,
-                            fileName: `xhs-style-${activeImage?.activeStyle || 'original'}-${activeIdx + 1}-${Date.now()}.jpg`
-                          });
+                        try {
+                          const src = await ensureHighResSpektraImage(activeImage, activeIdx);
+                          if (src) {
+                            setWechatSaveModal({
+                              isOpen: true,
+                              imageSrc: src,
+                              title: `风格化效果图 (${activeImage?.activeStyleLabel || activeImage?.activeStyle || '原图'})`,
+                              fileName: `xhs-style-${activeImage?.activeStyle || 'original'}-${activeIdx + 1}-${Date.now()}.jpg`
+                            });
+                          }
+                        } catch (err) {
+                          console.error('Prepare high-res save failed:', err);
+                          setErrorMsg(`高清存图失败: ${err.message}`);
                         }
                       }
                     }}
@@ -3462,7 +3602,7 @@ function App() {
                   >
                     <div className="h5-upload-icon">📤</div>
                     <div className="h5-upload-title">点击从手机相册选择照片</div>
-                    <div className="h5-upload-sub">支持 JPG / PNG / HEIC 原图 · 最多 4 张连传</div>
+                    <div className="h5-upload-sub">支持 JPG / PNG / HEIC / RAW 原片（DNG·ARW·CR2·NEF 等）· 最多 4 张</div>
                   </div>
                 )}
 

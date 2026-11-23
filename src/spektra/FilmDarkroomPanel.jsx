@@ -92,6 +92,9 @@ export function FilmDarkroomPanel({
           <div className="spk-title-row">
             <h2 className="h5-panel-title">🎞️ SpektraLab 物理胶片暗房</h2>
             <span className={`spk-engine-pill ${engineBadge.cls}`}>{engineBadge.text}</span>
+            {activeImage?.isRaw && (
+              <span className="spk-raw-pill">🔬 16位线性 RAW 无损管线</span>
+            )}
           </div>
           <p className="h5-panel-desc">
             81 波段真实染料层模拟 · 135/120 齿孔片边 · EXIF 石英日期后背
@@ -184,6 +187,26 @@ export function FilmDarkroomPanel({
               </select>
             </div>
 
+            <div className="spk-field-block" style={{ marginBottom: 10 }}>
+              <span className="spk-label">🎚️ 测光模式</span>
+              <div className="h5-pill-group">
+                {[
+                  { id: 'off', label: '关闭 · 原片曝光' },
+                  { id: 'highlight', label: '高光保护' },
+                  { id: 'average', label: '自动均衡' }
+                ].map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    className={`h5-choice-pill ${(params.metering || 'off') === m.id ? 'active' : ''}`}
+                    onClick={() => onUpdateParams({ metering: m.id })}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="spk-sliders-header">
               <span className="spk-label">🎛️ 暗房显影微调</span>
               <button
@@ -191,7 +214,9 @@ export function FilmDarkroomPanel({
                 className="spk-reset-link"
                 onClick={() =>
                   onUpdateParams({
-                    exposure: SPEKTRA_UI_DEFAULTS.exposure,
+                    darkroomExposure: SPEKTRA_UI_DEFAULTS.darkroomExposure,
+                    metering: SPEKTRA_UI_DEFAULTS.metering,
+                    highlightProtect: SPEKTRA_UI_DEFAULTS.highlightProtect,
                     temperature: SPEKTRA_UI_DEFAULTS.temperature,
                     contrast: SPEKTRA_UI_DEFAULTS.contrast,
                     grain: SPEKTRA_UI_DEFAULTS.grain,
@@ -206,7 +231,8 @@ export function FilmDarkroomPanel({
 
             <div className="spk-slider-grid">
               {[
-                { key: 'exposure', label: '曝光 EV', min: -2, max: 2, step: 0.1, fmt: (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}` },
+                { key: 'darkroomExposure', label: '暗房曝光', min: -3, max: 3, step: 0.1, fmt: (v) => `${v > 0 ? '+' : ''}${Number(v).toFixed(1)} EV` },
+                { key: 'highlightProtect', label: '高光保护', min: 0, max: 100, step: 5, fmt: (v) => `${v}%` },
                 { key: 'temperature', label: '色温冷暖', min: -60, max: 60, step: 2, fmt: (v) => `${v > 0 ? '+' : ''}${v}` },
                 { key: 'contrast', label: '反差对比', min: -40, max: 40, step: 2, fmt: (v) => `${v > 0 ? '+' : ''}${v}` },
                 { key: 'grain', label: '银盐颗粒', min: 0, max: 100, step: 5, fmt: (v) => `${v}%` },
@@ -604,6 +630,26 @@ export function FilmDarkroomPanel({
             <span>底部叠加「闪贴 AI · EXIF」白边摄影水印</span>
           </label>
         )}
+
+        <div className="spk-export-res-row">
+          <span className="spk-label">📐 导出分辨率</span>
+          <div className="h5-pill-group">
+            {[
+              { val: 2400, label: '2400px 社交高清' },
+              { val: 3600, label: '3600px 超清冲印' },
+              { val: 6000, label: '6000px 原图级' }
+            ].map((opt) => (
+              <button
+                key={opt.val}
+                type="button"
+                className={`h5-choice-pill ${(params.exportMaxEdge || 3600) === opt.val ? 'active' : ''}`}
+                onClick={() => onUpdateParams({ exportMaxEdge: opt.val })}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       <button

@@ -270,9 +270,7 @@ export function isVerticalStrip(imgW, imgH, params) {
   return imgH > imgW && f.w > f.h;
 }
 
-export function prepareFilmGateCanvas(img, params, maxEdge = 1280) {
-  const srcW = img.naturalWidth || img.width;
-  const srcH = img.naturalHeight || img.height;
+function computeGateCrop(srcW, srcH, params, maxEdge = 1600) {
   const f = EDGE_FORMATS[params?.edgeFormat || '135'] || EDGE_FORMATS['135'];
   const vertical = isVerticalStrip(srcW, srcH, params);
 
@@ -295,6 +293,13 @@ export function prepareFilmGateCanvas(img, params, maxEdge = 1280) {
   const scale = Math.min(1, maxEdge / Math.max(cropW, cropH));
   const outW = Math.max(2, Math.round(cropW * scale));
   const outH = Math.max(2, Math.round(cropH * scale));
+  return { sx, sy, cropW, cropH, outW, outH };
+}
+
+export function prepareFilmGateCanvas(img, params, maxEdge = 1600) {
+  const srcW = img.naturalWidth || img.width;
+  const srcH = img.naturalHeight || img.height;
+  const { sx, sy, cropW, cropH, outW, outH } = computeGateCrop(srcW, srcH, params, maxEdge);
 
   const canvas = document.createElement('canvas');
   canvas.width = outW;
@@ -304,6 +309,81 @@ export function prepareFilmGateCanvas(img, params, maxEdge = 1280) {
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(img, sx, sy, cropW, cropH, 0, 0, outW, outH);
   return canvas;
+}
+
+export function resampleRawGate(rawData, params, maxEdge = 1600) {
+  const { rgb16, width: srcW, height: srcH, channels = 3 } = rawData;
+  const { sx, sy, cropW, cropH, outW, outH } = computeGateCrop(srcW, srcH, params, maxEdge);
+  const floatRGB = new Float32Array(outW * outH * 3);
+  const inv65535 = 1 / 65535;
+
+  for (let y = 0; y < outH; y++) {
+    const fy = Math.max(0, Math.min(srcH - 1, sy + ((y + 0.5) / outH) * cropH - 0.5));
+    const y0 = Math.floor(fy);
+    const y1 = Math.min(srcH - 1, y0 + 1);
+    const ty = fy - y0;
+    const w0y = 1 - ty;
+
+    for (let x = 0; x < outW; x++) {
+      const fx = Math.max(0, Math.min(srcW - 1, sx + ((x + 0.5) / outW) * cropW - 0.5));
+      const x0 = Math.floor(fx);
+      const x1 = Math.min(srcW - 1, x0 + 1);
+      const tx = fx - x0;
+      const w0x = 1 - tx;
+
+      const i00 = (y0 * srcW + x0) * channels;
+      const i10 = (y0 * srcW + x1) * channels;
+      const i01 = (y1 * srcW + x0) * channels;
+      const i11 = (y1 * srcW + x1) * channels;
+      const dst = (y * outW + x) * 3;
+
+      for (let k = 0; k < 3; k++) {
+        const top = rgb16[i00 + k] * w0x + rgb16[i10 + k] * tx;
+        const bot = rgb16[i01 + k] * w0x + rgb16[i11 + k] * tx;
+        floatRGB[dst + k] = (top * w0y + bot * ty) * inv65535;
+      }
+    }
+  }
+
+  return { floatRGB, width: outW, height: outH };
+}
+
+export function applyLinearOverlayFromCanvas(floatRGB, width, height, params, exif = null) {
+  if (!params?.dateOn && !(Number(params?.edgeLeaks || 0) > 0)) return;
+  const overlayCanvas = document.createElement('canvas');
+  overlayCanvas.width = width;
+  overlayCanvas.height = height;
+  const ctx = overlayCanvas.getContext('2d', { willReadFrequently: true });
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, width, height);
+
+  stampDate(overlayCanvas, params, exif);
+  applyExposureLeaks(overlayCanvas, params);
+
+  const bytes = ctx.getImageData(0, 0, width, height).data;
+  const dec = (u8) => {
+    const x = u8 / 255;
+    return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+  };
+  const isProPhoto = true; // Used for linear ProPhoto RGB RAW pipeline
+
+  for (let i = 0; i < width * height; i++) {
+    const bIdx = i * 4;
+    if (bytes[bIdx] === 0 && bytes[bIdx + 1] === 0 && bytes[bIdx + 2] === 0) continue;
+    const lr = dec(bytes[bIdx]);
+    const lg = dec(bytes[bIdx + 1]);
+    const lb = dec(bytes[bIdx + 2]);
+    const fIdx = i * 3;
+    if (isProPhoto) {
+      floatRGB[fIdx] += 0.5293 * lr + 0.3301 * lg + 0.1406 * lb;
+      floatRGB[fIdx + 1] += 0.0984 * lr + 0.8734 * lg + 0.0282 * lb;
+      floatRGB[fIdx + 2] += 0.0169 * lr + 0.1177 * lg + 0.8654 * lb;
+    } else {
+      floatRGB[fIdx] += lr;
+      floatRGB[fIdx + 1] += lg;
+      floatRGB[fIdx + 2] += lb;
+    }
+  }
 }
 
 function drawRoundedRectPath(ctx, x, y, w, h, r) {

@@ -22,3 +22,7 @@ This directory contains prebuilt WebAssembly engine binaries, constants, and spe
 
 - **6 Product Profiles (`cinestill_800t`, `fujifilm_neopan_acros_100_ii`, `ilford_hp5_plus_400`, `ilford_multigrade_iv_rc`, `kodak_tmax_100`, `kodak_tri_x_400`)**
   - Derived/authored in `JamesQiu2005/SpektraLab` from manufacturer datasheets (`cinestill_800t` aliases `kodak_vision3_500t` with `antihalation: "no"`).
+
+- **LibRaw-Wasm (`vendor/libraw/`)**
+  - Browser 16-bit camera RAW decoder (`index.js`, `worker.js`, `libraw.wasm`, v1.6.0, vendored from `cut-hand/spektra-web`)
+  - Based on LibRaw (LGPL-2.1 / CDDL-1.0) and `libraw-wasm` by ybouane and contributors.

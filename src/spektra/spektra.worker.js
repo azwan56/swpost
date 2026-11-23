@@ -195,6 +195,72 @@ async function handleMessage(data) {
     };
   }
 
+  if (data.type === 'convert') {
+    if (data.baseUrl) absBaseUrl = ensureBase(data.baseUrl);
+    if (wasmState === 'idle') {
+      await initWasmEngine();
+    } else if (wasmState === 'loading' && wasmInitPromise) {
+      await wasmInitPromise;
+    }
+    const input = new Float32Array(data.pixels);
+    const srcSpace = data.source || 'ProPhoto RGB';
+    const dstSpace = data.target || 'sRGB';
+    const encoded = Boolean(data.encoded);
+
+    if (wasmState === 'ready' && wasmModule) {
+      const m = wasmModule;
+      const n = input.length;
+      const p = m._malloc(n * 4);
+      const q = m._malloc(n * 4);
+      if (!p || !q) {
+        if (p) m._free(p);
+        if (q) m._free(q);
+        throw new Error('色彩转换内存不足');
+      }
+      try {
+        m.HEAPF32.set(input, p / 4);
+        const ok = m.ccall(
+          'spk_convert',
+          'number',
+          ['number', 'number', 'number', 'string', 'string', 'number'],
+          [p, q, n / 3, srcSpace, dstSpace, +encoded]
+        );
+        if (!ok) {
+          throw new Error(m.UTF8ToString(m._spk_error()) || 'spk_convert failed');
+        }
+        const out = m.HEAPF32.slice(q / 4, q / 4 + n);
+        return {
+          id: data.id,
+          type: 'convert',
+          pixels: out.buffer
+        };
+      } finally {
+        m._free(p);
+        m._free(q);
+      }
+    }
+
+    // JS fallback ProPhoto linear -> sRGB encoded
+    const out = new Float32Array(input.length);
+    const enc = (c) => (c <= 0.0031308 ? 12.92 * Math.max(0, c) : 1.055 * (Math.max(0, c) ** (1 / 2.4)) - 0.055);
+    for (let i = 0; i < input.length; i += 3) {
+      const r = input[i];
+      const g = input[i + 1];
+      const b = input[i + 2];
+      const sr = 2.034193 * r - 0.727420 * g - 0.306766 * b;
+      const sg = -0.228811 * r + 1.231729 * g - 0.002922 * b;
+      const sb = -0.008565 * r - 0.153273 * g + 1.161839 * b;
+      out[i] = Math.min(1, Math.max(0, enc(sr)));
+      out[i + 1] = Math.min(1, Math.max(0, enc(sg)));
+      out[i + 2] = Math.min(1, Math.max(0, enc(sb)));
+    }
+    return {
+      id: data.id,
+      type: 'convert',
+      pixels: out.buffer
+    };
+  }
+
   if (data.type === 'render') {
     if (data.baseUrl) absBaseUrl = ensureBase(data.baseUrl);
     const { width, height, params, pixels } = data;
@@ -255,7 +321,9 @@ self.onmessage = (event) => {
   queue = queue
     .then(() => handleMessage(data))
     .then((result) => {
-      const transfer = result.rgba ? [result.rgba] : [];
+      const transfer = [];
+      if (result.rgba) transfer.push(result.rgba);
+      if (result.pixels) transfer.push(result.pixels);
       self.postMessage(result, transfer);
     })
     .catch((err) => {

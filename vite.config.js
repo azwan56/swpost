@@ -7,6 +7,10 @@ export default defineConfig({
   // In production, set VITE_BASE_PATH=/swpost/ for subpath deployment
   base: process.env.FIGMA_PUBLIC_URL || process.env.VITE_BASE_PATH || '/',
   server: {
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp'
+    },
     ...(process.env.FIGMA ? {
       port: Number(process.env.PORT) || 5173,
       host: process.env.FIGMA_DEV_SERVER_HOST || '0.0.0.0',
@@ -18,6 +22,12 @@ export default defineConfig({
         changeOrigin: true,
         secure: false
       }
+    }
+  },
+  preview: {
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp'
     }
   }
 })

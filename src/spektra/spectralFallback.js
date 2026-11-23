@@ -351,6 +351,32 @@ function hash2D(x, y) {
   return ((a ^ (a >>> 16)) >>> 0) / 4294967295;
 }
 
+const PROPHOTO_TO_SRGB_LIN = [
+  [2.034193, -0.727420, -0.306766],
+  [-0.228811, 1.231729, -0.002922],
+  [-0.008565, -0.153273, 1.161839]
+];
+
+function toLinearSRGB(r, g, b, p) {
+  let lr = r;
+  let lg = g;
+  let lb = b;
+  if (p.sourceEncoded !== false) {
+    lr = decodeSRGB(lr);
+    lg = decodeSRGB(lg);
+    lb = decodeSRGB(lb);
+  } else if (p.sourceColorSpace === 'ProPhoto RGB') {
+    const m = PROPHOTO_TO_SRGB_LIN;
+    const nr = Math.max(0, m[0][0] * lr + m[0][1] * lg + m[0][2] * lb);
+    const ng = Math.max(0, m[1][0] * lr + m[1][1] * lg + m[1][2] * lb);
+    const nb = Math.max(0, m[2][0] * lr + m[2][1] * lg + m[2][2] * lb);
+    lr = nr;
+    lg = ng;
+    lb = nb;
+  }
+  return [lr, lg, lb];
+}
+
 export function renderPassthrough({ floatRGB, width, height, params: p }) {
   const n = width * height;
   const out = new Uint8ClampedArray(n * 4);
@@ -360,7 +386,8 @@ export function renderPassthrough({ floatRGB, width, height, params: p }) {
     const u = x / width;
     const v = y / height;
     const vig = 1 - ((p.vignette || 0) / 100) * clamp((((u - 0.5) ** 2) + ((v - 0.5) ** 2)) * 1.5);
-    const rgb = postEffects([floatRGB[i * 3], floatRGB[i * 3 + 1], floatRGB[i * 3 + 2]], p);
+    const [lr, lg, lb] = toLinearSRGB(floatRGB[i * 3], floatRGB[i * 3 + 1], floatRGB[i * 3 + 2], p);
+    const rgb = postEffects([encodeSRGB(lr), encodeSRGB(lg), encodeSRGB(lb)], p);
     for (let k = 0; k < 3; k++) {
       out[i * 4 + k] = Math.round(clamp(rgb[k] * vig) * 255);
     }
@@ -373,6 +400,7 @@ export function renderSpectralCPU({ floatRGB, width, height, params: p, lut }) {
   const n = width * height;
   const out = new Uint8ClampedArray(n * 4);
   const gains = cameraGains(p);
+  const camGain = 2 ** (p.cameraExposure || 0);
   const mm = p.filmLongMm || 36;
   const dirs = Array.from({ length: 8 }, (_, i) => [Math.cos((i * Math.PI) / 4), Math.sin((i * Math.PI) / 4)]);
   const halationActive = (p.halation || 0) > 0;
@@ -385,10 +413,11 @@ export function renderSpectralCPU({ floatRGB, width, height, params: p, lut }) {
     const cx = clamp(Math.round(sx), 0, width - 1);
     const cy = clamp(Math.round(sy), 0, height - 1);
     const idx = (cy * width + cx) * 3;
+    const [lr, lg, lb] = toLinearSRGB(floatRGB[idx], floatRGB[idx + 1], floatRGB[idx + 2], p);
     return [
-      decodeSRGB(floatRGB[idx]) * gains[0],
-      decodeSRGB(floatRGB[idx + 1]) * gains[1],
-      decodeSRGB(floatRGB[idx + 2]) * gains[2]
+      lr * gains[0] * camGain,
+      lg * gains[1] * camGain,
+      lb * gains[2] * camGain
     ];
   };
 
@@ -397,10 +426,11 @@ export function renderSpectralCPU({ floatRGB, width, height, params: p, lut }) {
     const y = (i / width) | 0;
     const u = x / width;
     const v = y / height;
+    const [lr, lg, lb] = toLinearSRGB(floatRGB[i * 3], floatRGB[i * 3 + 1], floatRGB[i * 3 + 2], p);
     let lin = [
-      decodeSRGB(floatRGB[i * 3]) * gains[0],
-      decodeSRGB(floatRGB[i * 3 + 1]) * gains[1],
-      decodeSRGB(floatRGB[i * 3 + 2]) * gains[2]
+      lr * gains[0] * camGain,
+      lg * gains[1] * camGain,
+      lb * gains[2] * camGain
     ];
 
     if (halationActive) {
