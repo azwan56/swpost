@@ -71,13 +71,14 @@ export const SPEKTRA_UI_DEFAULTS = {
   film: 'kodak_portra_400',
   paper: 'kodak_portra_endura',
   darkroomExposure: 0,
-  metering: 'off', // 'off' | 'highlight' | 'average'
-  highlightProtect: 0, // 0..100
+  metering: 'auto', // 'auto' | 'highlight' | 'average' | 'off'
+  highlightProtect: 35, // 0..100
+  shadowLift: 0, // -40..100
   temperature: 0,
   contrast: 0,
   saturation: 0,
-  grain: 28,
-  halation: 30,
+  grain: 25,
+  halation: 15,
   vignette: 10,
   exportMaxEdge: 3600, // 2400 | 3600 | 6000
   border: true,
@@ -149,31 +150,18 @@ export function cameraGains(p) {
 
 export function buildEngineParams(uiParams, width, height, stockInfo, sourceMeta = {}) {
   const isMedium = String(uiParams.edgeFormat || '135').startsWith('120');
-  const darkroomExp = Number(uiParams.darkroomExposure ?? 0);
-  const hp = Math.max(0, Math.min(100, Number(uiParams.highlightProtect ?? 0)));
-
-  let exposure = 0;
-  let printExposure = 0;
-  let cameraExposure = 0;
-  if (uiParams.film === 'none') {
-    exposure = darkroomExp;
-  } else if (uiParams.paper === 'none' || uiParams.paper === 'di') {
-    cameraExposure = darkroomExp;
-  } else {
-    // Negative / B&W / cine print: lowering darkroomExposure means more print exposure onto paper (preserving highlights)
-    printExposure = -darkroomExp;
-  }
 
   const merged = {
     ...SPEKTRA_FULL_WIRE_DEFAULTS,
     ...uiParams,
-    exposure,
-    printExposure,
-    cameraExposure,
-    metering: uiParams.metering || 'off',
-    curveHighlights: -Math.round(hp * 0.5),
-    contrastMaskHighlights: Number((hp * 0.025).toFixed(2)),
-    edr: hp > 0,
+    // Exposure, metering, highlight shoulder & shadow recovery are conditioned in linear space prior to core.wasm
+    exposure: 0,
+    printExposure: 0,
+    cameraExposure: 0,
+    metering: 'off',
+    curveHighlights: 0,
+    contrastMaskHighlights: 0,
+    edr: false,
     format: isMedium ? '120' : '135',
     filmLongMm: isMedium ? 56 : 36,
     border: false, // Border & perforations are composited post-render in presentation.js

@@ -191,14 +191,15 @@ export function FilmDarkroomPanel({
               <span className="spk-label">🎚️ 测光模式</span>
               <div className="h5-pill-group">
                 {[
-                  { id: 'off', label: '关闭 · 原片曝光' },
-                  { id: 'highlight', label: '高光保护' },
-                  { id: 'average', label: '自动均衡' }
+                  { id: 'auto', label: '智能自适应' },
+                  { id: 'highlight', label: '高光优先' },
+                  { id: 'average', label: '全局提亮' },
+                  { id: 'off', label: '关闭测光' }
                 ].map((m) => (
                   <button
                     key={m.id}
                     type="button"
-                    className={`h5-choice-pill ${(params.metering || 'off') === m.id ? 'active' : ''}`}
+                    className={`h5-choice-pill ${(params.metering || 'auto') === m.id ? 'active' : ''}`}
                     onClick={() => onUpdateParams({ metering: m.id })}
                   >
                     {m.label}
@@ -217,6 +218,7 @@ export function FilmDarkroomPanel({
                     darkroomExposure: SPEKTRA_UI_DEFAULTS.darkroomExposure,
                     metering: SPEKTRA_UI_DEFAULTS.metering,
                     highlightProtect: SPEKTRA_UI_DEFAULTS.highlightProtect,
+                    shadowLift: SPEKTRA_UI_DEFAULTS.shadowLift,
                     temperature: SPEKTRA_UI_DEFAULTS.temperature,
                     contrast: SPEKTRA_UI_DEFAULTS.contrast,
                     grain: SPEKTRA_UI_DEFAULTS.grain,
@@ -233,6 +235,7 @@ export function FilmDarkroomPanel({
               {[
                 { key: 'darkroomExposure', label: '暗房曝光', min: -3, max: 3, step: 0.1, fmt: (v) => `${v > 0 ? '+' : ''}${Number(v).toFixed(1)} EV` },
                 { key: 'highlightProtect', label: '高光保护', min: 0, max: 100, step: 5, fmt: (v) => `${v}%` },
+                { key: 'shadowLift', label: '阴影恢复', min: -40, max: 100, step: 5, fmt: (v) => `${v > 0 ? '+' : ''}${v}%` },
                 { key: 'temperature', label: '色温冷暖', min: -60, max: 60, step: 2, fmt: (v) => `${v > 0 ? '+' : ''}${v}` },
                 { key: 'contrast', label: '反差对比', min: -40, max: 40, step: 2, fmt: (v) => `${v > 0 ? '+' : ''}${v}` },
                 { key: 'grain', label: '银盐颗粒', min: 0, max: 100, step: 5, fmt: (v) => `${v}%` },

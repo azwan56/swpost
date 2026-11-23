@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 import { normalizeBaseUrl } from './catalog.js';
+import { conditionLinearScene } from './rawTone.js';
 
 const RAW_FILE_RE = /\.(dng|arw|cr2|cr3|nef|nrw|raf|rw2|orf|pef|srw|raw)$/i;
 
@@ -59,6 +60,30 @@ function buildDisplayPreviewFromProPhoto16(rgb16, width, height, channels, maxEd
   const outW = Math.max(1, Math.round(width * scale));
   const outH = Math.max(1, Math.round(height * scale));
 
+  const linBuf = new Float32Array(outW * outH * 3);
+  const inv65535 = 1 / 65535;
+  for (let y = 0; y < outH; y++) {
+    const sy = Math.min(height - 1, Math.floor(((y + 0.5) / outH) * height));
+    for (let x = 0; x < outW; x++) {
+      const sx = Math.min(width - 1, Math.floor(((x + 0.5) / outW) * width));
+      const srcIdx = (sy * width + sx) * channels;
+      const dstIdx = (y * outW + x) * 3;
+      linBuf[dstIdx] = rgb16[srcIdx] * inv65535;
+      linBuf[dstIdx + 1] = rgb16[srcIdx + 1] * inv65535;
+      linBuf[dstIdx + 2] = rgb16[srcIdx + 2] * inv65535;
+    }
+  }
+
+  conditionLinearScene(linBuf, outW, outH, {
+    colorSpace: 'ProPhoto RGB',
+    isRaw: true,
+    metering: 'auto',
+    exposureEV: 0,
+    highlightProtect: 35,
+    shadowLift: 0,
+    isPositive: false
+  });
+
   const canvas = document.createElement('canvas');
   canvas.width = outW;
   canvas.height = outH;
@@ -67,28 +92,23 @@ function buildDisplayPreviewFromProPhoto16(rgb16, width, height, channels, maxEd
   const dst = imgData.data;
 
   const encode = (c) => (c <= 0.0031308 ? 12.92 * c : 1.055 * (c ** (1 / 2.4)) - 0.055);
-  const shoulder = (v) => v / (1 + 0.35 * Math.max(0, v - 0.7));
 
-  for (let y = 0; y < outH; y++) {
-    const sy = Math.min(height - 1, Math.floor(((y + 0.5) / outH) * height));
-    for (let x = 0; x < outW; x++) {
-      const sx = Math.min(width - 1, Math.floor(((x + 0.5) / outW) * width));
-      const srcIdx = (sy * width + sx) * channels;
-      const pr = rgb16[srcIdx] / 65535;
-      const pg = rgb16[srcIdx + 1] / 65535;
-      const pb = rgb16[srcIdx + 2] / 65535;
+  for (let i = 0; i < outW * outH; i++) {
+    const srcIdx = i * 3;
+    const pr = linBuf[srcIdx];
+    const pg = linBuf[srcIdx + 1];
+    const pb = linBuf[srcIdx + 2];
 
-      // Linear ProPhoto RGB (D50) -> Linear sRGB (D65)
-      const lr = Math.max(0, 2.034193 * pr - 0.727420 * pg - 0.306766 * pb);
-      const lg = Math.max(0, -0.228811 * pr + 1.231729 * pg - 0.002922 * pb);
-      const lb = Math.max(0, -0.008565 * pr - 0.153273 * pg + 1.161839 * pb);
+    // Linear ProPhoto RGB (D50) -> Linear sRGB (D65)
+    const lr = Math.max(0, 2.034193 * pr - 0.727420 * pg - 0.306766 * pb);
+    const lg = Math.max(0, -0.228811 * pr + 1.231729 * pg - 0.002922 * pb);
+    const lb = Math.max(0, -0.008565 * pr - 0.153273 * pg + 1.161839 * pb);
 
-      const dstIdx = (y * outW + x) * 4;
-      dst[dstIdx] = Math.round(Math.min(1, Math.max(0, encode(shoulder(lr)))) * 255);
-      dst[dstIdx + 1] = Math.round(Math.min(1, Math.max(0, encode(shoulder(lg)))) * 255);
-      dst[dstIdx + 2] = Math.round(Math.min(1, Math.max(0, encode(shoulder(lb)))) * 255);
-      dst[dstIdx + 3] = 255;
-    }
+    const dstIdx = i * 4;
+    dst[dstIdx] = Math.round(Math.min(1, Math.max(0, encode(lr))) * 255);
+    dst[dstIdx + 1] = Math.round(Math.min(1, Math.max(0, encode(lg))) * 255);
+    dst[dstIdx + 2] = Math.round(Math.min(1, Math.max(0, encode(lb))) * 255);
+    dst[dstIdx + 3] = 255;
   }
 
   ctx.putImageData(imgData, 0, 0);

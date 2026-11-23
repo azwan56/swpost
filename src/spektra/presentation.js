@@ -348,7 +348,7 @@ export function resampleRawGate(rawData, params, maxEdge = 1600) {
   return { floatRGB, width: outW, height: outH };
 }
 
-export function applyLinearOverlayFromCanvas(floatRGB, width, height, params, exif = null) {
+export function applyLinearOverlayFromCanvas(floatRGB, width, height, params, exif = null, colorSpace = 'ProPhoto RGB') {
   if (!params?.dateOn && !(Number(params?.edgeLeaks || 0) > 0)) return;
   const overlayCanvas = document.createElement('canvas');
   overlayCanvas.width = width;
@@ -365,7 +365,7 @@ export function applyLinearOverlayFromCanvas(floatRGB, width, height, params, ex
     const x = u8 / 255;
     return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
   };
-  const isProPhoto = true; // Used for linear ProPhoto RGB RAW pipeline
+  const isProPhoto = colorSpace === 'ProPhoto RGB';
 
   for (let i = 0; i < width * height; i++) {
     const bIdx = i * 4;

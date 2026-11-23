@@ -3,13 +3,12 @@ import piexif from 'piexifjs';
 import { findFilm, loadSpektraCatalog, normalizeBaseUrl } from './catalog.js';
 import { buildEngineParams } from './defaults.js';
 import {
-  applyExposureLeaks,
   applyLinearOverlayFromCanvas,
   decorateFilmEdge,
   prepareFilmGateCanvas,
-  resampleRawGate,
-  stampDate
+  resampleRawGate
 } from './presentation.js';
+import { conditionLinearScene, decodeSRGB } from './rawTone.js';
 
 const getPiexif = () => (piexif?.load ? piexif : (piexif?.default || piexif));
 
@@ -191,6 +190,7 @@ export async function renderSpektraImage(imageSrc, uiParams, exif = null, option
 
   const catalog = await loadSpektraCatalog(import.meta.env.BASE_URL || '/');
   const stockInfo = findFilm(catalog, uiParams.film);
+  const isPositive = stockInfo?.type === 'positive' || uiParams.paper === 'none';
 
   let w;
   let h;
@@ -202,9 +202,19 @@ export async function renderSpektraImage(imageSrc, uiParams, exif = null, option
     w = resampled.width;
     h = resampled.height;
     floatRGB = resampled.floatRGB;
-    applyLinearOverlayFromCanvas(floatRGB, w, h, uiParams, exif);
+    const rawSpace = rawData.sourceColorSpace || 'ProPhoto RGB';
+    conditionLinearScene(floatRGB, w, h, {
+      colorSpace: rawSpace,
+      isRaw: true,
+      metering: uiParams.metering || 'auto',
+      exposureEV: Number(uiParams.darkroomExposure ?? 0),
+      highlightProtect: Number(uiParams.highlightProtect ?? 35),
+      shadowLift: Number(uiParams.shadowLift ?? 0),
+      isPositive
+    });
+    applyLinearOverlayFromCanvas(floatRGB, w, h, uiParams, exif, rawSpace);
     sourceMeta = {
-      sourceColorSpace: rawData.sourceColorSpace || 'ProPhoto RGB',
+      sourceColorSpace: rawSpace,
       sourceEncoded: rawData.sourceEncoded !== undefined ? rawData.sourceEncoded : false,
       origLongEdge: Math.max(rawData.width, rawData.height)
     };
@@ -212,23 +222,30 @@ export async function renderSpektraImage(imageSrc, uiParams, exif = null, option
     const img = await loadImageElement(imageSrc);
     const gateCanvas = prepareFilmGateCanvas(img, uiParams, maxEdge);
 
-    // Physical darkroom exposure order: expose date back & light leaks onto negative BEFORE film simulation
-    stampDate(gateCanvas, uiParams, exif);
-    applyExposureLeaks(gateCanvas, uiParams);
-
     w = gateCanvas.width;
     h = gateCanvas.height;
     const srcCtx = gateCanvas.getContext('2d', { willReadFrequently: true });
     const imgData = srcCtx.getImageData(0, 0, w, h).data;
     floatRGB = new Float32Array(w * h * 3);
     for (let i = 0; i < w * h; i++) {
-      floatRGB[i * 3] = imgData[i * 4] / 255;
-      floatRGB[i * 3 + 1] = imgData[i * 4 + 1] / 255;
-      floatRGB[i * 3 + 2] = imgData[i * 4 + 2] / 255;
+      floatRGB[i * 3] = decodeSRGB(imgData[i * 4] / 255);
+      floatRGB[i * 3 + 1] = decodeSRGB(imgData[i * 4 + 1] / 255);
+      floatRGB[i * 3 + 2] = decodeSRGB(imgData[i * 4 + 2] / 255);
     }
+    conditionLinearScene(floatRGB, w, h, {
+      colorSpace: 'sRGB',
+      isRaw: false,
+      metering: uiParams.metering || 'auto',
+      exposureEV: Number(uiParams.darkroomExposure ?? 0),
+      highlightProtect: Number(uiParams.highlightProtect ?? 35),
+      shadowLift: Number(uiParams.shadowLift ?? 0),
+      isPositive
+    });
+    // Physical darkroom exposure order: expose date back & light leaks onto negative BEFORE film simulation
+    applyLinearOverlayFromCanvas(floatRGB, w, h, uiParams, exif, 'sRGB');
     sourceMeta = {
       sourceColorSpace: 'sRGB',
-      sourceEncoded: true,
+      sourceEncoded: false,
       origLongEdge: Math.max(img.naturalWidth || img.width, img.naturalHeight || img.height)
     };
   }
