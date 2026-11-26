@@ -450,8 +450,9 @@ app.post('/api/ai/style-transfer', async (req, res) => {
     }
 
     // ===== Primary: Volcano Ark Doubao-Seedream (highest quality style transfer) =====
+    let volcStyleError = null;
     if (volcApiKey) {
-      console.log(`[StyleTransfer] 使用 Volcano Ark (Doubao Seedream 5.0), style=${style}, original width=${width}, height=${height}`);
+      console.log(`[StyleTransfer] 使用 Volcano Ark (Doubao Seedream), style=${style}, original width=${width}, height=${height}`);
       
       let size = calculateSeedreamSize(width, height);
       console.log(`[StyleTransfer] Calculated aspect-ratio size for Seedream: ${size}`);
@@ -474,45 +475,22 @@ app.post('/api/ai/style-transfer', async (req, res) => {
         prompt = '将参考图重新渲染为中国传统没骨画风格（没骨彩墨），不用粗重墨线勾勒，直接用色彩与水分自然渲染成形，轮廓温润柔和，如同透过晨雾看到的城市与风景，色调清润淡雅，彩墨交融晕染，画面朦胧唯美，充满江南水乡般的诗意与呼吸感，中国画中最温柔细腻的技法，高清原画品质';
       }
 
-      const volcPayload = {
-        model: 'doubao-seedream-5-0-260128',
-        prompt: prompt,
-        image: [imageDataUri],
-        size: size,
-        n: 1
-      };
-
-      console.log(`[StyleTransfer] Sending to Seedream: model=${volcPayload.model}, prompt length=${prompt.length}`);
-
-      const volcResponse = await fetch('https://ark.cn-beijing.volces.com/api/v3/images/generations', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${volcApiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(volcPayload)
-      });
-
-      if (volcResponse.ok) {
-        const volcData = await volcResponse.json();
-        const resultUrl = volcData.data?.[0]?.url;
-        if (resultUrl) {
-          console.log('[StyleTransfer] ✅ Seedream 生成成功，正在转换为 base64...');
-          const resultBase64 = await convertUrlToBase64(resultUrl);
-          const finalBase64 = await copyAndModifyExif(image, resultBase64, style, 'doubao-seedream-5-0');
-          return res.json({ image: finalBase64, model: 'doubao-seedream-5-0', exif: exifData });
-        } else {
-          console.error('[StyleTransfer] ⚠️ Seedream returned OK but no image URL:', JSON.stringify(volcData));
-          throw new Error('Seedream 返回成功但未包含图片，请重试。');
-        }
-      } else {
-        const errText = await volcResponse.text();
-        console.error(`[StyleTransfer] ❌ Seedream API 调用失败 (HTTP ${volcResponse.status}): ${errText}`);
-        
+      try {
+        const seedreamRes = await callSeedreamImageEdit(volcApiKey, {
+          prompt,
+          images: [imageDataUri],
+          size
+        });
+        console.log(`[StyleTransfer] ✅ Seedream (${seedreamRes.model}) 生成成功`);
+        const finalBase64 = await copyAndModifyExif(image, seedreamRes.base64, style, seedreamRes.model);
+        return res.json({ image: finalBase64, model: seedreamRes.model, exif: exifData });
+      } catch (err) {
+        volcStyleError = err;
+        console.error(`[StyleTransfer] ❌ Seedream API 调用失败: ${err.message}`);
         if (!dashscopeApiKey) {
-          throw new Error(`Seedream 风格化失败 (HTTP ${volcResponse.status})，请检查火山引擎账户余额或 API Key 是否有效。`);
+          throw new Error(`Seedream 风格化失败: ${err.message}`);
         }
-        console.warn('[StyleTransfer] ⚠️ Seedream 失败，降级使用 DashScope 万相模型（画质可能降低）');
+        console.warn('[StyleTransfer] ⚠️ Seedream 失败，尝试降级使用 DashScope 万相模型');
       }
     }
 
@@ -612,6 +590,9 @@ app.post('/api/ai/style-transfer', async (req, res) => {
 
     if (!taskResponse.ok) {
       const errText = await taskResponse.text();
+      if (taskResponse.status === 401 && volcStyleError) {
+        throw volcStyleError;
+      }
       throw new Error(`所有风格化引擎均失败: ${taskResponse.status} - ${errText}`);
     }
 
@@ -1085,35 +1066,62 @@ function decodeBase64ToBuffer(base64Str) {
   return Buffer.from(clean, 'base64');
 }
 
-// Helper: Call Volcano Ark Doubao Seedream 5.0 image generation/editing
+// Helper: Call Volcano Ark Doubao Seedream image generation/editing with active model fallback
 async function callSeedreamImageEdit(volcApiKey, { prompt, images, size }) {
-  const payload = {
-    model: 'doubao-seedream-5-0-260128',
-    prompt,
-    image: images,
-    size,
-    n: 1
-  };
-  const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/images/generations', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${volcApiKey}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(payload)
-  });
+  const envModel = process.env.VOLC_IMAGE_MODEL;
+  const defaultModels = [
+    'doubao-seedream-5-0-pro-260628',
+    'doubao-seedream-5-5-261028',
+    'doubao-seedream-5-0-flash-260915',
+    'doubao-seedream-4-0-20260415'
+  ];
+  const candidateModels = envModel
+    ? [envModel, ...defaultModels.filter((m) => m !== envModel)]
+    : defaultModels;
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Seedream HTTP ${response.status}: ${errText}`);
+  let lastError = null;
+  for (const model of candidateModels) {
+    try {
+      const payload = { model, prompt, image: images, size, n: 1 };
+      const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/images/generations', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${volcApiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        const err = new Error(`Seedream (${model}) HTTP ${response.status}: ${errText}`);
+        const isUnavailable =
+          response.status === 404 ||
+          (response.status === 400 && /ClosedEndpoint|ModelNotOpen|NotFound/i.test(errText));
+        if (isUnavailable) {
+          console.warn(`[Seedream] Model ${model} unavailable (${response.status}), trying next candidate...`);
+          lastError = err;
+          continue;
+        }
+        throw err;
+      }
+
+      const data = await response.json();
+      const resultUrl = data.data?.[0]?.url;
+      if (!resultUrl) {
+        throw new Error(`Seedream (${model}) returned OK without image URL`);
+      }
+      const base64 = await convertUrlToBase64(resultUrl);
+      return { base64, model };
+    } catch (err) {
+      lastError = err;
+      if (!/unavailable|ClosedEndpoint|ModelNotOpen|NotFound|HTTP 404/i.test(err.message)) {
+        throw err;
+      }
+    }
   }
 
-  const data = await response.json();
-  const resultUrl = data.data?.[0]?.url;
-  if (!resultUrl) {
-    throw new Error('Seedream returned OK without image URL');
-  }
-  return await convertUrlToBase64(resultUrl);
+  throw lastError || new Error('所有 Seedream 图像模型均不可用');
 }
 
 // Helper: Call DashScope wanx2.1-imageedit async task
@@ -1180,8 +1188,56 @@ category 只能从以下选项中选一：路人、杂物、线条、文字、�
 
     let rawText = null;
 
-    // 1. Primary: DashScope Qwen-VL-Plus
-    if (dashscopeApiKey) {
+    // 1. Primary: Volcano Ark Multimodal Vision
+    if (volcApiKey) {
+      const visionModels = [
+        'doubao-seed-2-1-pro-260915',
+        'doubao-seed-2-1-turbo-260628',
+        'doubao-seed-2-1-lite-260915'
+      ];
+      for (const model of visionModels) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 25000);
+          const vRes = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${volcApiKey}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              model,
+              messages: [
+                {
+                  role: 'user',
+                  content: [
+                    { type: 'text', text: detectPrompt },
+                    { type: 'image_url', image_url: { url: dataUri } }
+                  ]
+                }
+              ]
+            }),
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          if (vRes.ok) {
+            const vData = await vRes.json();
+            rawText = vData.choices?.[0]?.message?.content?.trim() || null;
+            if (rawText) {
+              console.log(`[DetectClutter] Volcano ${model} succeeded.`);
+              break;
+            }
+          } else {
+            console.warn(`[DetectClutter] Volcano ${model} HTTP ${vRes.status}:`, await vRes.text());
+          }
+        } catch (err) {
+          console.warn(`[DetectClutter] Volcano ${model} error:`, err.message);
+        }
+      }
+    }
+
+    // 2. Fallback: DashScope Qwen-VL-Plus
+    if (!rawText && dashscopeApiKey) {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -1214,45 +1270,6 @@ category 只能从以下选项中选一：路人、杂物、线条、文字、�
         }
       } catch (err) {
         console.warn('[DetectClutter] Qwen-VL error:', err.message);
-      }
-    }
-
-    // 2. Fallback: Volcano Ark Multimodal Vision
-    if (!rawText && volcApiKey) {
-      const visionModels = ['doubao-seed-2-1-turbo-260628', 'doubao-seed-2-1-pro-260628'];
-      for (const model of visionModels) {
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 18000);
-          const vRes = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${volcApiKey}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              model,
-              messages: [
-                {
-                  role: 'user',
-                  content: [
-                    { type: 'text', text: detectPrompt },
-                    { type: 'image_url', image_url: { url: dataUri } }
-                  ]
-                }
-              ]
-            }),
-            signal: controller.signal
-          });
-          clearTimeout(timeoutId);
-          if (vRes.ok) {
-            const vData = await vRes.json();
-            rawText = vData.choices?.[0]?.message?.content?.trim() || null;
-            if (rawText) break;
-          }
-        } catch (err) {
-          console.warn(`[DetectClutter] Volcano ${model} error:`, err.message);
-        }
       }
     }
 
@@ -1330,6 +1347,7 @@ app.post('/api/ai/edit-image', async (req, res) => {
 
     let resultBase64 = null;
     let usedModel = '';
+    let volcError = null;
 
     if (mode === 'outpaint') {
       const parts = String(targetAspect).split(':').map(Number);
@@ -1367,13 +1385,15 @@ app.post('/api/ai/edit-image', async (req, res) => {
       if (volcApiKey) {
         try {
           console.log(`[EditImage:outpaint] Seedream target=${targetAspect} size=${targetSize}`);
-          resultBase64 = await callSeedreamImageEdit(volcApiKey, {
+          const resObj = await callSeedreamImageEdit(volcApiKey, {
             prompt: seedreamPrompt,
             images: [imageDataUri],
             size: targetSize
           });
-          usedModel = 'doubao-seedream-5-0';
+          resultBase64 = resObj.base64;
+          usedModel = resObj.model;
         } catch (err) {
+          volcError = err;
           console.warn('[EditImage:outpaint] Seedream failed:', err.message);
           if (!dashscopeApiKey) throw err;
         }
@@ -1414,19 +1434,26 @@ app.post('/api/ai/edit-image', async (req, res) => {
 
         const expandPrompt = `自然向四周延展画面背景与环境细节，与原图光线、透视、质感无缝融合${userHint}`;
         console.log(`[EditImage:outpaint] DashScope expand scales T=${topScale.toFixed(2)} B=${bottomScale.toFixed(2)} L=${leftScale.toFixed(2)} R=${rightScale.toFixed(2)}`);
-        resultBase64 = await callDashScopeImageEdit(
-          dashscopeApiKey,
-          { function: 'expand', base_image_url: imageDataUri, prompt: expandPrompt },
-          {
-            n: 1,
-            top_scale: Number(topScale.toFixed(2)),
-            bottom_scale: Number(bottomScale.toFixed(2)),
-            left_scale: Number(leftScale.toFixed(2)),
-            right_scale: Number(rightScale.toFixed(2))
-          },
-          35
-        );
-        usedModel = 'dashscope-wanx-expand';
+        try {
+          resultBase64 = await callDashScopeImageEdit(
+            dashscopeApiKey,
+            { function: 'expand', base_image_url: imageDataUri, prompt: expandPrompt },
+            {
+              n: 1,
+              top_scale: Number(topScale.toFixed(2)),
+              bottom_scale: Number(bottomScale.toFixed(2)),
+              left_scale: Number(leftScale.toFixed(2)),
+              right_scale: Number(rightScale.toFixed(2))
+            },
+            35
+          );
+          usedModel = 'dashscope-wanx-expand';
+        } catch (dsErr) {
+          if (volcError && /HTTP 401|InvalidApiKey/i.test(dsErr.message)) {
+            throw volcError;
+          }
+          throw dsErr;
+        }
 
         // Ensure exact target ratio if DashScope 2.0x cap caused slight ratio drift
         const dsBuf = decodeBase64ToBuffer(resultBase64);
@@ -1462,26 +1489,35 @@ app.post('/api/ai/edit-image', async (req, res) => {
       if (volcApiKey) {
         try {
           console.log(`[EditImage:remove_clutter] Seedream targets=${targetsText}`);
-          resultBase64 = await callSeedreamImageEdit(volcApiKey, {
+          const resObj = await callSeedreamImageEdit(volcApiKey, {
             prompt: cleanPrompt,
             images: [imageDataUri],
             size
           });
-          usedModel = 'doubao-seedream-5-0';
+          resultBase64 = resObj.base64;
+          usedModel = resObj.model;
         } catch (err) {
+          volcError = err;
           console.warn('[EditImage:remove_clutter] Seedream failed:', err.message);
           if (!dashscopeApiKey) throw err;
         }
       }
 
       if (!resultBase64 && dashscopeApiKey) {
-        resultBase64 = await callDashScopeImageEdit(
-          dashscopeApiKey,
-          { function: 'description_edit', base_image_url: imageDataUri, prompt: cleanPrompt },
-          { n: 1 },
-          35
-        );
-        usedModel = 'dashscope-wanx-edit';
+        try {
+          resultBase64 = await callDashScopeImageEdit(
+            dashscopeApiKey,
+            { function: 'description_edit', base_image_url: imageDataUri, prompt: cleanPrompt },
+            { n: 1 },
+            35
+          );
+          usedModel = 'dashscope-wanx-edit';
+        } catch (dsErr) {
+          if (volcError && /HTTP 401|InvalidApiKey/i.test(dsErr.message)) {
+            throw volcError;
+          }
+          throw dsErr;
+        }
       }
     } else if (mode === 'remove_mask') {
       if (!mask) {
@@ -1520,8 +1556,61 @@ app.post('/api/ai/edit-image', async (req, res) => {
       const normMaskUri = `data:image/png;base64,${normMaskBuf.toString('base64')}`;
       const hintSuffix = prompt && prompt.trim() ? `，背景补全参考：${prompt.trim()}` : '';
 
-      // Primary for mask inpainting: DashScope wanx2.1-imageedit description_edit_with_mask
-      if (dashscopeApiKey) {
+      // Primary: Volcano Seedream with red visual mask overlay guide
+      if (volcApiKey) {
+        try {
+          const redAlphaRaw = await sharp(normMaskBuf)
+            .grayscale()
+            .linear(0.7, 0)
+            .raw()
+            .toBuffer();
+          const redOverlayBuf = await sharp({
+            create: {
+              width: normW,
+              height: normH,
+              channels: 3,
+              background: { r: 255, g: 16, b: 84 }
+            }
+          })
+            .joinChannel(redAlphaRaw, { raw: { width: normW, height: normH, channels: 1 } })
+            .png()
+            .toBuffer();
+
+          const guideBuf = await sharp(normOrigBuf)
+            .composite([{ input: redOverlayBuf, blend: 'over' }])
+            .jpeg({ quality: 92 })
+            .toBuffer();
+          const guideUri = `data:image/jpeg;base64,${guideBuf.toString('base64')}`;
+          const seedreamSize = calculateSeedreamSize(normW, normH);
+          const maskPrompt = `精准消除局部涂抹区域：第2张参考图中用半透明洋红色涂抹覆盖的区域是需要被移除的杂物${hintSuffix}。请对照第1张原图，仅将涂抹区域内的物体完全无痕移除，并根据周围环境自动补全自然背景，未涂抹的其他区域必须与第1张原图完全一致。`;
+
+          try {
+            const resObj = await callSeedreamImageEdit(volcApiKey, {
+              prompt: maskPrompt,
+              images: [normOrigUri, guideUri],
+              size: seedreamSize
+            });
+            resultBase64 = resObj.base64;
+            usedModel = resObj.model;
+          } catch (multiErr) {
+            console.warn('[EditImage:remove_mask] Seedream 2-image guide failed, retrying single guide image:', multiErr.message);
+            const resObj = await callSeedreamImageEdit(volcApiKey, {
+              prompt: `请把图中半透明洋红色涂抹覆盖的杂物区域完全无痕消除，去掉洋红色标记并用周围自然的背景纹理无缝补全${hintSuffix}，其余未标记区域保持原样不变。`,
+              images: [guideUri],
+              size: seedreamSize
+            });
+            resultBase64 = resObj.base64;
+            usedModel = resObj.model;
+          }
+        } catch (err) {
+          volcError = err;
+          console.warn('[EditImage:remove_mask] Seedream failed:', err.message);
+          if (!dashscopeApiKey) throw err;
+        }
+      }
+
+      // Fallback: DashScope wanx2.1-imageedit description_edit_with_mask
+      if (!resultBase64 && dashscopeApiKey) {
         try {
           console.log(`[EditImage:remove_mask] DashScope masked inpaint ${normW}x${normH}`);
           resultBase64 = await callDashScopeImageEdit(
@@ -1536,54 +1625,11 @@ app.post('/api/ai/edit-image', async (req, res) => {
             35
           );
           usedModel = 'dashscope-wanx-inpaint';
-        } catch (err) {
-          console.warn('[EditImage:remove_mask] DashScope masked edit failed:', err.message);
-          if (!volcApiKey) throw err;
-        }
-      }
-
-      // Fallback / Alternative: Volcano Seedream with red visual mask overlay guide
-      if (!resultBase64 && volcApiKey) {
-        const redAlphaRaw = await sharp(normMaskBuf)
-          .grayscale()
-          .linear(0.7, 0)
-          .raw()
-          .toBuffer();
-        const redOverlayBuf = await sharp({
-          create: {
-            width: normW,
-            height: normH,
-            channels: 3,
-            background: { r: 255, g: 16, b: 84 }
+        } catch (dsErr) {
+          if (volcError && /HTTP 401|InvalidApiKey/i.test(dsErr.message)) {
+            throw volcError;
           }
-        })
-          .joinChannel(redAlphaRaw, { raw: { width: normW, height: normH, channels: 1 } })
-          .png()
-          .toBuffer();
-
-        const guideBuf = await sharp(normOrigBuf)
-          .composite([{ input: redOverlayBuf, blend: 'over' }])
-          .jpeg({ quality: 92 })
-          .toBuffer();
-        const guideUri = `data:image/jpeg;base64,${guideBuf.toString('base64')}`;
-        const seedreamSize = calculateSeedreamSize(normW, normH);
-        const maskPrompt = `精准消除局部涂抹区域：第2张参考图中用半透明洋红色涂抹覆盖的区域是需要被移除的杂物${hintSuffix}。请对照第1张原图，仅将涂抹区域内的物体完全无痕移除，并根据周围环境自动补全自然背景，未涂抹的其他区域必须与第1张原图完全一致。`;
-
-        try {
-          resultBase64 = await callSeedreamImageEdit(volcApiKey, {
-            prompt: maskPrompt,
-            images: [normOrigUri, guideUri],
-            size: seedreamSize
-          });
-          usedModel = 'doubao-seedream-5-0';
-        } catch (multiErr) {
-          console.warn('[EditImage:remove_mask] Seedream 2-image guide failed, retrying single guide image:', multiErr.message);
-          resultBase64 = await callSeedreamImageEdit(volcApiKey, {
-            prompt: `请把图中半透明洋红色涂抹覆盖的杂物区域完全无痕消除，去掉洋红色标记并用周围自然的背景纹理无缝补全${hintSuffix}，其余未标记区域保持原样不变。`,
-            images: [guideUri],
-            size: seedreamSize
-          });
-          usedModel = 'doubao-seedream-5-0';
+          throw dsErr;
         }
       }
 
@@ -1636,26 +1682,35 @@ app.post('/api/ai/edit-image', async (req, res) => {
       if (volcApiKey) {
         try {
           console.log(`[EditImage:${mode}] Seedream intensity=${intensity}`);
-          resultBase64 = await callSeedreamImageEdit(volcApiKey, {
+          const resObj = await callSeedreamImageEdit(volcApiKey, {
             prompt: bokehPrompt,
             images: [imageDataUri],
             size
           });
-          usedModel = 'doubao-seedream-5-0';
+          resultBase64 = resObj.base64;
+          usedModel = resObj.model;
         } catch (err) {
+          volcError = err;
           console.warn(`[EditImage:${mode}] Seedream failed:`, err.message);
           if (!dashscopeApiKey) throw err;
         }
       }
 
       if (!resultBase64 && dashscopeApiKey) {
-        resultBase64 = await callDashScopeImageEdit(
-          dashscopeApiKey,
-          { function: 'description_edit', base_image_url: imageDataUri, prompt: bokehPrompt },
-          { n: 1 },
-          35
-        );
-        usedModel = 'dashscope-wanx-edit';
+        try {
+          resultBase64 = await callDashScopeImageEdit(
+            dashscopeApiKey,
+            { function: 'description_edit', base_image_url: imageDataUri, prompt: bokehPrompt },
+            { n: 1 },
+            35
+          );
+          usedModel = 'dashscope-wanx-edit';
+        } catch (dsErr) {
+          if (volcError && /HTTP 401|InvalidApiKey/i.test(dsErr.message)) {
+            throw volcError;
+          }
+          throw dsErr;
+        }
       }
     }
 
