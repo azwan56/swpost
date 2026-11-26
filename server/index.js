@@ -1092,7 +1092,7 @@ async function callSeedreamImageEdit(volcApiKey, { prompt, images, size }) {
   let lastError = null;
   for (const model of candidateModels) {
     try {
-      const payload = { model, prompt, image: images, size, n: 1 };
+      const payload = { model, prompt, image: images, size, n: 1, watermark: false };
       const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/images/generations', {
         method: 'POST',
         headers: {
@@ -1366,39 +1366,80 @@ app.post('/api/ai/edit-image', async (req, res) => {
       const rh = parts[1] > 0 ? parts[1] : 4;
       const targetRatio = rw / rh;
       const origRatio = origW / origH;
-      const zoom = Math.min(1.5, Math.max(1.0, parseFloat(zoomOut) || 1.0));
+      const requestedZoom = Math.min(1.5, Math.max(1.0, parseFloat(zoomOut) || 1.0));
+      const effectiveZoom =
+        Math.abs(targetRatio - origRatio) / origRatio < 0.02 && requestedZoom <= 1.02
+          ? 1.15
+          : requestedZoom;
       const targetSize = calculateSeedreamSize(targetRatio * 1000, 1000);
+      const userHint = prompt && prompt.trim() ? `，延伸场景参考：${prompt.trim()}` : '';
 
-      let directionDesc = '向四周自然等比延展扩大取景视野';
-      if (zoom <= 1.05) {
-        if (targetRatio > origRatio * 1.03) {
-          directionDesc = '重点向左右两侧水平延展画面';
-        } else if (targetRatio < origRatio * 0.97) {
-          directionDesc = '重点向上下两端垂直延展画面';
-        }
+      // Compute normalized inner photo placement matching frontend blueprint
+      let baseInnerW;
+      let baseInnerH;
+      if (targetRatio > origRatio) {
+        baseInnerH = 1.0;
+        baseInnerW = origRatio / targetRatio;
       } else {
-        directionDesc = targetRatio > origRatio * 1.03
-          ? '同时向左右两侧与四周退远扩画，扩大画面广角视野'
-          : (targetRatio < origRatio * 0.97 ? '同时向上下两端与四周退远扩画，扩大画面广角视野' : '向四周退远等比扩画，展现更开阔的环境视野');
+        baseInnerW = 1.0;
+        baseInnerH = targetRatio / origRatio;
       }
-
-      const anchorMap = {
-        center: '原图主体保持在画面居中位置',
-        top: '原图主体保持偏上位置，重点向下延展地面/前景空间',
-        bottom: '原图主体保持偏下位置，重点向上延展天空/上方建筑或环境空间',
-        left: '原图主体保持偏左位置，重点向右延展右侧环境',
-        right: '原图主体保持偏右位置，重点向左延展左侧环境'
-      };
-      const anchorDesc = anchorMap[anchor] || anchorMap.center;
-      const userHint = prompt && prompt.trim() ? `，延伸场景补充参考：${prompt.trim()}` : '';
-      const seedreamPrompt = `生成式扩图与画幅比例重构（Outpainting）：将参考图自然延展为 ${rw}:${rh} 比例的完整摄影大片。${directionDesc}，${anchorDesc}${userHint}。严格要求：原图中的主体人物、五官、服饰、建筑结构、光线色温与色彩质感必须 100% 保持原样不扭曲不变形；新延展出的边缘区域必须与原图无缝衔接，透视、景深虚化、颗粒感与光影完全自然一致，不要出现拼接痕迹或白边黑边。Seamless photographic outpainting to ${rw}:${rh} aspect ratio, strictly preserve original subject and details.`;
+      const innerW = Math.min(1.0, baseInnerW / effectiveZoom);
+      const innerH = Math.min(1.0, baseInnerH / effectiveZoom);
+      const slackX = Math.max(0, 1.0 - innerW);
+      const slackY = Math.max(0, 1.0 - innerH);
+      let innerX = slackX / 2;
+      let innerY = slackY / 2;
+      if (anchor === 'top') innerY = 0;
+      else if (anchor === 'bottom') innerY = slackY;
+      else if (anchor === 'left') innerX = 0;
+      else if (anchor === 'right') innerX = slackX;
 
       if (volcApiKey) {
         try {
-          console.log(`[EditImage:outpaint] Seedream target=${targetAspect} size=${targetSize}`);
+          const canvasLong = 1440;
+          const canvasW = targetRatio >= 1 ? canvasLong : Math.max(256, Math.round(canvasLong * targetRatio));
+          const canvasH = targetRatio >= 1 ? Math.max(256, Math.round(canvasLong / targetRatio)) : canvasLong;
+          const dw = Math.max(16, Math.round(canvasW * innerW));
+          const dh = Math.max(16, Math.round(canvasH * innerH));
+          const dx = Math.max(0, Math.min(canvasW - dw, Math.round(canvasW * innerX)));
+          const dy = Math.max(0, Math.min(canvasH - dh, Math.round(canvasH * innerY)));
+
+          const hasTop = dy > 4;
+          const hasBottom = canvasH - (dy + dh) > 4;
+          const hasLeft = dx > 4;
+          const hasRight = canvasW - (dx + dw) > 4;
+
+          let blankSidesDesc = '四周';
+          if (hasTop && hasBottom && !hasLeft && !hasRight) blankSidesDesc = '上下两侧';
+          else if (!hasTop && !hasBottom && hasLeft && hasRight) blankSidesDesc = '左右两侧';
+          else if (hasTop && !hasBottom && !hasLeft && !hasRight) blankSidesDesc = '上方';
+          else if (!hasTop && hasBottom && !hasLeft && !hasRight) blankSidesDesc = '下方';
+          else if (!hasTop && !hasBottom && hasLeft && !hasRight) blankSidesDesc = '左侧';
+          else if (!hasTop && !hasBottom && !hasLeft && hasRight) blankSidesDesc = '右侧';
+
+          const resizedInnerBuf = await sharp(origRawBuf)
+            .resize(dw, dh, { fit: 'fill' })
+            .toBuffer();
+          const paddedCanvasBuf = await sharp({
+            create: {
+              width: canvasW,
+              height: canvasH,
+              channels: 3,
+              background: { r: 255, g: 255, b: 255 }
+            }
+          })
+            .composite([{ input: resizedInnerBuf, left: dx, top: dy }])
+            .jpeg({ quality: 92 })
+            .toBuffer();
+          const paddedCanvasUri = `data:image/jpeg;base64,${paddedCanvasBuf.toString('base64')}`;
+
+          const seedreamPrompt = `这是一张${blankSidesDesc}留有纯白色空白区域的待扩图画布。请将${blankSidesDesc}所有纯白色空白区域完整自然地补全为实拍画面，沿着原实拍照片边缘的建筑、景物、天空、地面、人物衣着与光线无缝向外延展，生成一张浑然一体的 ${rw}:${rh} 单张真实摄影照片${userHint}。严格要求：严禁残留任何白色留白、相框、画中画或直线拼接分界线；画布中原本已有的实拍区域的构图、人物面容、物体、比例和透视必须完全保持原样。`;
+
+          console.log(`[EditImage:outpaint] Seedream white-canvas target=${targetAspect} canvas=${canvasW}x${canvasH} inner=${dw}x${dh}+${dx}+${dy} size=${targetSize}`);
           const resObj = await callSeedreamImageEdit(volcApiKey, {
             prompt: seedreamPrompt,
-            images: [imageDataUri],
+            images: [paddedCanvasUri],
             size: targetSize
           });
           resultBase64 = resObj.base64;
@@ -1411,6 +1452,7 @@ app.post('/api/ai/edit-image', async (req, res) => {
       }
 
       if (!resultBase64 && dashscopeApiKey) {
+        const zoom = effectiveZoom;
         let topScale = zoom;
         let bottomScale = zoom;
         let leftScale = zoom;
