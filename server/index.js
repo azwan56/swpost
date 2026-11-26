@@ -1070,8 +1070,8 @@ function decodeBase64ToBuffer(base64Str) {
 async function callSeedreamImageEdit(volcApiKey, { prompt, images, size }) {
   const envModel = process.env.VOLC_IMAGE_MODEL;
   const defaultModels = [
-    'doubao-seedream-5-0-pro-260628',
     'doubao-seedream-5-5-261028',
+    'doubao-seedream-5-0-pro-260628',
     'doubao-seedream-5-0-flash-260915',
     'doubao-seedream-4-0-20260415'
   ];
