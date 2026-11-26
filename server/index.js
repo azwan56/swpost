@@ -34,12 +34,12 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, '../dist')));
 
 // Helper: Poll DashScope async task until completion
-async function pollDashScopeTask(taskId) {
+async function pollDashScopeTask(taskId, maxAttempts = 30) {
   const apiKey = process.env.DASHSCOPE_API_KEY;
   const url = `https://dashscope.aliyuncs.com/api/v1/tasks/${taskId}`;
 
-  // Poll up to 20 times (30 seconds total)
-  for (let i = 0; i < 20; i++) {
+  // Poll up to maxAttempts times (default 30 * 1.5s = 45 seconds total)
+  for (let i = 0; i < maxAttempts; i++) {
     const response = await fetch(url, {
       method: 'GET',
       headers: {
@@ -70,6 +70,32 @@ async function pollDashScopeTask(taskId) {
   }
 
   throw new Error('AI generation task timed out.');
+}
+
+// Helper: Calculate Doubao Seedream 5.0 output size (>= 3,686,400 px, multiple of 16, safe ratio [0.25, 4.0])
+function calculateSeedreamSize(width, height) {
+  let w = parseInt(width, 10);
+  let h = parseInt(height, 10);
+  if (isNaN(w) || isNaN(h) || w <= 0 || h <= 0) {
+    return '2048x2048';
+  }
+  const ratio = Math.min(4.0, Math.max(0.25, w / h));
+  const minPixels = 3686400; // Required minimum pixels for Seedream 5.0
+
+  const targetW = Math.sqrt(minPixels * ratio);
+  const targetH = targetW / ratio;
+
+  w = Math.max(256, Math.round(targetW / 16) * 16);
+  h = Math.max(256, Math.round(targetH / 16) * 16);
+
+  while (w * h < minPixels) {
+    if (ratio > 1) {
+      w += 16;
+    } else {
+      h += 16;
+    }
+  }
+  return `${w}x${h}`;
 }
 
 // Helper: Fetch remote image URL and convert to Base64
@@ -211,7 +237,12 @@ async function copyAndModifyExif(originalBase64, styledBase64, styleName, modelN
       'oriental-tale': 'Oriental Tale',
       'baimiao': 'Traditional Baimiao',
       'qianjiang': 'Qianjiang Landscape',
-      'mogu': 'Boneless Painting (Mogu)'
+      'mogu': 'Boneless Painting (Mogu)',
+      'outpaint': 'AI Generative Outpaint',
+      'remove_clutter': 'AI Clutter Removal',
+      'remove_mask': 'AI Brush Erase',
+      'blur_background': 'AI Background Bokeh',
+      'blur_foreground': 'AI Foreground Blur'
     };
     const styleLabelEn = styleLabelMap[styleName] || 'Oriental Art';
 
@@ -422,35 +453,8 @@ app.post('/api/ai/style-transfer', async (req, res) => {
     if (volcApiKey) {
       console.log(`[StyleTransfer] 使用 Volcano Ark (Doubao Seedream 5.0), style=${style}, original width=${width}, height=${height}`);
       
-      let size = '2048x2048'; // Default fallback (4M pixels, compatible with Seedream 5.0)
-      if (width && height) {
-        let w = parseInt(width, 10);
-        let h = parseInt(height, 10);
-        if (!isNaN(w) && !isNaN(h) && w > 0 && h > 0) {
-          const ratio = w / h;
-          const minPixels = 3686400; // Required minimum pixels for Seedream 5.0
-          
-          // Calculate w and h maintaining aspect ratio with at least minPixels area
-          let targetW = Math.sqrt(minPixels * ratio);
-          let targetH = targetW / ratio;
-          
-          // Round to nearest multiple of 16 for network efficiency
-          w = Math.round(targetW / 16) * 16;
-          h = Math.round(targetH / 16) * 16;
-          
-          // Ensure we don't fall below minPixels due to rounding down
-          while (w * h < minPixels) {
-            if (ratio > 1) {
-              w += 16;
-            } else {
-              h += 16;
-            }
-          }
-          
-          size = `${w}x${h}`;
-          console.log(`[StyleTransfer] Calculated aspect-ratio size for Seedream: ${size} (Total pixels: ${w * h})`);
-        }
-      }
+      let size = calculateSeedreamSize(width, height);
+      console.log(`[StyleTransfer] Calculated aspect-ratio size for Seedream: ${size}`);
 
       let prompt = '将参考图转换成极其精美的吉卜力动画风格，宫崎骏工作室手绘画画风，温暖治愈的水彩线条，梦幻柔和的动漫光影，明亮清新的色彩，高清原画品质';
       if (style === 'clay') {
@@ -1075,6 +1079,607 @@ ${visualDescriptions ? `- 画面视觉细节：${visualDescriptions.slice(0, 150
     res.status(500).json({ error: `封面标题生成失败: ${err.message}` });
   }
 });
+// Helper: Decode base64 image or data URI to Buffer
+function decodeBase64ToBuffer(base64Str) {
+  const clean = String(base64Str || '').replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
+  return Buffer.from(clean, 'base64');
+}
+
+// Helper: Call Volcano Ark Doubao Seedream 5.0 image generation/editing
+async function callSeedreamImageEdit(volcApiKey, { prompt, images, size }) {
+  const payload = {
+    model: 'doubao-seedream-5-0-260128',
+    prompt,
+    image: images,
+    size,
+    n: 1
+  };
+  const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/images/generations', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${volcApiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Seedream HTTP ${response.status}: ${errText}`);
+  }
+
+  const data = await response.json();
+  const resultUrl = data.data?.[0]?.url;
+  if (!resultUrl) {
+    throw new Error('Seedream returned OK without image URL');
+  }
+  return await convertUrlToBase64(resultUrl);
+}
+
+// Helper: Call DashScope wanx2.1-imageedit async task
+async function callDashScopeImageEdit(dashscopeApiKey, inputObj, parametersObj = { n: 1 }, maxAttempts = 35) {
+  const response = await fetch('https://dashscope.aliyuncs.com/api/v1/services/aigc/image2image/image-synthesis', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${dashscopeApiKey}`,
+      'Content-Type': 'application/json',
+      'X-DashScope-Async': 'enable'
+    },
+    body: JSON.stringify({
+      model: 'wanx2.1-imageedit',
+      input: inputObj,
+      parameters: parametersObj
+    })
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`DashScope HTTP ${response.status}: ${errText}`);
+  }
+
+  const taskData = await response.json();
+  const taskId = taskData.output?.task_id || taskData.task_id || taskData.id;
+  if (!taskId) {
+    throw new Error(`DashScope missing task_id: ${JSON.stringify(taskData)}`);
+  }
+  const resultUrl = await pollDashScopeTask(taskId, maxAttempts);
+  return await convertUrlToBase64(resultUrl);
+}
+
+// AI Clutter Recognition for Smart Object Removal
+app.post('/api/ai/detect-clutter', async (req, res) => {
+  try {
+    const { image } = req.body || {};
+    if (!image) {
+      return res.status(400).json({ error: '请先提供需要扫描的图片数据。' });
+    }
+
+    const dashscopeApiKey = process.env.DASHSCOPE_API_KEY;
+    const volcApiKey = process.env.VOLC_API_KEY;
+    if (!dashscopeApiKey && !volcApiKey) {
+      return res.status(500).json({ error: '服务器未配置视觉识别模型 API Key。' });
+    }
+
+    const dataUri = ensureDataUri(image);
+    const detectPrompt = `你是一位专业摄影后期修图师。请仔细观察这张照片，识别画面中影响构图美感、抢镜或杂乱的多余元素（最多列出 6 个最明显的元素，例如：背景路人、空中电线/电线杆、地面垃圾桶/杂物、桌面纸巾/杂乱小物件、杂乱标识牌/水印、无关反光等）。
+注意：不要把照片中的主要拍摄主体（如主人公、主角美食、主建筑）列为杂乱元素！如果画面已经非常干净，可以返回空数组 []。
+
+请直接返回纯 JSON 格式（不要包含 markdown 代码块或额外解释）：
+{
+  "summary": "简短的画面整洁度评估（25字以内）",
+  "items": [
+    {
+      "id": "c1",
+      "label": "具体元素名称（2到8个字）",
+      "location": "画面具体方位（如：左侧背景/右下角桌面）",
+      "category": "路人"
+    }
+  ]
+}
+category 只能从以下选项中选一：路人、杂物、线条、文字、反光。`;
+
+    let rawText = null;
+
+    // 1. Primary: DashScope Qwen-VL-Plus
+    if (dashscopeApiKey) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        const vlRes = await fetch('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${dashscopeApiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: 'qwen-vl-plus',
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: detectPrompt },
+                  { type: 'image_url', image_url: { url: dataUri } }
+                ]
+              }
+            ]
+          }),
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        if (vlRes.ok) {
+          const vlData = await vlRes.json();
+          rawText = vlData.choices?.[0]?.message?.content?.trim() || null;
+        } else {
+          console.warn('[DetectClutter] Qwen-VL failed:', vlRes.status, await vlRes.text());
+        }
+      } catch (err) {
+        console.warn('[DetectClutter] Qwen-VL error:', err.message);
+      }
+    }
+
+    // 2. Fallback: Volcano Ark Multimodal Vision
+    if (!rawText && volcApiKey) {
+      const visionModels = ['doubao-seed-2-1-turbo-260628', 'doubao-seed-2-1-pro-260628'];
+      for (const model of visionModels) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 18000);
+          const vRes = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${volcApiKey}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              model,
+              messages: [
+                {
+                  role: 'user',
+                  content: [
+                    { type: 'text', text: detectPrompt },
+                    { type: 'image_url', image_url: { url: dataUri } }
+                  ]
+                }
+              ]
+            }),
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          if (vRes.ok) {
+            const vData = await vRes.json();
+            rawText = vData.choices?.[0]?.message?.content?.trim() || null;
+            if (rawText) break;
+          }
+        } catch (err) {
+          console.warn(`[DetectClutter] Volcano ${model} error:`, err.message);
+        }
+      }
+    }
+
+    if (!rawText) {
+      throw new Error('视觉识别服务暂时不可用，请稍后重试或使用手动涂抹消除。');
+    }
+
+    let parsed = { summary: '已完成画面扫描', items: [] };
+    try {
+      parsed = parseModelJson(rawText);
+    } catch (parseErr) {
+      console.warn('[DetectClutter] JSON parse fallback:', parseErr.message, rawText);
+    }
+
+    const items = Array.isArray(parsed?.items)
+      ? parsed.items
+          .filter((item) => item && item.label)
+          .slice(0, 6)
+          .map((item, idx) => ({
+            id: String(item.id || `c${idx + 1}`),
+            label: String(item.label).trim(),
+            location: String(item.location || '画面内').trim(),
+            category: String(item.category || '杂物').trim()
+          }))
+      : [];
+
+    const summary = parsed?.summary
+      ? String(parsed.summary).trim()
+      : (items.length > 0 ? `共识别到 ${items.length} 处可清理的干扰元素` : '画面构图非常干净，未发现明显杂乱元素');
+
+    res.json({ summary, items });
+  } catch (err) {
+    console.error('[DetectClutter] Error:', err);
+    res.status(500).json({ error: `AI 识别杂物失败: ${err.message}` });
+  }
+});
+
+// AI Image Editing (Generative Outpainting, Clutter Removal, Brush Inpainting, Foreground/Background Bokeh)
+app.post('/api/ai/edit-image', async (req, res) => {
+  try {
+    const {
+      image,
+      mode,
+      width,
+      height,
+      targetAspect = '3:4',
+      anchor = 'center',
+      zoomOut = 1.0,
+      prompt = '',
+      items = [],
+      mask = '',
+      intensity = 'medium',
+      focusTarget = ''
+    } = req.body || {};
+
+    if (!image) {
+      return res.status(400).json({ error: '缺少待编辑的图片数据。' });
+    }
+    const validModes = ['outpaint', 'remove_clutter', 'remove_mask', 'blur_background', 'blur_foreground'];
+    if (!validModes.includes(mode)) {
+      return res.status(400).json({ error: `不支持的修图模式: ${mode}` });
+    }
+
+    const volcApiKey = process.env.VOLC_API_KEY;
+    const dashscopeApiKey = process.env.DASHSCOPE_API_KEY;
+    if (!volcApiKey && !dashscopeApiKey) {
+      return res.status(500).json({ error: '服务器未配置 VOLC_API_KEY 或 DASHSCOPE_API_KEY。' });
+    }
+
+    const imageDataUri = ensureDataUri(image);
+    const origRawBuf = decodeBase64ToBuffer(image);
+    const origMeta = await sharp(origRawBuf).metadata();
+    const origW = parseInt(width, 10) || origMeta.width || 1024;
+    const origH = parseInt(height, 10) || origMeta.height || 1024;
+
+    let resultBase64 = null;
+    let usedModel = '';
+
+    if (mode === 'outpaint') {
+      const parts = String(targetAspect).split(':').map(Number);
+      const rw = parts[0] > 0 ? parts[0] : 3;
+      const rh = parts[1] > 0 ? parts[1] : 4;
+      const targetRatio = rw / rh;
+      const origRatio = origW / origH;
+      const zoom = Math.min(1.5, Math.max(1.0, parseFloat(zoomOut) || 1.0));
+      const targetSize = calculateSeedreamSize(targetRatio * 1000, 1000);
+
+      let directionDesc = '向四周自然等比延展扩大取景视野';
+      if (zoom <= 1.05) {
+        if (targetRatio > origRatio * 1.03) {
+          directionDesc = '重点向左右两侧水平延展画面';
+        } else if (targetRatio < origRatio * 0.97) {
+          directionDesc = '重点向上下两端垂直延展画面';
+        }
+      } else {
+        directionDesc = targetRatio > origRatio * 1.03
+          ? '同时向左右两侧与四周退远扩画，扩大画面广角视野'
+          : (targetRatio < origRatio * 0.97 ? '同时向上下两端与四周退远扩画，扩大画面广角视野' : '向四周退远等比扩画，展现更开阔的环境视野');
+      }
+
+      const anchorMap = {
+        center: '原图主体保持在画面居中位置',
+        top: '原图主体保持偏上位置，重点向下延展地面/前景空间',
+        bottom: '原图主体保持偏下位置，重点向上延展天空/上方建筑或环境空间',
+        left: '原图主体保持偏左位置，重点向右延展右侧环境',
+        right: '原图主体保持偏右位置，重点向左延展左侧环境'
+      };
+      const anchorDesc = anchorMap[anchor] || anchorMap.center;
+      const userHint = prompt && prompt.trim() ? `，延伸场景补充参考：${prompt.trim()}` : '';
+      const seedreamPrompt = `生成式扩图与画幅比例重构（Outpainting）：将参考图自然延展为 ${rw}:${rh} 比例的完整摄影大片。${directionDesc}，${anchorDesc}${userHint}。严格要求：原图中的主体人物、五官、服饰、建筑结构、光线色温与色彩质感必须 100% 保持原样不扭曲不变形；新延展出的边缘区域必须与原图无缝衔接，透视、景深虚化、颗粒感与光影完全自然一致，不要出现拼接痕迹或白边黑边。Seamless photographic outpainting to ${rw}:${rh} aspect ratio, strictly preserve original subject and details.`;
+
+      if (volcApiKey) {
+        try {
+          console.log(`[EditImage:outpaint] Seedream target=${targetAspect} size=${targetSize}`);
+          resultBase64 = await callSeedreamImageEdit(volcApiKey, {
+            prompt: seedreamPrompt,
+            images: [imageDataUri],
+            size: targetSize
+          });
+          usedModel = 'doubao-seedream-5-0';
+        } catch (err) {
+          console.warn('[EditImage:outpaint] Seedream failed:', err.message);
+          if (!dashscopeApiKey) throw err;
+        }
+      }
+
+      if (!resultBase64 && dashscopeApiKey) {
+        let topScale = zoom;
+        let bottomScale = zoom;
+        let leftScale = zoom;
+        let rightScale = zoom;
+        if (targetRatio > origRatio) {
+          const factor = targetRatio / origRatio;
+          const totalX = factor * zoom;
+          if (anchor === 'left') {
+            leftScale = Math.min(2.0, zoom);
+            rightScale = Math.min(2.0, Math.max(1.0, totalX * 1.25));
+          } else if (anchor === 'right') {
+            rightScale = Math.min(2.0, zoom);
+            leftScale = Math.min(2.0, Math.max(1.0, totalX * 1.25));
+          } else {
+            leftScale = Math.min(2.0, totalX);
+            rightScale = Math.min(2.0, totalX);
+          }
+        } else if (targetRatio < origRatio) {
+          const factor = origRatio / targetRatio;
+          const totalY = factor * zoom;
+          if (anchor === 'top') {
+            topScale = Math.min(2.0, zoom);
+            bottomScale = Math.min(2.0, Math.max(1.0, totalY * 1.25));
+          } else if (anchor === 'bottom') {
+            bottomScale = Math.min(2.0, zoom);
+            topScale = Math.min(2.0, Math.max(1.0, totalY * 1.25));
+          } else {
+            topScale = Math.min(2.0, totalY);
+            bottomScale = Math.min(2.0, totalY);
+          }
+        }
+
+        const expandPrompt = `自然向四周延展画面背景与环境细节，与原图光线、透视、质感无缝融合${userHint}`;
+        console.log(`[EditImage:outpaint] DashScope expand scales T=${topScale.toFixed(2)} B=${bottomScale.toFixed(2)} L=${leftScale.toFixed(2)} R=${rightScale.toFixed(2)}`);
+        resultBase64 = await callDashScopeImageEdit(
+          dashscopeApiKey,
+          { function: 'expand', base_image_url: imageDataUri, prompt: expandPrompt },
+          {
+            n: 1,
+            top_scale: Number(topScale.toFixed(2)),
+            bottom_scale: Number(bottomScale.toFixed(2)),
+            left_scale: Number(leftScale.toFixed(2)),
+            right_scale: Number(rightScale.toFixed(2))
+          },
+          35
+        );
+        usedModel = 'dashscope-wanx-expand';
+
+        // Ensure exact target ratio if DashScope 2.0x cap caused slight ratio drift
+        const dsBuf = decodeBase64ToBuffer(resultBase64);
+        const dsMeta = await sharp(dsBuf).metadata();
+        if (dsMeta.width && dsMeta.height) {
+          const dsRatio = dsMeta.width / dsMeta.height;
+          if (Math.abs(dsRatio - targetRatio) / targetRatio > 0.03) {
+            const cropW = dsRatio > targetRatio ? Math.round(dsMeta.height * targetRatio) : dsMeta.width;
+            const cropH = dsRatio > targetRatio ? dsMeta.height : Math.round(dsMeta.width / targetRatio);
+            const croppedBuf = await sharp(dsBuf)
+              .resize(cropW, cropH, { fit: 'cover', position: 'centre' })
+              .jpeg({ quality: 95 })
+              .toBuffer();
+            resultBase64 = `data:image/jpeg;base64,${croppedBuf.toString('base64')}`;
+          }
+        }
+      }
+    } else if (mode === 'remove_clutter') {
+      const itemDescriptions = Array.isArray(items)
+        ? items
+            .map((it) => (typeof it === 'string' ? it : `${it.label}${it.location ? `（位于${it.location}）` : ''}`))
+            .filter(Boolean)
+        : [];
+      const customDesc = prompt && prompt.trim() ? prompt.trim() : '';
+      const targetsText = [...itemDescriptions, customDesc].filter(Boolean).join('、');
+      if (!targetsText) {
+        return res.status(400).json({ error: '请至少选择一个需要消除的杂乱元素，或输入消除描述。' });
+      }
+
+      const size = calculateSeedreamSize(origW, origH);
+      const cleanPrompt = `专业摄影无痕修图消除（Object Removal）：请精准且完全无痕地移除画面中的以下干扰杂物元素：【${targetsText}】。并用周围自然合理的背景纹理、地面墙面结构、光线与景深效果无缝填补被移除区域。严格要求：除了上述指定的杂乱元素之外，画面中的人物主体、面容神态、服装、核心物体、构图比例和整体色调必须 100% 保持原样不变。Cleanly remove only the specified distracting objects and inpaint the background naturally while keeping the main subject and composition completely untouched.`;
+
+      if (volcApiKey) {
+        try {
+          console.log(`[EditImage:remove_clutter] Seedream targets=${targetsText}`);
+          resultBase64 = await callSeedreamImageEdit(volcApiKey, {
+            prompt: cleanPrompt,
+            images: [imageDataUri],
+            size
+          });
+          usedModel = 'doubao-seedream-5-0';
+        } catch (err) {
+          console.warn('[EditImage:remove_clutter] Seedream failed:', err.message);
+          if (!dashscopeApiKey) throw err;
+        }
+      }
+
+      if (!resultBase64 && dashscopeApiKey) {
+        resultBase64 = await callDashScopeImageEdit(
+          dashscopeApiKey,
+          { function: 'description_edit', base_image_url: imageDataUri, prompt: cleanPrompt },
+          { n: 1 },
+          35
+        );
+        usedModel = 'dashscope-wanx-edit';
+      }
+    } else if (mode === 'remove_mask') {
+      if (!mask) {
+        return res.status(400).json({ error: '请先在画面上涂抹需要消除的区域。' });
+      }
+
+      const maskRawBuf = decodeBase64ToBuffer(mask);
+      const maxEdge = 1536;
+      const minEdge = 512;
+      let normW = origMeta.width || origW;
+      let normH = origMeta.height || origH;
+      const longSide = Math.max(normW, normH);
+      const shortSide = Math.min(normW, normH);
+      if (longSide > maxEdge) {
+        const s = maxEdge / longSide;
+        normW = Math.round(normW * s);
+        normH = Math.round(normH * s);
+      } else if (shortSide < minEdge) {
+        const s = Math.min(maxEdge / longSide, minEdge / shortSide);
+        normW = Math.round(normW * s);
+        normH = Math.round(normH * s);
+      }
+
+      const normOrigBuf = await sharp(origRawBuf)
+        .resize(normW, normH, { fit: 'fill' })
+        .jpeg({ quality: 94 })
+        .toBuffer();
+      const normMaskBuf = await sharp(maskRawBuf)
+        .resize(normW, normH, { fit: 'fill' })
+        .grayscale()
+        .threshold(100)
+        .png()
+        .toBuffer();
+
+      const normOrigUri = `data:image/jpeg;base64,${normOrigBuf.toString('base64')}`;
+      const normMaskUri = `data:image/png;base64,${normMaskBuf.toString('base64')}`;
+      const hintSuffix = prompt && prompt.trim() ? `，背景补全参考：${prompt.trim()}` : '';
+
+      // Primary for mask inpainting: DashScope wanx2.1-imageedit description_edit_with_mask
+      if (dashscopeApiKey) {
+        try {
+          console.log(`[EditImage:remove_mask] DashScope masked inpaint ${normW}x${normH}`);
+          resultBase64 = await callDashScopeImageEdit(
+            dashscopeApiKey,
+            {
+              function: 'description_edit_with_mask',
+              base_image_url: normOrigUri,
+              mask_image_url: normMaskUri,
+              prompt: `无痕移除白色遮罩区域内的多余杂物与元素，根据周围环境纹理、透视与光影自然无缝补全背景${hintSuffix}`
+            },
+            { n: 1 },
+            35
+          );
+          usedModel = 'dashscope-wanx-inpaint';
+        } catch (err) {
+          console.warn('[EditImage:remove_mask] DashScope masked edit failed:', err.message);
+          if (!volcApiKey) throw err;
+        }
+      }
+
+      // Fallback / Alternative: Volcano Seedream with red visual mask overlay guide
+      if (!resultBase64 && volcApiKey) {
+        const redAlphaRaw = await sharp(normMaskBuf)
+          .grayscale()
+          .linear(0.7, 0)
+          .raw()
+          .toBuffer();
+        const redOverlayBuf = await sharp({
+          create: {
+            width: normW,
+            height: normH,
+            channels: 3,
+            background: { r: 255, g: 16, b: 84 }
+          }
+        })
+          .joinChannel(redAlphaRaw, { raw: { width: normW, height: normH, channels: 1 } })
+          .png()
+          .toBuffer();
+
+        const guideBuf = await sharp(normOrigBuf)
+          .composite([{ input: redOverlayBuf, blend: 'over' }])
+          .jpeg({ quality: 92 })
+          .toBuffer();
+        const guideUri = `data:image/jpeg;base64,${guideBuf.toString('base64')}`;
+        const seedreamSize = calculateSeedreamSize(normW, normH);
+        const maskPrompt = `精准消除局部涂抹区域：第2张参考图中用半透明洋红色涂抹覆盖的区域是需要被移除的杂物${hintSuffix}。请对照第1张原图，仅将涂抹区域内的物体完全无痕移除，并根据周围环境自动补全自然背景，未涂抹的其他区域必须与第1张原图完全一致。`;
+
+        try {
+          resultBase64 = await callSeedreamImageEdit(volcApiKey, {
+            prompt: maskPrompt,
+            images: [normOrigUri, guideUri],
+            size: seedreamSize
+          });
+          usedModel = 'doubao-seedream-5-0';
+        } catch (multiErr) {
+          console.warn('[EditImage:remove_mask] Seedream 2-image guide failed, retrying single guide image:', multiErr.message);
+          resultBase64 = await callSeedreamImageEdit(volcApiKey, {
+            prompt: `请把图中半透明洋红色涂抹覆盖的杂物区域完全无痕消除，去掉洋红色标记并用周围自然的背景纹理无缝补全${hintSuffix}，其余未标记区域保持原样不变。`,
+            images: [guideUri],
+            size: seedreamSize
+          });
+          usedModel = 'doubao-seedream-5-0';
+        }
+      }
+
+      // Feathered Mask Post-Composite: guarantees 100% pixel-exact preservation outside user mask
+      if (resultBase64 && origMeta.width && origMeta.height) {
+        try {
+          const ow = origMeta.width;
+          const oh = origMeta.height;
+          const aiOutBuf = decodeBase64ToBuffer(resultBase64);
+          const outResizedBuf = await sharp(aiOutBuf).resize(ow, oh, { fit: 'fill' }).removeAlpha().toBuffer();
+          const featherRadius = Math.max(2, Math.round(Math.min(ow, oh) * 0.008));
+          const featheredMaskRaw = await sharp(maskRawBuf)
+            .resize(ow, oh, { fit: 'fill' })
+            .grayscale()
+            .blur(featherRadius)
+            .raw()
+            .toBuffer();
+          const maskedPatchBuf = await sharp(outResizedBuf)
+            .joinChannel(featheredMaskRaw, { raw: { width: ow, height: oh, channels: 1 } })
+            .png()
+            .toBuffer();
+          const compositedBuf = await sharp(origRawBuf)
+            .composite([{ input: maskedPatchBuf, blend: 'over' }])
+            .jpeg({ quality: 95 })
+            .toBuffer();
+          resultBase64 = `data:image/jpeg;base64,${compositedBuf.toString('base64')}`;
+        } catch (compErr) {
+          console.warn('[EditImage:remove_mask] Feathered composite skipped:', compErr.message);
+        }
+      }
+    } else if (mode === 'blur_background' || mode === 'blur_foreground') {
+      const intensityMap = {
+        light: '轻微自然的光学景深虚化（等效 f/2.8 镜头柔和焦外）',
+        medium: '浓郁高级的奶油大光圈人像虚化（等效 f/1.8 镜头焦外光斑）',
+        strong: '极具电影感的极致浅景深虚化（等效 f/1.2 梦幻散景光斑）'
+      };
+      const bokehDesc = intensityMap[intensity] || intensityMap.medium;
+      const focusHint = focusTarget && focusTarget.trim() ? focusTarget.trim() : '';
+      const size = calculateSeedreamSize(origW, origH);
+
+      let bokehPrompt = '';
+      if (mode === 'blur_background') {
+        const subjectPhrase = focusHint ? `画面中的【${focusHint}】及核心前景主体` : '画面前景核心人物或主要拍摄主体';
+        bokehPrompt = `单反大光圈光学背景虚化效果：保持${subjectPhrase}的清晰度、五官神态、边缘细节与色彩质感 100% 锐利且完全不变；仅对人物/主体身后的背景环境施加真实自然的光学景深虚化，呈现${bokehDesc}，保留真实距离过渡梯度与自然柔和的焦外圆润光斑，禁止改变构图或重绘主体。Realistic optical background bokeh blur (${intensity}), keep main foreground subject razor-sharp and completely unchanged.`;
+      } else {
+        const bgPhrase = focusHint ? `画面中后景的【${focusHint}】` : '画面中远景与背景主体风景';
+        bokehPrompt = `摄影前景虚化景深效果：像相机对焦在远景一样，保持${bgPhrase}完全清晰锐利且细节不变；对靠近镜头最近的前景边缘物体、前景遮挡物或底部近景施加自然柔和的浅景深虚化，呈现${bokehDesc}，营造透过朦胧前景窥探清晰主体的电影级空间纵深感，禁止改变构图与色彩基调。Realistic optical foreground blur (${intensity}), keep midground/background subject sharp and clear.`;
+      }
+
+      if (volcApiKey) {
+        try {
+          console.log(`[EditImage:${mode}] Seedream intensity=${intensity}`);
+          resultBase64 = await callSeedreamImageEdit(volcApiKey, {
+            prompt: bokehPrompt,
+            images: [imageDataUri],
+            size
+          });
+          usedModel = 'doubao-seedream-5-0';
+        } catch (err) {
+          console.warn(`[EditImage:${mode}] Seedream failed:`, err.message);
+          if (!dashscopeApiKey) throw err;
+        }
+      }
+
+      if (!resultBase64 && dashscopeApiKey) {
+        resultBase64 = await callDashScopeImageEdit(
+          dashscopeApiKey,
+          { function: 'description_edit', base_image_url: imageDataUri, prompt: bokehPrompt },
+          { n: 1 },
+          35
+        );
+        usedModel = 'dashscope-wanx-edit';
+      }
+    }
+
+    if (!resultBase64) {
+      throw new Error('图像编辑服务未能返回有效结果。');
+    }
+
+    const finalBase64 = await copyAndModifyExif(image, resultBase64, mode, usedModel || 'ai-editor');
+    const outBuf = decodeBase64ToBuffer(finalBase64);
+    const outMeta = await sharp(outBuf).metadata();
+
+    res.json({
+      image: finalBase64,
+      width: outMeta.width || origW,
+      height: outMeta.height || origH,
+      model: usedModel,
+      mode
+    });
+  } catch (err) {
+    console.error('[EditImage] ❌ Error:', err);
+    res.status(500).json({ error: `AI 修图失败: ${err.message}` });
+  }
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ 

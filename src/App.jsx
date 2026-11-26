@@ -6,6 +6,8 @@ import { SPEKTRA_UI_DEFAULTS } from './spektra/defaults.js';
 import { isRawFile, decodeRawFile } from './spektra/rawDecoder.js';
 import { renderSpektraImage } from './spektra/spektraClient.js';
 import './spektra/spektra.css';
+import { ImageEditPanel } from './editor/ImageEditPanel.jsx';
+import './editor/editor.css';
 
 const getPiexif = () => (piexif?.load ? piexif : (piexif?.default || piexif));
 
@@ -268,7 +270,8 @@ function App() {
   const [showWelcome, setShowWelcome] = useState(true);
   const [uploadedImages, setUploadedImages] = useState([]); // [{ id, file, src, styledSrc, activeStyle }]
   const [activeIdx, setActiveIdx] = useState(0); 
-  const [activeTab, setActiveTab] = useState('photos'); // 'photos' | 'style' | 'cover' | 'copy'
+  const [activeTab, setActiveTab] = useState('photos'); // 'photos' | 'edit' | 'style' | 'cover' | 'copy'
+  const [editSubTab, setEditSubTab] = useState('expand'); // 'expand' | 'erase' | 'bokeh' | 'basic'
   const [coverSubTab, setCoverSubTab] = useState('template'); // 'template' | 'text' | 'depth'
   const [h5FrameMode, setH5FrameMode] = useState(true); // Mobile H5 shell preview on desktop
 
@@ -386,10 +389,22 @@ function App() {
   const [isBatchSpektra, setIsBatchSpektra] = useState(false);
   const [isComparingOriginal, setIsComparingOriginal] = useState(false);
 
+  // Image Edit Studio Interactive States
+  const [editLivePreviewUri, setEditLivePreviewUri] = useState('');
+  const [isEraseBrushMode, setIsEraseBrushMode] = useState(false);
+  const [eraseBrushSize, setEraseBrushSize] = useState(28);
+  const [eraseBrushStrokes, setEraseBrushStrokes] = useState([]);
+  const [bokehFocusPoint, setBokehFocusPoint] = useState({ x: 0.5, y: 0.5 });
+  const [isBokehTapFocusActive, setIsBokehTapFocusActive] = useState(false);
+
   // Refs
   const fileInputRef = useRef(null);
   const previewImgRef = useRef(null);
   const doodleCanvasRef = useRef(null);
+  const eraseImgRef = useRef(null);
+  const eraseCanvasRef = useRef(null);
+  const isErasingRef = useRef(false);
+  const currentEraseStrokeRef = useRef(null);
   const isDrawingRef = useRef(false);
   const currentStrokeRef = useRef(null);
   const spektraLiveTimerRef = useRef(null);
@@ -535,10 +550,11 @@ function App() {
     }
   };
 
-  // Run AI Portrait Segmentation for subject outline and 3D occlusion
-  const handleDetectSubjectOutline = async (targetIdx = coverImageIdx, enableOutline = false) => {
+  // Run AI Portrait Segmentation for subject outline, 3D occlusion, and local bokeh
+  const handleDetectSubjectOutline = async (targetIdx = coverImageIdx, enableOutline = false, options = {}) => {
+    const { switchToCover = true, silent = false } = options;
     const target = uploadedImages[targetIdx] || uploadedImages[activeIdx] || uploadedImages[0];
-    if (!target) return;
+    if (!target) return null;
 
     setIsDetectingOutline(true);
     try {
@@ -549,7 +565,7 @@ function App() {
       // Use Model 0 (General model: higher resolution, superior for full-body, outdoor scenes, and stylized anime/cartoon characters)
       segmenter.setOptions({ modelSelection: 0 });
 
-      const actualSrc = target.styledSrc || target.src;
+      const actualSrc = switchToCover ? (target.styledSrc || target.src) : target.src;
       const img = new Image();
       if (!actualSrc.startsWith('data:')) {
         img.crossOrigin = 'anonymous';
@@ -586,13 +602,24 @@ function App() {
       if (enableOutline) {
         setOutlineEnabled(true);
       }
-      setActivePreviewTab('cover');
+      if (switchToCover) {
+        setActivePreviewTab('cover');
+      }
+      return maskCanvas;
     } catch (err) {
       console.error('Subject outline detection error:', err);
-      alert('未能自动检测到人像主体，您可以开启「自由手绘涂鸦」在画面上直接绘制轮廓或箭头标记哦！');
+      if (!silent) {
+        alert('未能自动检测到人像主体，您可以开启「自由手绘涂鸦」在画面上直接绘制轮廓或箭头标记哦！');
+      }
+      return null;
     } finally {
       setIsDetectingOutline(false);
     }
+  };
+
+  const ensurePortraitMaskForEdit = async (targetIdx = activeIdx, { silent = true } = {}) => {
+    if (outlineMasks[targetIdx]) return outlineMasks[targetIdx];
+    return await handleDetectSubjectOutline(targetIdx, false, { switchToCover: false, silent });
   };
 
   // Handle pointer events on doodle overlay canvas
@@ -1153,6 +1180,231 @@ function App() {
       });
       return next;
     });
+  };
+
+  // Clear transient edit overlays when switching photo, main tab, or edit sub-tab
+  useEffect(() => {
+    setEditLivePreviewUri('');
+    setEraseBrushStrokes([]);
+    if (activeTab !== 'edit' || editSubTab !== 'erase') {
+      setIsEraseBrushMode(false);
+    }
+    if (activeTab !== 'edit' || editSubTab !== 'bokeh') {
+      setIsBokehTapFocusActive(false);
+    }
+  }, [activeIdx, activeTab, editSubTab]);
+
+  // Redraw erase brush canvas whenever strokes or active canvas size update
+  const redrawEraseCanvas = (strokesToDraw = eraseBrushStrokes) => {
+    const canvas = eraseCanvasRef.current;
+    const imgEl = eraseImgRef.current;
+    if (!canvas || !imgEl) return;
+    const w = imgEl.clientWidth || 400;
+    const h = imgEl.clientHeight || 533;
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, w, h);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(255, 36, 66, 0.56)';
+    ctx.fillStyle = 'rgba(255, 36, 66, 0.56)';
+
+    for (const stroke of strokesToDraw) {
+      const pts = stroke?.points || [];
+      if (pts.length === 0) continue;
+      ctx.lineWidth = stroke.size || eraseBrushSize;
+      if (pts.length === 1) {
+        ctx.beginPath();
+        ctx.arc(pts[0].x * w, pts[0].y * h, ctx.lineWidth / 2, 0, Math.PI * 2);
+        ctx.fill();
+        continue;
+      }
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x * w, pts[0].y * h);
+      for (let i = 1; i < pts.length; i++) {
+        ctx.lineTo(pts[i].x * w, pts[i].y * h);
+      }
+      ctx.stroke();
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'edit' && editSubTab === 'erase' && isEraseBrushMode) {
+      const id = requestAnimationFrame(() => redrawEraseCanvas(eraseBrushStrokes));
+      return () => cancelAnimationFrame(id);
+    }
+  }, [activeTab, editSubTab, isEraseBrushMode, eraseBrushStrokes]);
+
+  const handleErasePointerDown = (e) => {
+    const canvas = eraseCanvasRef.current;
+    const imgEl = eraseImgRef.current;
+    if (!canvas || !imgEl) return;
+    const w = imgEl.clientWidth || 400;
+    const h = imgEl.clientHeight || 533;
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    const y = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height));
+    isErasingRef.current = true;
+    currentEraseStrokeRef.current = { size: eraseBrushSize, points: [{ x, y }] };
+    redrawEraseCanvas([...eraseBrushStrokes, currentEraseStrokeRef.current]);
+  };
+
+  const handleErasePointerMove = (e) => {
+    if (!isErasingRef.current || !currentEraseStrokeRef.current) return;
+    const canvas = eraseCanvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    const y = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height));
+    const pts = currentEraseStrokeRef.current.points;
+    const prev = pts[pts.length - 1];
+    pts.push({ x, y });
+
+    const ctx = canvas.getContext('2d');
+    ctx.strokeStyle = 'rgba(255, 36, 66, 0.56)';
+    ctx.lineWidth = currentEraseStrokeRef.current.size;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(prev.x * canvas.width, prev.y * canvas.height);
+    ctx.lineTo(x * canvas.width, y * canvas.height);
+    ctx.stroke();
+  };
+
+  const handleErasePointerUp = () => {
+    if (!isErasingRef.current) return;
+    isErasingRef.current = false;
+    if (currentEraseStrokeRef.current && currentEraseStrokeRef.current.points.length > 0) {
+      const finalized = currentEraseStrokeRef.current;
+      setEraseBrushStrokes((prev) => [...prev, finalized]);
+    }
+    currentEraseStrokeRef.current = null;
+  };
+
+  // Commit an image edit cleanly with undo history & original backup
+  const commitImageEdit = (targetId, { dataUrl, width, height, label }) => {
+    const targetIdx = uploadedImages.findIndex((img) => img.id === targetId);
+    setUploadedImages((prev) =>
+      prev.map((img) => {
+        if (img.id !== targetId) return img;
+        const snapshot = {
+          src: img.src,
+          width: img.width,
+          height: img.height,
+          editTag: img.editTag || null,
+          isRaw: img.isRaw || false,
+          rawData: img.rawData || null
+        };
+        const nextHistory = [...(img.editHistory || []), snapshot].slice(-8);
+        return {
+          ...img,
+          originalSrc: img.originalSrc || img.src,
+          originalWidth: img.originalWidth || img.width,
+          originalHeight: img.originalHeight || img.height,
+          originalRawData: img.originalRawData !== undefined ? img.originalRawData : (img.rawData || null),
+          editHistory: nextHistory,
+          src: dataUrl,
+          width: width || img.width,
+          height: height || img.height,
+          styledSrc: null,
+          activeStyle: null,
+          activeStyleLabel: null,
+          editTag: label || '✨ 已修图',
+          spektraApplied: false,
+          spektraRenderedEdge: 0,
+          isRaw: false,
+          rawData: null
+        };
+      })
+    );
+    if (targetIdx !== -1) {
+      setOutlineMasks((prev) => {
+        if (!prev[targetIdx]) return prev;
+        const next = { ...prev };
+        delete next[targetIdx];
+        return next;
+      });
+    }
+    setCachedVisualDescriptions(null);
+    setActivePreviewTab('styled');
+  };
+
+  const handleUndoImageEdit = (targetId) => {
+    const targetIdx = uploadedImages.findIndex((img) => img.id === targetId);
+    setUploadedImages((prev) =>
+      prev.map((img) => {
+        if (img.id !== targetId) return img;
+        const hist = img.editHistory || [];
+        if (hist.length === 0) return img;
+        const last = hist[hist.length - 1];
+        return {
+          ...img,
+          src: last.src,
+          width: last.width,
+          height: last.height,
+          editTag: last.editTag,
+          isRaw: last.isRaw,
+          rawData: last.rawData,
+          editHistory: hist.slice(0, -1),
+          styledSrc: null,
+          activeStyle: null,
+          activeStyleLabel: null,
+          spektraApplied: false,
+          spektraRenderedEdge: 0
+        };
+      })
+    );
+    if (targetIdx !== -1) {
+      setOutlineMasks((prev) => {
+        if (!prev[targetIdx]) return prev;
+        const next = { ...prev };
+        delete next[targetIdx];
+        return next;
+      });
+    }
+    setCachedVisualDescriptions(null);
+    showToast('↩️ 已撤销上一步修图');
+  };
+
+  const handleResetImageToOriginal = (targetId) => {
+    const targetIdx = uploadedImages.findIndex((img) => img.id === targetId);
+    setUploadedImages((prev) =>
+      prev.map((img) => {
+        if (img.id !== targetId || !img.originalSrc) return img;
+        return {
+          ...img,
+          src: img.originalSrc,
+          width: img.originalWidth || img.width,
+          height: img.originalHeight || img.height,
+          rawData: img.originalRawData || null,
+          isRaw: Boolean(img.originalRawData),
+          editHistory: [],
+          editTag: null,
+          styledSrc: null,
+          activeStyle: null,
+          activeStyleLabel: null,
+          spektraApplied: false,
+          spektraRenderedEdge: 0
+        };
+      })
+    );
+    if (targetIdx !== -1) {
+      setOutlineMasks((prev) => {
+        if (!prev[targetIdx]) return prev;
+        const next = { ...prev };
+        delete next[targetIdx];
+        return next;
+      });
+    }
+    setCachedVisualDescriptions(null);
+    showToast('↩️ 已恢复至初始上传原图');
   };
 
   // Shared helper: develop a single photo via SpektraLab (handles full-sensor RAW upgrade for HD export)
@@ -3159,9 +3411,10 @@ function App() {
 
               {/* Floating Feature Pills */}
               <div className="h5-feature-pills">
-                <span className="h5-pill">📍 EXIF 真实坐标</span>
+                <span className="h5-pill">📐 生成式扩图</span>
+                <span className="h5-pill">🧹 AI 去杂物</span>
+                <span className="h5-pill">📷 前后景虚化</span>
                 <span className="h5-pill">🎞️ 物理胶片暗房</span>
-                <span className="h5-pill">🏮 7大艺术画风</span>
                 <span className="h5-pill">👤 3D人物穿插大字</span>
               </div>
             </div>
@@ -3276,10 +3529,11 @@ function App() {
               <div className="h5-brand-titles">
                 <h1>你拍照我生文</h1>
                 <span>
-                  {activeTab === 'photos' && 'Step 1/4 · 原图与时空元数据'}
-                  {activeTab === 'style' && 'Step 2/4 · 物理胶片暗房 & AI 画风'}
-                  {activeTab === 'cover' && 'Step 3/4 · 3D 巨幕封面大片'}
-                  {activeTab === 'copy' && 'Step 4/4 · 爆款笔记文案'}
+                  {activeTab === 'photos' && 'Step 1/5 · 原图与时空元数据'}
+                  {activeTab === 'edit' && 'Step 2/5 · AI 智能修图工作台'}
+                  {activeTab === 'style' && 'Step 3/5 · 物理胶片暗房 & AI 画风'}
+                  {activeTab === 'cover' && 'Step 4/5 · 3D 巨幕封面大片'}
+                  {activeTab === 'copy' && 'Step 5/5 · 爆款笔记文案'}
                 </span>
               </div>
             </div>
@@ -3431,10 +3685,12 @@ function App() {
                     </>
                   ) : (
                     <span>
-                      {activeImage.activeStyleLabel ||
-                        (activeImage.activeStyle
-                          ? (styleNameBadgeMap[activeImage.activeStyle] || '🎨 已重绘')
-                          : '📷 原始实拍图')}
+                      {editLivePreviewUri
+                        ? '✨ 实时修图预览'
+                        : (activeImage.activeStyleLabel ||
+                          (activeImage.activeStyle
+                            ? (styleNameBadgeMap[activeImage.activeStyle] || '🎨 已重绘')
+                            : (activeImage.editTag || '📷 原始实拍图')))}
                     </span>
                   )}
                 </div>
@@ -3447,7 +3703,9 @@ function App() {
                 )}
 
                 {/* Press-and-hold Original Comparison Button */}
-                {activePreviewTab === 'styled' && activeImage.styledSrc && (
+                {activePreviewTab === 'styled' &&
+                  (activeImage.styledSrc || editLivePreviewUri || (activeImage.originalSrc && activeImage.originalSrc !== activeImage.src)) &&
+                  !(activeTab === 'edit' && editSubTab === 'erase' && isEraseBrushMode) && (
                   <button
                     type="button"
                     className={`spk-compare-btn ${isComparingOriginal ? 'active' : ''}`}
@@ -3490,12 +3748,48 @@ function App() {
                     <div className="spinner" />
                   )
                 ) : (
-                  <div className="h5-canvas-img-wrap">
+                  <div
+                    className="h5-canvas-img-wrap"
+                    style={activeTab === 'edit' && editSubTab === 'bokeh' && isBokehTapFocusActive ? { cursor: 'crosshair' } : undefined}
+                    onClick={(e) => {
+                      if (activeTab !== 'edit' || editSubTab !== 'bokeh' || !isBokehTapFocusActive) return;
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      if (!rect.width || !rect.height) return;
+                      const x = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+                      const y = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height));
+                      setBokehFocusPoint({ x, y });
+                    }}
+                  >
                     <img
-                      src={isComparingOriginal ? activeImage.src : (activeImage.styledSrc || activeImage.src)}
+                      ref={eraseImgRef}
+                      src={
+                        isComparingOriginal
+                          ? (activeImage.originalSrc || activeImage.src)
+                          : (editLivePreviewUri || activeImage.styledSrc || activeImage.src)
+                      }
                       alt="Styled Preview"
                       className="h5-stage-img"
                     />
+                    {activeTab === 'edit' && editSubTab === 'erase' && isEraseBrushMode && (
+                      <canvas
+                        ref={eraseCanvasRef}
+                        onPointerDown={handleErasePointerDown}
+                        onPointerMove={handleErasePointerMove}
+                        onPointerUp={handleErasePointerUp}
+                        onPointerLeave={handleErasePointerUp}
+                        onPointerCancel={handleErasePointerUp}
+                        className="h5-erase-brush-canvas"
+                      />
+                    )}
+                    {activeTab === 'edit' && editSubTab === 'bokeh' && isBokehTapFocusActive && (
+                      <div
+                        className="h5-focus-reticle"
+                        style={{
+                          left: `${bokehFocusPoint.x * 100}%`,
+                          top: `${bokehFocusPoint.y * 100}%`
+                        }}
+                      />
+                    )}
                   </div>
                 )}
 
@@ -3648,21 +3942,71 @@ function App() {
                       </div>
                     </div>
 
-                    <div className="h5-next-step-row">
+                    <div className="h5-next-step-row" style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        type="button"
+                        className="h5-primary-action-btn indigo"
+                        style={{ flex: 1 }}
+                        onClick={() => {
+                          setActiveTab('edit');
+                          setActivePreviewTab('styled');
+                        }}
+                      >
+                        ✨ 智能修图（扩图/去杂物/虚化）
+                      </button>
                       <button
                         type="button"
                         className="h5-primary-action-btn"
+                        style={{ flex: 1 }}
                         onClick={() => {
                           setActiveTab('style');
                           setActivePreviewTab('styled');
                         }}
                       >
-                        🎨 下一步：进入胶片暗房 &amp; AI 画风 ➔
+                        🎨 胶片暗房 &amp; 画风 ➔
                       </button>
                     </div>
                   </div>
                 )}
               </div>
+            )}
+
+            {/* TAB 2: AI & BASIC IMAGE EDITING WORKBENCH */}
+            {uploadedImages.length > 0 && activeImage && activeTab === 'edit' && (
+              <ImageEditPanel
+                activeImage={activeImage}
+                activeIdx={activeIdx}
+                apiBase={API_BASE}
+                subTab={editSubTab}
+                onChangeSubTab={setEditSubTab}
+                hasSubjectMask={Boolean(outlineMasks[activeIdx])}
+                onRequestSubjectMask={ensurePortraitMaskForEdit}
+                isDetectingMask={isDetectingOutline}
+                bokehFocusPoint={bokehFocusPoint}
+                isBokehTapFocusActive={isBokehTapFocusActive}
+                onSetBokehTapFocusActive={setIsBokehTapFocusActive}
+                isEraseBrushMode={isEraseBrushMode}
+                onSetEraseBrushMode={setIsEraseBrushMode}
+                eraseBrushSize={eraseBrushSize}
+                onSetEraseBrushSize={setEraseBrushSize}
+                eraseBrushStrokes={eraseBrushStrokes}
+                onUndoEraseStroke={() => setEraseBrushStrokes((prev) => prev.slice(0, -1))}
+                onClearEraseStrokes={() => setEraseBrushStrokes([])}
+                onSetLivePreview={setEditLivePreviewUri}
+                onCommitEdit={commitImageEdit}
+                onUndoEdit={handleUndoImageEdit}
+                onResetOriginal={handleResetImageToOriginal}
+                onStartLoading={(label) => {
+                  setIsLoading(true);
+                  setAiOperationName(label || 'AI 正在处理图像');
+                }}
+                onStopLoading={() => {
+                  setIsLoading(false);
+                  setAiOperationName('');
+                }}
+                onError={setErrorMsg}
+                onToast={showToast}
+              />
             )}
 
             {/* TAB 2: SPEKTRALAB FILM DARKROOM & AI ART STYLE TRANSFER */}
@@ -4326,6 +4670,24 @@ function App() {
               {uploadedImages.length > 0 && (
                 <span className="dock-badge">{uploadedImages.length}</span>
               )}
+            </button>
+
+            <button
+              type="button"
+              className={`h5-dock-tab ${activeTab === 'edit' ? 'active' : ''}`}
+              onClick={() => {
+                if (uploadedImages.length === 0) {
+                  showToast('请先上传或载入示例照片哦！');
+                  setActiveTab('photos');
+                  return;
+                }
+                setActiveTab('edit');
+                setActivePreviewTab('styled');
+              }}
+            >
+              <span className="dock-icon">✨</span>
+              <span className="dock-label">修图</span>
+              {activeImage?.editTag && <span className="dock-dot" />}
             </button>
 
             <button
