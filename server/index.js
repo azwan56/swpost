@@ -7,6 +7,9 @@ import ExifReader from 'exifreader';
 import piexif from 'piexifjs';
 import sharp from 'sharp';
 
+sharp.cache(false);
+sharp.concurrency(1);
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -16,6 +19,13 @@ dotenv.config();
 if (!process.env.DASHSCOPE_API_KEY) {
   dotenv.config({ path: path.join(__dirname, '.env') });
 }
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[Process] Unhandled Rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[Process] Uncaught Exception:', err);
+});
 
 const app = express();
 const port = process.env.PORT || 5001;
@@ -1089,7 +1099,8 @@ async function callSeedreamImageEdit(volcApiKey, { prompt, images, size }) {
           'Authorization': `Bearer ${volcApiKey}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(95000)
       });
 
       if (!response.ok) {

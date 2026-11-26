@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   build-and-deploy:
@@ -143,6 +144,17 @@ jobs:
               npm install -g pm2 || echo "Failed to install PM2"
             fi
             
-            # 尝试重新启动应用
+            # 尝试重新启动应用前记录诊断日志
+            echo "=== Pre-Restart Diagnostics ==="
+            free -m || true
+            pm2 list || true
+            pm2 logs swpost-api --nostream --lines 40 || true
+            echo "==============================="
+
             echo "Starting / Restarting app via PM2..."
-            pm2 restart swpost-api || pm2 start index.js --name swpost-api || echo "PM2 failed to run"
+            pm2 delete swpost-api || true
+            pm2 start index.js --name swpost-api --max-memory-restart 400M --time
+            pm2 save || true
+            sleep 2
+            pm2 list
+            curl -fsS http://127.0.0.1:5001/api/health
